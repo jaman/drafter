@@ -7,6 +7,7 @@ defmodule Drafter.Terminal.Driver do
 
   defstruct [
     :shell_pid,
+    :stdin_reader_pid,
     :terminal_mode,
     buffer: "",
     mouse_enabled: false,
@@ -17,6 +18,7 @@ defmodule Drafter.Terminal.Driver do
 
   @type state :: %__MODULE__{
           shell_pid: pid() | nil,
+          stdin_reader_pid: pid() | nil,
           terminal_mode: terminal_mode(),
           buffer: binary(),
           mouse_enabled: boolean(),
@@ -173,7 +175,8 @@ defmodule Drafter.Terminal.Driver do
 
       case enter_terminal_mode() do
         {:ok, terminal_mode} ->
-          setup_stdin()
+          maybe_stop_stdin_reader(state.stdin_reader_pid)
+          stdin_reader_pid = setup_stdin()
           setup_signal_handling()
           setup_exit_handler()
 
@@ -187,6 +190,7 @@ defmodule Drafter.Terminal.Driver do
           new_state = %{
             state
             | shell_pid: shell_pid,
+              stdin_reader_pid: stdin_reader_pid,
               terminal_mode: terminal_mode,
               raw_mode: true,
               alt_screen: true,
@@ -264,12 +268,15 @@ defmodule Drafter.Terminal.Driver do
       end
     end
 
+    maybe_stop_stdin_reader(state.stdin_reader_pid)
+
     %{
       state
       | raw_mode: false,
         alt_screen: false,
         mouse_enabled: false,
         shell_pid: nil,
+        stdin_reader_pid: nil,
         terminal_mode: nil
     }
   end
@@ -310,8 +317,14 @@ defmodule Drafter.Terminal.Driver do
 
   defp setup_stdin() do
     :io.setopts(:stdio, [:binary, {:encoding, :unicode}])
-
     spawn_link(fn -> stdin_reader() end)
+  end
+
+  defp maybe_stop_stdin_reader(nil), do: :ok
+
+  defp maybe_stop_stdin_reader(pid) do
+    if Process.alive?(pid), do: Process.exit(pid, :kill)
+    :ok
   end
 
   defp stdin_reader() do

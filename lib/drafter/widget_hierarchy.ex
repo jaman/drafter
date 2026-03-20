@@ -145,6 +145,27 @@ defmodule Drafter.WidgetHierarchy do
     }
   end
 
+  @spec stop_all_servers(t() | nil) :: :ok
+  def stop_all_servers(nil), do: :ok
+
+  def stop_all_servers(hierarchy) do
+    hierarchy.widgets
+    |> Map.values()
+    |> Enum.each(fn
+      %{pid: pid} when is_pid(pid) ->
+        if Process.alive?(pid) do
+          try do
+            WidgetServer.stop(pid)
+          catch
+            :exit, _ -> :ok
+          end
+        end
+      _ -> :ok
+    end)
+
+    :ok
+  end
+
   @doc "Remove a widget from the hierarchy"
   @spec remove_widget(t(), widget_id()) :: t()
   def remove_widget(hierarchy, widget_id) do

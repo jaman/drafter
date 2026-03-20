@@ -399,6 +399,7 @@ defmodule Drafter do
         case check_global_quit(event) do
           :quit ->
             cleanup_timers(timers)
+            Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
             :ok
 
           :continue ->
@@ -616,6 +617,8 @@ defmodule Drafter do
 
     ThemeManager.register_app(self())
     Drafter.ScreenManager.register_app(self())
+    Compositor.clear_screen()
+    drain_stale_events()
 
     initial_props = %{}
     app_state = app_module.mount(initial_props)
@@ -701,6 +704,7 @@ defmodule Drafter do
 
                   {:stop, reason} ->
                     cleanup_timers(timers)
+                    Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
                     if reason == :normal, do: :ok, else: {:error, reason}
 
                   {:error, _reason} ->
@@ -781,6 +785,7 @@ defmodule Drafter do
         case result do
           {:stop, reason} ->
             cleanup_timers(timers)
+            Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
             if reason == :normal, do: :ok, else: {:error, reason}
 
           _ ->
@@ -1044,6 +1049,11 @@ defmodule Drafter do
         render_screens_from_manager(screen_rect, app_module, app_state, widget_hierarchy)
         app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
 
+      {:__drafter_stop__, reason} ->
+        cleanup_timers(timers)
+        Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
+        if reason == :normal, do: :ok, else: {:error, reason}
+
       other ->
         new_app_state = maybe_on_message(app_module, other, app_state)
         app_event_loop(app_module, new_app_state, screen_rect, timers, widget_hierarchy)
@@ -1056,7 +1066,13 @@ defmodule Drafter do
   end
 
   defp dispatch_app_callback_result(result, acc_state) do
-    Drafter.ActionRegistry.dispatch(result, acc_state)
+    case result do
+      {:stop, reason} ->
+        send(self(), {:__drafter_stop__, reason})
+        acc_state
+      _ ->
+        Drafter.ActionRegistry.dispatch(result, acc_state)
+    end
   end
 
   defp extract_widget_value(state) do
@@ -1172,6 +1188,17 @@ defmodule Drafter do
 
     new_ref = Process.send_after(self(), :scroll_debounce_render, @scroll_debounce_ms)
     Process.put(:scroll_debounce_ref, new_ref)
+  end
+
+  defp drain_stale_events do
+    receive do
+      {:widget_render_needed, _} -> drain_stale_events()
+      {:widget_action, _, _} -> drain_stale_events()
+      {:activate_widget, _} -> drain_stale_events()
+      {:__drafter_stop__, _} -> drain_stale_events()
+    after
+      0 -> :ok
+    end
   end
 
   defp drain_widget_render_notifications do

@@ -3,6 +3,37 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.28] - 2026-03-20
+
+### Added
+- `run_examples.exs` — interactive example gallery; run with `elixir run_examples.exs`
+  to browse and launch all bundled examples. Returns to the gallery after each example
+  exits. Note: the SSH example terminates the launcher on `Ctrl+C` — this is expected.
+- `Gauge` widget — semi-circular arc gauge rendered with braille characters; colour
+  transitions through configurable low/mid/high thresholds as value increases.
+
+  ```elixir
+  gauge(value: 0.72)
+  gauge(value: cpu_usage, label: "CPU", low_threshold: 0.6, high_threshold: 0.8)
+  ```
+
+- `CodeView`: `hex_view: true` prop — displays binary files as a hex dump instead of
+  attempting text rendering. The `code_browser` example enables this automatically for
+  non-text files.
+
+### Fixed
+- Calculator keyboard input dropped characters and missed button animations (PR #3,
+  nshkrdotcom; follow-up fix for hierarchy state sync)
+- Running multiple `Drafter.run/2` calls in sequence (e.g. via `run_examples.exs`)
+  no longer causes leftover widget processes, stale renders, or corrupted input from
+  a previous app bleeding into the next
+- `{:stop, :normal}` returned from a widget `on_select` / `on_click` callback now
+  correctly stops the application
+- Tree-sitter "No language found" messages no longer bleed into the TUI output
+- `StyleHelpers`: stylesheet detection broken for apps using `use Drafter.App` with
+  CSS (fixes #1)
+- `widgets.exs` example crashed on text input
+
 ## [0.1.22] - 2026-03-17
 ### Added
 - `Chart`: `area_fill: :inverted` option for area charts — fills from the baseline upward (braille dots at bottom, empty space above); default behaviour (dots at top) is unchanged
