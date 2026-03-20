@@ -219,15 +219,7 @@ defmodule Drafter.WidgetHierarchy do
       widget_info ->
         if widget_info.pid do
           WidgetServer.update_props(widget_info.pid, new_props)
-          new_state =
-            if function_exported?(widget_info.module, :update, 2) do
-              apply(widget_info.module, :update, [new_props, widget_info.state])
-            else
-              Map.merge(widget_info.state, new_props)
-            end
-          updated_widget = %{widget_info | state: new_state}
-          new_widgets = Map.put(hierarchy.widgets, widget_id, updated_widget)
-          %{hierarchy | widgets: new_widgets}
+          hierarchy
         else
           new_state =
             if function_exported?(widget_info.module, :update, 2) do
@@ -614,11 +606,25 @@ defmodule Drafter.WidgetHierarchy do
   end
 
   def handle_event_consumed(hierarchy, event) do
+    hierarchy = sync_focused_pid_state(hierarchy)
     {new_hierarchy, actions} = handle_event(hierarchy, event)
     consumed = actions != [] or
                new_hierarchy.focused_widget != hierarchy.focused_widget or
                :erlang.phash2(new_hierarchy.widgets) != :erlang.phash2(hierarchy.widgets)
     {new_hierarchy, actions, consumed}
+  end
+
+  defp sync_focused_pid_state(hierarchy) do
+    case hierarchy.focused_widget && Map.get(hierarchy.widgets, hierarchy.focused_widget) do
+      %{pid: pid} = info when not is_nil(pid) ->
+        current_state = WidgetServer.get_state(pid)
+        updated_info = %{info | state: current_state}
+        updated_widgets = Map.put(hierarchy.widgets, hierarchy.focused_widget, updated_info)
+        %{hierarchy | widgets: updated_widgets}
+
+      _ ->
+        hierarchy
+    end
   end
 
   defp dispatch_to_focused(hierarchy, semantic_event) do

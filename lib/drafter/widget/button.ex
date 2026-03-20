@@ -232,10 +232,7 @@ defmodule Drafter.Widget.Button do
     classes_from_props = Map.get(props, :classes)
     disabled = Map.get(props, :disabled, state.disabled)
 
-    base_classes =
-      if classes_from_props != nil,
-        do: classes_from_props,
-        else: List.delete(state.classes, state.button_type)
+    base_classes = if classes_from_props != nil, do: classes_from_props, else: state.classes
 
     classes =
       if button_type != :default do

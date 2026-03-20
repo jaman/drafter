@@ -80,7 +80,8 @@ defmodule WidgetsShowcase do
   end
 
   def handle_event(:clicked, _data, state), do: {:ok, %{state | clicks: state.clicks + 1}}
-  def handle_event(:text_changed, value, state), do: {:ok, %{state | text: value}}
+  def handle_event(:text_changed, {text, _}, state), do: {:ok, %{state | text: text}}
+  def handle_event(:text_changed, text, state), do: {:ok, %{state | text: text}}
   def handle_event(:checkbox_changed, value, state), do: {:ok, %{state | checked: value}}
   def handle_event(:switch_changed, value, state), do: {:ok, %{state | switch_on: value}}
   def handle_event(:option_selected, value, state), do: {:ok, %{state | selected: value}}

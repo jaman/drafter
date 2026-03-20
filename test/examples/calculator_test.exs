@@ -20,19 +20,17 @@ defmodule Drafter.Examples.CalculatorTest do
     :ok
   end
 
-  test "keyboard digits update state once without widget activation side effects" do
+  test "keyboard digits delegate to button via activate_widget" do
     state = Calculator.mount(%{})
 
-    assert {:ok, %{value: 1, entering: true}} = Calculator.handle_event({:key, :"1"}, state)
-    refute_received {:activate_widget, :btn_1}
+    assert {:noreply, ^state} = Calculator.handle_event({:key, :"1"}, state)
+    assert_received {:activate_widget, :btn_1}
   end
 
-  test "keyboard operators apply once without widget activation side effects" do
+  test "keyboard operators delegate to button via activate_widget" do
     state = %{value: 12, left: 0, op: nil, entering: true}
 
-    assert {:ok, %{value: 12, left: 12, op: :+, entering: false}} =
-             Calculator.handle_event({:key, :+}, state)
-
-    refute_received {:activate_widget, :btn_plus}
+    assert {:noreply, ^state} = Calculator.handle_event({:key, :+}, state)
+    assert_received {:activate_widget, :btn_plus}
   end
 end
