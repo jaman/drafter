@@ -7,7 +7,8 @@ defmodule CodeBrowser do
   def mount(_props) do
     %{
       root: File.cwd!(),
-      selected_path: nil
+      selected_path: nil,
+      hex_view: false
     }
   end
 
@@ -32,6 +33,7 @@ defmodule CodeBrowser do
             path: state.selected_path,
             source: "",
             show_line_numbers: true,
+            hex_view: state.hex_view,
             flex: 1
           )
         ],
@@ -42,7 +44,16 @@ defmodule CodeBrowser do
   end
 
   def handle_event(:file_selected, path, state) do
-    {:ok, %{state | selected_path: path}}
+    hex_view = binary_file?(path)
+    {:ok, %{state | selected_path: path, hex_view: hex_view}}
+  end
+
+  defp binary_file?(nil), do: false
+  defp binary_file?(path) do
+    case File.read(path) do
+      {:ok, content} -> not String.valid?(content)
+      _ -> false
+    end
   end
 
   def handle_event({:key, :q, [:ctrl]}, _state), do: {:stop, :normal}

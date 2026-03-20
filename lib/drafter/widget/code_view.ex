@@ -46,7 +46,8 @@ defmodule Drafter.Widget.CodeView do
     :scroll_offset,
     :h_scroll_offset,
     :focused,
-    :show_line_numbers
+    :show_line_numbers,
+    :hex_view
   ]
 
   @impl Drafter.Widget
@@ -54,18 +55,9 @@ defmodule Drafter.Widget.CodeView do
     path = Map.get(props, :path)
     language = Map.get(props, :language, :text)
     show_line_numbers = Map.get(props, :show_line_numbers, false)
-    source =
-      if path do
-        case File.read(path) do
-          {:ok, content} -> content
-          _ -> ""
-        end
-      else
-        Map.get(props, :source, "")
-      end
+    hex_view = Map.get(props, :hex_view, false)
 
-    lines = String.split(source, "\n")
-    highlights = compute_highlights(source, language, path)
+    {lines, highlights} = load_content(path, Map.get(props, :source, ""), language, hex_view)
 
     %__MODULE__{
       lines: lines,
@@ -75,7 +67,8 @@ defmodule Drafter.Widget.CodeView do
       scroll_offset: 0,
       h_scroll_offset: 0,
       focused: false,
-      show_line_numbers: show_line_numbers
+      show_line_numbers: show_line_numbers,
+      hex_view: hex_view
     }
   end
 
@@ -142,15 +135,17 @@ defmodule Drafter.Widget.CodeView do
   @impl Drafter.Widget
   def update(props, state) do
     path = Map.get(props, :path, state.path)
+    hex_view = Map.get(props, :hex_view, state.hex_view)
     source = Map.get(props, :source)
     path_changed = path != state.path
+    hex_changed = hex_view != state.hex_view
     source_changed = source && source != "" && source != Enum.join(state.lines, "\n")
 
-    if path_changed || source_changed do
+    if path_changed || source_changed || hex_changed do
       language = Map.get(props, :language, state.language)
-      effective_source =
+      raw_source =
         cond do
-          path && path_changed ->
+          path && (path_changed || hex_changed) ->
             case File.read(path) do
               {:ok, content} -> content
               _ -> ""
@@ -158,20 +153,71 @@ defmodule Drafter.Widget.CodeView do
           source -> source
           true -> Enum.join(state.lines, "\n")
         end
-      lines = String.split(effective_source, "\n")
-      highlights = compute_highlights(effective_source, language, path)
+      {lines, highlights} = content_to_lines(raw_source, language, path, hex_view)
 
       %{state |
         lines: lines,
         highlights: highlights,
         language: language,
         path: path,
+        hex_view: hex_view,
         scroll_offset: 0,
         h_scroll_offset: 0
       }
     else
       state
     end
+  end
+
+  defp load_content(nil, source, language, hex_view) do
+    content_to_lines(source, language, nil, hex_view)
+  end
+
+  defp load_content(path, _source, language, hex_view) do
+    raw =
+      case File.read(path) do
+        {:ok, content} -> content
+        _ -> ""
+      end
+    content_to_lines(raw, language, path, hex_view)
+  end
+
+  defp content_to_lines(raw, _language, _path, true) do
+    lines = hex_dump_lines(raw)
+    {lines, nil}
+  end
+
+  defp content_to_lines(raw, language, path, _hex_view) do
+    lines = String.split(raw, "\n")
+    highlights = compute_highlights(raw, language, path)
+    {lines, highlights}
+  end
+
+  defp hex_dump_lines(binary) do
+    binary
+    |> :binary.bin_to_list()
+    |> Enum.chunk_every(16)
+    |> Enum.with_index()
+    |> Enum.map(fn {row_bytes, row_index} ->
+      offset = Integer.to_string(row_index * 16, 16) |> String.pad_leading(8, "0")
+      hex_left =
+        row_bytes
+        |> Enum.take(8)
+        |> Enum.map(&(Integer.to_string(&1, 16) |> String.pad_leading(2, "0")))
+        |> Enum.join(" ")
+      hex_right =
+        row_bytes
+        |> Enum.drop(8)
+        |> Enum.map(&(Integer.to_string(&1, 16) |> String.pad_leading(2, "0")))
+        |> Enum.join(" ")
+      hex_left_padded = String.pad_trailing(hex_left, 23)
+      hex_right_padded = String.pad_trailing(hex_right, 23)
+      ascii =
+        row_bytes
+        |> Enum.map(fn b -> if b >= 32 and b <= 126, do: <<b>>, else: "." end)
+        |> Enum.join()
+      "#{offset}  #{hex_left_padded}  #{hex_right_padded}  |#{ascii}|"
+    end)
   end
 
   defp compute_highlights(source, language, path) do

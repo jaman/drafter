@@ -2213,12 +2213,15 @@ defmodule Drafter.ComponentRenderer do
         path = Keyword.get(opts, :path)
         subscribe_to = Keyword.get(opts, :subscribe_to) || Keyword.get(opts, :id)
 
+        hex_view = Keyword.get(opts, :hex_view, false)
+
         mount_props = %{
           source: source,
           path: path,
           language: Keyword.get(opts, :language, :text),
           show_line_numbers:
             Keyword.get(opts, :show_line_numbers, Keyword.get(opts, :line_numbers, true)),
+          hex_view: hex_view,
           subscribe_to: subscribe_to
         }
 
@@ -2230,7 +2233,8 @@ defmodule Drafter.ComponentRenderer do
             |> WidgetHierarchy.update_widget(widget_id, %{
               source: source,
               path: path,
-              language: mount_props.language
+              language: mount_props.language,
+              hex_view: hex_view
             })
           else
             WidgetHierarchy.add_widget(
