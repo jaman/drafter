@@ -84,7 +84,7 @@ defmodule Drafter.Syntax.TreeSitterDaemon do
 
   defp run_highlight_path(path) do
     case System.cmd(@bin, ["highlight", "--html", "--css-classes", path],
-           stderr_to_stdout: false
+           stderr_to_stdout: true
          ) do
       {html, 0} -> parse_html(html)
       _ -> []

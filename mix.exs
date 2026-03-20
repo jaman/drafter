@@ -6,7 +6,7 @@ defmodule Drafter.MixProject do
 
     [
       app: :drafter,
-      version: "0.1.26",
+      version: "0.1.27",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
