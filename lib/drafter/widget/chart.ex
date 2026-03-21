@@ -557,14 +557,7 @@ defmodule Drafter.Widget.Chart do
           if state.colors != [] do
             state.colors
           else
-            [
-              {255, 100, 100},
-              {100, 255, 100},
-              {100, 100, 255},
-              {255, 255, 100},
-              {255, 180, 100},
-              {180, 100, 255}
-            ]
+            @default_series_colors
           end
 
         scroll_offset = state._scroll_offset || 0
@@ -898,8 +891,9 @@ defmodule Drafter.Widget.Chart do
           end
 
         pixels =
-          for x <- 0..(length(shifted) - 1) do
-            y = Enum.at(shifted, x)
+          shifted
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {y, x} ->
             case state.area_fill do
               :inverted ->
                 flipped = pixel_height - 1 - y
@@ -907,8 +901,7 @@ defmodule Drafter.Widget.Chart do
               _ ->
                 for yi <- 0..y, do: {x, yi}
             end
-          end
-          |> List.flatten()
+          end)
 
         render_braille_pixels(pixels, width, height, bg, fg)
     end
@@ -1544,18 +1537,35 @@ defmodule Drafter.Widget.Chart do
         {255, 255, 100}
       ])
 
-    all_values = List.flatten(data_series)
-    min_val = Keyword.get(opts, :min, Enum.min(all_values))
-    max_val = Keyword.get(opts, :max, Enum.max(all_values))
+    {min_val, max_val} =
+      case {Keyword.get(opts, :min), Keyword.get(opts, :max)} do
+        {nil, nil} ->
+          all_values = List.flatten(data_series)
+          {Enum.min(all_values), Enum.max(all_values)}
+
+        {nil, max} ->
+          all_values = List.flatten(data_series)
+          {Enum.min(all_values), max}
+
+        {min, nil} ->
+          all_values = List.flatten(data_series)
+          {min, Enum.max(all_values)}
+
+        {min, max} ->
+          {min, max}
+      end
     range = max_val - min_val
 
     pixel_height = height * 4
+
+    colors_tuple = List.to_tuple(colors)
+    color_count = tuple_size(colors_tuple)
 
     all_pixels =
       data_series
       |> Enum.with_index()
       |> Enum.flat_map(fn {series, series_idx} ->
-        color = Enum.at(colors, series_idx, hd(colors))
+        color = elem(colors_tuple, rem(series_idx, color_count))
 
         series
         |> Enum.with_index()

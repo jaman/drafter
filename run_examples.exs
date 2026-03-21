@@ -23,9 +23,9 @@ defmodule ExamplesLauncher do
     ])
   end
 
-  def handle_event(:run_example, path, _state) do
-    Application.put_env(:drafter, :__selected_example__, path)
-    {:stop, :normal}
+  def handle_event(:run_example, path, state) do
+    Task.start(fn -> eval_example(path) end)
+    {:ok, state}
   end
 
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
@@ -37,22 +37,6 @@ defmodule ExamplesLauncher do
     |> String.replace("_", " ")
     |> String.split()
     |> Enum.map_join(" ", &String.capitalize/1)
-  end
-end
-
-defmodule ExamplesRunner do
-  def run do
-    Application.delete_env(:drafter, :__selected_example__)
-    Drafter.run(ExamplesLauncher)
-
-    case Application.get_env(:drafter, :__selected_example__) do
-      nil ->
-        :ok
-
-      path ->
-        eval_example(path)
-        run()
-    end
   end
 
   defp eval_example(path) do
@@ -66,4 +50,4 @@ defmodule ExamplesRunner do
   end
 end
 
-ExamplesRunner.run()
+Drafter.run(ExamplesLauncher, syntax_highlighting: true)

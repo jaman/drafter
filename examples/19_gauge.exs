@@ -11,12 +11,18 @@ defmodule GaugeDemo do
 
   def keybindings, do: [{"q", "quit"}, {"+", "grow"}, {"-", "shrink"}]
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
-
   def handle_event(:grow_gauge, _data, state),
     do: {:ok, %{state | gauge_height: min(@max_gauge_height, state.gauge_height + 1)}}
 
   def handle_event(:shrink_gauge, _data, state),
+    do: {:ok, %{state | gauge_height: max(@min_gauge_height, state.gauge_height - 1)}}
+
+  def handle_event({:key, :q}, _state), do: {:stop, :normal}
+
+  def handle_event({:key, :+}, state),
+    do: {:ok, %{state | gauge_height: min(@max_gauge_height, state.gauge_height + 1)}}
+
+  def handle_event({:key, :-}, state),
     do: {:ok, %{state | gauge_height: max(@min_gauge_height, state.gauge_height - 1)}}
 
   def handle_event(_event, state), do: {:noreply, state}
@@ -31,11 +37,11 @@ defmodule GaugeDemo do
   end
 
   def on_ready(state) do
-    send(self(), {:set_interval, 16, :tick})
+    Drafter.set_interval(16, :fps)
     state
   end
 
-  def on_timer(:tick, state) do
+  def on_timer(:fps, state) do
     step = if state.direction == :up, do: @step, else: -@step
     new_value = clamp(Float.round(state.animated_value + step, 4))
 
@@ -75,7 +81,7 @@ defmodule GaugeDemo do
         ],
         gap: 1
       ),
-      gauge(value: 0.65, label: "Resize Me", height: state.gauge_height, flex: 1),
+      gauge(value: 0.95, label: "Resize Me", height: state.gauge_height, flex: 1),
       footer(bindings: [{"q", "Quit"}, {"+/-", "Resize"}])
     ])
   end

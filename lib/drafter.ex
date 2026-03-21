@@ -62,17 +62,28 @@ defmodule Drafter do
   """
   @spec run(module(), keyword()) :: :ok
   def run(app_module, opts \\ []) when is_atom(app_module) do
-    # Initialize file logging for debugging
-    _ = Drafter.Logging.setup()
+    case Drafter.AppRegistry.whereis() do
+      nil ->
+        _ = Drafter.Logging.setup()
 
-    with :ok <- start_system(),
-         :ok <- maybe_start_tree_sitter(opts),
-         :ok <- run_app(app_module, opts) do
-      :ok
-    else
-      {:error, reason} ->
-        IO.puts("Failed to start TUI application: #{inspect(reason)}")
-        {:error, reason}
+        with :ok <- start_system(),
+             :ok <- maybe_start_tree_sitter(opts),
+             :ok <- run_app(app_module, opts) do
+          :ok
+        else
+          {:error, reason} ->
+            IO.puts("Failed to start TUI application: #{inspect(reason)}")
+            {:error, reason}
+        end
+
+      loop_pid ->
+        maybe_start_tree_sitter(opts)
+        ref = make_ref()
+        send(loop_pid, {:push_session, app_module, opts, self(), ref})
+
+        receive do
+          {:session_result, ^ref, result} -> result
+        end
     end
   end
 
@@ -154,8 +165,20 @@ defmodule Drafter do
 
   @doc "Set an interval timer"
   @spec set_interval(pos_integer(), atom()) :: :ok
-  def set_interval(interval_ms, timer_id) do
-    send(self(), {:set_interval, interval_ms, timer_id})
+  def set_interval(value, unit_or_id) do
+    interval_ms =
+      case unit_or_id do
+        :fps -> round(1000 / value)
+        :ms -> value
+        :tick -> value
+        _ -> value
+      end
+
+    case Process.get(:pending_intervals) do
+      nil -> send(self(), {:set_interval, interval_ms, unit_or_id})
+      pending -> Process.put(:pending_intervals, [{interval_ms, unit_or_id} | pending])
+    end
+
     :ok
   end
 
@@ -369,17 +392,19 @@ defmodule Drafter do
     {mode, opts} = Keyword.pop(opts, :mode, :isolated)
     {shared_state, opts} = Keyword.pop(opts, :shared_state)
     {scroll_opt, opts} = Keyword.pop(opts, :scroll_optimization, true)
+    {refresh_rate, opts} = Keyword.pop(opts, :refresh_rate)
     Process.put(:scroll_optimization, scroll_opt)
 
     mount_props = Map.new(opts)
+    loop_opts = if refresh_rate, do: [refresh_rate: refresh_rate], else: []
 
     case mode do
       :shared -> run_shared_session(app_module, mount_props, shared_state)
-      _ -> run_isolated_session(app_module, mount_props)
+      _ -> run_isolated_session(app_module, mount_props, loop_opts)
     end
   end
 
-  defp run_isolated_session(app_module, mount_props) do
+  defp run_isolated_session(app_module, mount_props, opts) do
     _ = Drafter.Logging.setup()
 
     app_state = app_module.mount(mount_props)
@@ -392,7 +417,7 @@ defmodule Drafter do
     ready_app_state = app_module.on_ready(app_state)
     {_, hierarchy} = Renderer.render_app(app_module, ready_app_state, screen_rect, hierarchy)
 
-    Drafter.Runtime.AppLoop.enter_loop(app_module, ready_app_state, screen_rect, %{}, hierarchy)
+    Drafter.Runtime.AppLoop.enter_loop(app_module, ready_app_state, screen_rect, %{}, hierarchy, opts)
   end
 
   defp run_shared_session(app_module, mount_props, shared_state_pid) do
@@ -833,7 +858,7 @@ defmodule Drafter do
     app_pid =
       spawn_link(fn ->
         Process.put(:scroll_optimization, scroll_opt)
-        Drafter.Runtime.AppLoop.run(app_module)
+        Drafter.Runtime.AppLoop.run(app_module, opts)
       end)
 
     ref = Process.monitor(app_pid)

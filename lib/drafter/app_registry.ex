@@ -61,4 +61,24 @@ defmodule Drafter.AppRegistry do
       pid -> send(pid, message)
     end
   end
+
+  @spec set_frame_interval(pos_integer() | nil) :: true
+  def set_frame_interval(ms) do
+    ensure_table()
+    :ets.insert(@table, {:frame_interval, ms})
+  end
+
+  @spec get_frame_interval() :: pos_integer() | nil
+  def get_frame_interval do
+    case :ets.whereis(@table) do
+      :undefined ->
+        nil
+
+      _ ->
+        case :ets.lookup(@table, :frame_interval) do
+          [{:frame_interval, ms}] -> ms
+          _ -> nil
+        end
+    end
+  end
 end

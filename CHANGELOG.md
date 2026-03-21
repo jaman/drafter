@@ -3,6 +3,84 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.2.0] - 2026-03-21
+
+### ⚠ Breaking Changes
+
+#### `Drafter.set_interval/2` — new unit-aware API
+
+The second argument to `set_interval` is now a **unit atom** that also serves as
+the timer ID passed to `on_timer/2`. Any app using `set_interval` must update
+both the call site and the matching `on_timer` clause.
+
+**Before:**
+```elixir
+def on_ready(state) do
+  Drafter.set_interval(33, :my_timer)
+  state
+end
+
+def on_timer(:my_timer, state), do: ...
+```
+
+**After — choose the unit that matches your intent:**
+```elixir
+def on_ready(state) do
+  Drafter.set_interval(30, :fps)   # 30 fps  → ~33 ms interval
+  # or
+  Drafter.set_interval(500, :ms)   # 500 ms interval
+  state
+end
+
+def on_timer(:fps, state), do: ...
+# or
+def on_timer(:ms, state), do: ...
+```
+
+The available units are:
+
+| Unit | Meaning | Example |
+|------|---------|---------|
+| `:fps` | fires N times per second | `set_interval(30, :fps)` → ~33 ms |
+| `:ms` | fires every N milliseconds | `set_interval(500, :ms)` → 500 ms |
+| `:tick` | alias for `:ms` (backward compat) | `set_interval(500, :tick)` |
+
+The timer ID used in `on_timer/2` is always the **unit atom** you passed, not a
+separate name. If you need two independent timers, use two different unit atoms
+(or combine `:tick` for one and `:fps`/`:ms` for the other):
+
+```elixir
+def on_ready(state) do
+  Drafter.set_interval(30, :fps)
+  Drafter.set_interval(1000, :ms)
+  state
+end
+
+def on_timer(:fps, state), do: ...   # animation tick
+def on_timer(:ms, state), do: ...    # slow poll
+```
+
+> **Apps using `send(self(), {:set_interval, ms, id})` directly** must switch to
+> `Drafter.set_interval/2`. Direct sends bypass session isolation and can cause
+> timers from one session to fire in the next.
+
+### Added
+- `run_examples.exs`: example gallery now starts `TreeSitterDaemon` automatically,
+  so syntax-highlighted examples (e.g. `code_browser`) work without any extra flags
+  when launched from the gallery
+
+### Fixed
+- Timer events from a finished session no longer bleed into the next session — stale
+  `{:timer, _}` messages are drained from the process mailbox when a new session starts
+- `Drafter.run/2` called with `syntax_highlighting: true` from inside a running app
+  (gallery → sub-example) now correctly starts `TreeSitterDaemon`; previously the
+  tree-sitter daemon was only started for the root `run/2` call, so sub-sessions
+  always fell back to plain-text rendering
+- `set_interval` called during `on_ready` is now captured synchronously and immune
+  to race conditions when the gallery launches two examples in quick succession
+- Gauge example `+`/`-` keyboard shortcuts now work (previously only the on-screen
+  buttons worked); the `keybindings` hint was declared but the key handlers were missing
+
 ## [0.1.28] - 2026-03-20
 
 ### Added

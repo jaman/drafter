@@ -20,11 +20,11 @@ defmodule MultiSeriesCharts do
   def keybindings, do: [{"q", "quit"}]
 
   def on_ready(state) do
-    Drafter.set_interval(80, :tick)
+    Drafter.set_interval(24, :fps)
     state
   end
 
-  def on_timer(:tick, state) do
+  def on_timer(:fps, state) do
     %{state | timestamp: state.timestamp + 1, phase: state.phase + 0.05}
   end
 
@@ -36,8 +36,11 @@ defmodule MultiSeriesCharts do
     triangle = Enum.map(0..79, fn i -> abs(rem(i, 20) - 10) * 8.0 + 10 + :math.sin(p) * 5 end)
     sawtooth = Enum.map(0..79, fn i -> rem(i, 20) / 20.0 * 70 + 15 end)
 
-    inbound = Enum.map(0..59, fn i -> :math.sin(i * 0.2 + p) * 80 + :math.sin(i * 0.7 + p * 0.5) * 30 end)
-    outbound = Enum.map(0..59, fn i -> -(:math.cos(i * 0.18 + p) * 60 + :math.sin(i * 0.5 + p) * 40) end)
+    inbound =
+      Enum.map(0..59, fn i -> :math.sin(i * 0.2 + p) * 80 + :math.sin(i * 0.7 + p * 0.5) * 30 end)
+
+    outbound =
+      Enum.map(0..59, fn i -> -(:math.cos(i * 0.18 + p) * 60 + :math.sin(i * 0.5 + p) * 40) end)
 
     monthly_a = [42, 58, 71, 65, 83, 91, 78, 94, 88, 102, 95, 110]
     monthly_b = [35, 48, 55, 72, 68, 75, 82, 70, 88, 79, 98, 89]
@@ -48,8 +51,18 @@ defmodule MultiSeriesCharts do
     stacked_c = [10, 15, 18, 22, 20, 25]
 
     temp_ranges = [
-      [-5, 3], [-3, 6], [0, 10], [4, 15], [9, 22], [14, 28],
-      [17, 32], [16, 31], [11, 24], [5, 16], [0, 8], [-4, 4]
+      [-5, 3],
+      [-3, 6],
+      [0, 10],
+      [4, 15],
+      [9, 22],
+      [14, 28],
+      [17, 32],
+      [16, 31],
+      [11, 24],
+      [5, 16],
+      [0, 8],
+      [-4, 4]
     ]
 
     scatter_a = Enum.map(0..29, fn i -> [i * 3, :math.sin(i * 0.4 + p) * 40 + 50] end)

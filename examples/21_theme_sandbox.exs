@@ -93,11 +93,11 @@ defmodule ThemeSandbox do
   def keybindings, do: [{"tab", "next"}, {"q", "quit"}]
 
   def on_ready(state) do
-    Drafter.set_interval(500, :tick)
+    Drafter.set_interval(24, :fps)
     state
   end
 
-  def on_timer(:tick, state) do
+  def on_timer(:fps, state) do
     [_ | rest] = state.sparkline_data
     %{state | sparkline_data: rest ++ [:rand.uniform(10)], current_time: current_time()}
   end

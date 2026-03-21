@@ -9,7 +9,8 @@ defmodule Drafter.WidgetServer do
     :id,
     :module,
     :state,
-    :rect
+    :rect,
+    last_event_render_at: 0
   ]
 
   def start_link(opts) do
@@ -78,23 +79,31 @@ defmodule Drafter.WidgetServer do
 
   @impl true
   def handle_cast({:event, event}, state) do
-    case apply(state.module, :handle_event, [event, state.state]) do
-      {:ok, new_widget_state} ->
-        new_state = %{state | state: new_widget_state}
-        render_and_push(new_state)
-        {:noreply, new_state}
+    priority = event_priority(event)
 
-      {:ok, new_widget_state, actions} ->
-        handle_actions(state.id, actions)
-        new_state = %{state | state: new_widget_state}
-        render_and_push(new_state)
-        {:noreply, new_state}
+    if should_render_event?(priority, state.last_event_render_at) do
+      case apply(state.module, :handle_event, [event, state.state]) do
+        {:ok, new_widget_state} ->
+          now = System.monotonic_time(:millisecond)
+          new_state = %{state | state: new_widget_state, last_event_render_at: now}
+          render_and_push(new_state)
+          {:noreply, new_state}
 
-      {:noreply, _} ->
-        {:noreply, state}
+        {:ok, new_widget_state, actions} ->
+          handle_actions(state.id, actions)
+          now = System.monotonic_time(:millisecond)
+          new_state = %{state | state: new_widget_state, last_event_render_at: now}
+          render_and_push(new_state)
+          {:noreply, new_state}
 
-      _ ->
-        {:noreply, state}
+        {:noreply, _} ->
+          {:noreply, state}
+
+        _ ->
+          {:noreply, state}
+      end
+    else
+      {:noreply, state}
     end
   end
 
@@ -232,6 +241,22 @@ defmodule Drafter.WidgetServer do
       _ ->
         {:noreply, state}
     end
+  end
+
+  defp event_priority({:key, _}), do: :high
+  defp event_priority({:mouse, _}), do: :high
+  defp event_priority({:resize, _}), do: :critical
+  defp event_priority({:focus}), do: :high
+  defp event_priority({:blur}), do: :normal
+  defp event_priority({:timer, _}), do: :low
+  defp event_priority(_), do: :normal
+
+  defp should_render_event?(priority, _last_at) when priority in [:critical, :high], do: true
+
+  defp should_render_event?(priority, last_at) do
+    interval = Drafter.AppRegistry.get_frame_interval() || 33
+    multiplier = if priority == :low, do: 3, else: 1
+    System.monotonic_time(:millisecond) - last_at >= interval * multiplier
   end
 
   defp render_and_push(server_state) do

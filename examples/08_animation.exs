@@ -19,11 +19,11 @@ defmodule Animation do
   def keybindings, do: [{"1-6", "color"}, {"q", "quit"}]
 
   def on_ready(state) do
-    Drafter.set_interval(33, :tick)
+    Drafter.set_interval(24, :fps)
     state
   end
 
-  def on_timer(:tick, state), do: %{state | tick: state.tick + 1}
+  def on_timer(:fps, state), do: %{state | tick: state.tick + 1}
 
   def render(state) do
     current_color = Enum.at(@colors, state.color_index)

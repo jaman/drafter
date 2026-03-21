@@ -25,11 +25,11 @@ defmodule ChartPerf do
     do: [{"q", "quit"}, {"1", "500 pts"}, {"2", "5k pts"}, {"3", "50k pts"}]
 
   def on_ready(state) do
-    Drafter.set_interval(500, :tick)
+    Drafter.set_interval(2, :fps)
     state
   end
 
-  def on_timer(:tick, state) do
+  def on_timer(:fps, state) do
     t0 = System.monotonic_time(:millisecond)
 
     new_a = tl(state.series_a) ++ [walk(List.last(state.series_a))]
@@ -39,23 +39,27 @@ defmodule ChartPerf do
 
     t1 = System.monotonic_time(:millisecond)
 
-    %{state |
-      series_a: new_a,
-      series_b: new_b,
-      series_c: new_c,
-      series_d: new_d,
-      last_render_ms: t1 - t0,
-      tick_count: state.tick_count + 1
+    %{
+      state
+      | series_a: new_a,
+        series_b: new_b,
+        series_c: new_c,
+        series_d: new_d,
+        last_render_ms: t1 - t0,
+        tick_count: state.tick_count + 1
     }
   end
 
   def render(state) do
     count = Enum.at(@point_counts, state.selected_count)
-    status = if state.last_render_ms, do: "data update: #{state.last_render_ms}ms", else: "initialising"
+
+    status =
+      if state.last_render_ms, do: "data update: #{state.last_render_ms}ms", else: "initialising"
 
     vertical([
       header("Chart Performance — #{format_count(count)} data points  |  #{status}"),
-      scrollable([
+      scrollable(
+        [
           label("Series A (line, #{format_count(count)} pts):"),
           chart(state.series_a,
             chart_type: :line,
@@ -133,13 +137,16 @@ defmodule ChartPerf do
 
   defp reload(state, idx) do
     count = Enum.at(@point_counts, idx)
-    {:ok, %{state |
-      selected_count: idx,
-      series_a: generate_series(count, 0),
-      series_b: generate_series(count, 100),
-      series_c: generate_series(count, 200),
-      series_d: generate_series(count, 300)
-    }}
+
+    {:ok,
+     %{
+       state
+       | selected_count: idx,
+         series_a: generate_series(count, 0),
+         series_b: generate_series(count, 100),
+         series_c: generate_series(count, 200),
+         series_d: generate_series(count, 300)
+     }}
   end
 
   defp walk(prev) do
@@ -149,6 +156,7 @@ defmodule ChartPerf do
 
   defp generate_series(count, seed_offset) do
     :rand.seed(:exsss, {seed_offset, 0, 0})
+
     Enum.scan(1..count, 50.0, fn _, prev ->
       delta = (:rand.uniform() - 0.5) * 5
       max(1.0, min(99.0, prev + delta))

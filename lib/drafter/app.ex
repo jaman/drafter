@@ -47,7 +47,9 @@ defmodule Drafter.App do
   @doc "Cleanup application resources"
   @callback unmount(state()) :: :ok
 
-  @optional_callbacks [update: 2, unmount: 1, on_ready: 1, on_timer: 2, handle_event: 3, on_scroll_active: 1, on_scroll_idle: 1, on_message: 2]
+  @callback refresh_rate() :: pos_integer() | String.t() | :unlimited
+
+  @optional_callbacks [update: 2, unmount: 1, on_ready: 1, on_timer: 2, handle_event: 3, on_scroll_active: 1, on_scroll_idle: 1, on_message: 2, refresh_rate: 0]
 
   defmacro __using__(opts) do
     quote do
