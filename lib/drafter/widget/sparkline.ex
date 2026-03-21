@@ -35,20 +35,7 @@ defmodule Drafter.Widget.Sparkline do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-
-  @spark_bars [
-    {" ", 0},
-    {"▁", 1},
-    {"▂", 2},
-    {"▃", 3},
-    {"▄", 4},
-    {"▅", 5},
-    {"▆", 6},
-    {"▇", 7},
-    {"█", 8}
-  ]
-
-  @horizontal_blocks [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
+  alias Drafter.{CharacterSet, Visualization}
 
   defstruct [
     :data,
@@ -77,8 +64,8 @@ defmodule Drafter.Widget.Sparkline do
 
     %__MODULE__{
       data: data,
-      min_value: Map.get(props, :min_value, min_val),
-      max_value: Map.get(props, :max_value, max_val),
+      min_value: Map.get(props, :min_value) || min_val,
+      max_value: Map.get(props, :max_value) || max_val,
       color: Map.get(props, :color),
       min_color: Map.get(props, :min_color),
       max_color: Map.get(props, :max_color),
@@ -220,70 +207,52 @@ defmodule Drafter.Widget.Sparkline do
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
 
   defp render_horizontal(state, rect, bg, min_color, max_color) do
-    data = state.data
-    min_val = state.min_value
-    max_val = state.max_value
-    range = max_val - min_val
+    levels = CharacterSet.sparkline_levels_h()
+    full = CharacterSet.fill(:full)
+    level_count = length(levels)
 
-    data
+    state.data
     |> Enum.take(rect.height)
     |> Enum.map(fn value ->
-      normalized =
-        if range > 0 do
-          (value - min_val) / range
-        else
-          0.5
-        end
+      normalized = Visualization.normalize(value, state.min_value, state.max_value)
+      total_steps = round(normalized * rect.width * (level_count - 1))
+      full_blocks = div(total_steps, level_count - 1)
+      remainder = rem(total_steps, level_count - 1)
 
-      total_eighths = round(normalized * rect.width * 8)
-      full_blocks = div(total_eighths, 8)
-      remainder = rem(total_eighths, 8)
-
-      full_str = String.duplicate("█", full_blocks)
+      full_str = Visualization.safe_duplicate(full, full_blocks)
 
       partial_str =
         if remainder > 0 and full_blocks < rect.width do
-          Enum.at(@horizontal_blocks, remainder)
+          Enum.at(levels, remainder)
         else
           ""
         end
 
       bar_len = full_blocks + if(remainder > 0 and full_blocks < rect.width, do: 1, else: 0)
-      padding = String.duplicate(" ", max(0, rect.width - bar_len))
-
-      bar_text = full_str <> partial_str <> padding
+      padding = Visualization.safe_duplicate(" ", rect.width - bar_len)
 
       interpolated_color = interpolate_color(min_color, max_color, normalized)
-      Strip.new([Segment.new(bar_text, %{fg: interpolated_color, bg: bg})])
+      Strip.new([Segment.new(full_str <> partial_str <> padding, %{fg: interpolated_color, bg: bg})])
     end)
   end
 
   def render_sparkline_with_values(data, min_val, max_val, width) do
-    if length(data) == 0 or min_val == max_val do
+    levels = CharacterSet.sparkline_levels_v()
+
+    if length(data) == 0 do
       {String.duplicate(" ", width), List.duplicate(0.5, width)}
     else
-      range = max_val - min_val
-
       result =
         data
         |> Enum.take(width)
         |> Enum.map(fn value ->
-          normalized =
-            if range > 0 do
-              (value - min_val) / range
-            else
-              0.5
-            end
-
-          bar_index = round(normalized * 8)
-          {bar, _} = Enum.at(@spark_bars, min(8, max(0, bar_index)))
-          {bar, normalized}
+          normalized = Visualization.normalize(value, min_val, max_val)
+          idx = Visualization.level_index(normalized, levels)
+          {Enum.at(levels, idx), normalized}
         end)
 
-      chars = Enum.map(result, fn {char, _} -> char end)
-      values = Enum.map(result, fn {_, val} -> val end)
-
-      {Enum.join(chars), values}
+      {Enum.map_join(result, fn {char, _} -> char end),
+       Enum.map(result, fn {_, val} -> val end)}
     end
   end
 
@@ -295,18 +264,7 @@ defmodule Drafter.Widget.Sparkline do
   end
 
   defp render_summary(data, min_val, max_val) do
-    count = length(data)
-    sum = Enum.sum(data)
-    avg = if count > 0, do: sum / count, else: 0
-
-    min_str = format_number(min_val)
-    max_str = format_number(max_val)
-    avg_str = format_number(avg)
-
-    "min:#{min_str} max:#{max_str} avg:#{avg_str}"
+    avg = if length(data) > 0, do: Enum.sum(data) / length(data), else: 0
+    "min:#{Visualization.format_number(min_val)} max:#{Visualization.format_number(max_val)} avg:#{Visualization.format_number(avg)}"
   end
-
-  defp format_number(n) when is_integer(n), do: "#{n}"
-  defp format_number(n) when is_float(n), do: :erlang.float_to_binary(n, decimals: 1)
-  defp format_number(_), do: "0"
 end

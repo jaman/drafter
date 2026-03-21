@@ -32,7 +32,7 @@ defmodule Drafter do
       
   """
 
-  alias Drafter.{Terminal, Event, Compositor, ThemeManager}
+  alias Drafter.{Terminal, Event, Compositor, ThemeManager, SkinManager}
   alias Drafter.Runtime.Renderer
 
   alias Drafter.Widget.{
@@ -68,6 +68,7 @@ defmodule Drafter do
 
         with :ok <- start_system(),
              :ok <- maybe_start_tree_sitter(opts),
+             :ok <- register_widget_libraries(opts),
              :ok <- run_app(app_module, opts) do
           :ok
         else
@@ -78,6 +79,7 @@ defmodule Drafter do
 
       loop_pid ->
         maybe_start_tree_sitter(opts)
+        register_widget_libraries(opts)
         ref = make_ref()
         send(loop_pid, {:push_session, app_module, opts, self(), ref})
 
@@ -241,6 +243,25 @@ defmodule Drafter do
       100 -> nil
     end
   end
+
+  @doc """
+  Switch the active rendering skin.
+
+  The skin controls which characters `Drafter.CharacterSet` returns for every
+  widget render. Built-in skins: `:graphical` (default), `:wireframe`, `:ascii`.
+
+  Can be called from inside `handle_event/2` or `on_timer/2` — takes effect on
+  the next frame.
+  """
+  @spec set_skin(atom()) :: :ok
+  def set_skin(skin) when is_atom(skin) do
+    send(self(), {:skin_change, skin})
+    :ok
+  end
+
+  @doc "Returns the currently active skin atom."
+  @spec current_skin() :: atom()
+  def current_skin, do: Drafter.SkinManager.get_current_skin()
 
   @doc """
   Query a single widget by CSS-like selector.
@@ -823,6 +844,13 @@ defmodule Drafter do
     end
   end
 
+  defp register_widget_libraries(opts) do
+    Keyword.get(opts, :widget_libraries, [])
+    |> Enum.each(&Drafter.Widget.Registry.register/1)
+
+    :ok
+  end
+
   defp maybe_start_tree_sitter(opts) do
     if Keyword.get(opts, :syntax_highlighting, false) do
       case Drafter.Syntax.TreeSitterDaemon.start_link() do
@@ -843,6 +871,7 @@ defmodule Drafter do
          {:ok, _} <- ensure_started(Terminal.Driver.start_link()),
          {:ok, _} <- ensure_started(Compositor.start_link()),
          {:ok, _} <- ensure_started(ThemeManager.start_link()),
+         {:ok, _} <- ensure_started(SkinManager.start_link()),
          :ok <- Terminal.Driver.setup() do
       :ok
     end

@@ -28,6 +28,7 @@ defmodule Drafter.Widget.ProgressBar do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.CharacterSet
 
   defstruct [
     :progress,
@@ -177,7 +178,7 @@ defmodule Drafter.Widget.ProgressBar do
 
     segments =
       if completed_width > 0 do
-        completed_text = String.duplicate("━", completed_width)
+        completed_text = String.duplicate(CharacterSet.box(:h_bold), completed_width)
         [Segment.new(completed_text, %{fg: bar_color, bg: bg_color}) | segments]
       else
         segments
@@ -185,7 +186,7 @@ defmodule Drafter.Widget.ProgressBar do
 
     segments =
       if empty_width > 0 do
-        empty_text = String.duplicate("━", empty_width)
+        empty_text = String.duplicate(CharacterSet.box(:h_bold), empty_width)
         [Segment.new(empty_text, %{fg: empty_color, bg: bg_color}) | segments]
       else
         segments
@@ -209,7 +210,7 @@ defmodule Drafter.Widget.ProgressBar do
 
     segments =
       if spin_start > 0 do
-        empty_text = String.duplicate("━", spin_start)
+        empty_text = String.duplicate(CharacterSet.box(:h_bold), spin_start)
         [Segment.new(empty_text, %{fg: empty_color, bg: bg_color}) | segments]
       else
         segments
@@ -217,7 +218,7 @@ defmodule Drafter.Widget.ProgressBar do
 
     segments =
       if spinner_width > 0 do
-        spin_text = String.duplicate("═", spinner_width)
+        spin_text = String.duplicate(CharacterSet.box(:h_double), spinner_width)
         [Segment.new(spin_text, %{fg: bar_color, bg: bg_color}) | segments]
       else
         segments
@@ -227,7 +228,7 @@ defmodule Drafter.Widget.ProgressBar do
 
     segments =
       if remaining_width > 0 do
-        empty_text = String.duplicate("━", remaining_width)
+        empty_text = String.duplicate(CharacterSet.box(:h_bold), remaining_width)
         [Segment.new(empty_text, %{fg: empty_color, bg: bg_color}) | segments]
       else
         segments

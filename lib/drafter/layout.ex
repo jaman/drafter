@@ -61,6 +61,9 @@ defmodule Drafter.Layout do
           1
         end
 
+      {:split_pane, _children, opts} ->
+        Keyword.get(opts, :height, 1)
+
       {:theme_selector, _opts} ->
         10
 
@@ -109,6 +112,20 @@ defmodule Drafter.Layout do
             height -> height
             has_flex -> 1
             true -> get_preferred_height(child, hierarchy)
+          end
+
+        {preferred, max(flex, 1), has_flex}
+
+      {:split_pane, _children, opts} ->
+        flex = Keyword.get(opts, :flex, 0)
+        height = Keyword.get(opts, :height)
+        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
+
+        preferred =
+          cond do
+            height -> height
+            has_flex -> 1
+            true -> 1
           end
 
         {preferred, max(flex, 1), has_flex}

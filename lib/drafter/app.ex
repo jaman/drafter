@@ -349,6 +349,10 @@ defmodule Drafter.App do
     {:scrollable, children, opts}
   end
 
+  def split_pane(children, opts \\ []) do
+    {:split_pane, children, opts}
+  end
+
   def code_view(opts \\ []) when is_list(opts) do
     {:code_view, opts}
   end

@@ -32,6 +32,7 @@ defmodule Drafter.Widget.ScrollableContainer do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.ThemeManager
+  alias Drafter.CharacterSet
 
   defstruct [
     :id,
@@ -119,10 +120,10 @@ defmodule Drafter.Widget.ScrollableContainer do
 
       {char, style} =
         cond do
-          is_thumb and state.dragging_scrollbar -> {"█", thumb_drag_style}
-          is_thumb and state.hovering_scrollbar -> {"█", thumb_hover_style}
-          is_thumb -> {"█", thumb_style}
-          true -> {"░", track_style}
+          is_thumb and state.dragging_scrollbar -> {CharacterSet.scroll(:thumb_drag), thumb_drag_style}
+          is_thumb and state.hovering_scrollbar -> {CharacterSet.scroll(:thumb_hover), thumb_hover_style}
+          is_thumb -> {CharacterSet.scroll(:thumb), thumb_style}
+          true -> {CharacterSet.scroll(:track), track_style}
         end
 
       Strip.new([Segment.new(char, style)])

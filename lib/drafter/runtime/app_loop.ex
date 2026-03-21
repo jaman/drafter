@@ -6,7 +6,7 @@ defmodule Drafter.Runtime.AppLoop do
   Calls Drafter.Runtime.Renderer for all rendering.
   """
 
-  alias Drafter.{Terminal, Event, ThemeManager, Compositor}
+  alias Drafter.{Terminal, Event, ThemeManager, SkinManager, Compositor}
   alias Drafter.Runtime.Renderer
 
   @scroll_debounce_ms 150
@@ -23,6 +23,7 @@ defmodule Drafter.Runtime.AppLoop do
     Drafter.AppRegistry.register()
 
     ThemeManager.register_app(self())
+    SkinManager.register_app(self())
     Drafter.ScreenManager.reset()
     Drafter.ScreenManager.register_app(self())
     Drafter.WidgetStripCache.clear()
@@ -372,6 +373,14 @@ defmodule Drafter.Runtime.AppLoop do
         {_, new_hierarchy} = immediate_render(app_module, new_app_state, screen_rect, widget_hierarchy)
         app_event_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy, session_stack)
 
+      {:skin_change, skin_name} ->
+        SkinManager.set_skin(skin_name)
+        app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
+
+      {:skin_updated, _skin} ->
+        {_, new_hierarchy} = immediate_render(app_module, app_state, screen_rect, widget_hierarchy)
+        app_event_loop(app_module, app_state, screen_rect, timers, new_hierarchy, session_stack)
+
       {:timer, timer_id} ->
         is_parent_timer =
           not Map.has_key?(timers, timer_id) and
@@ -466,6 +475,10 @@ defmodule Drafter.Runtime.AppLoop do
 
       {:widget_action, _widget_id, {:theme_change, theme_name}} ->
         ThemeManager.set_theme(theme_name)
+        app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
+
+      {:widget_action, _widget_id, {:skin_change, skin_name}} ->
+        SkinManager.set_skin(skin_name)
         app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
 
       {:widget_action, _widget_id, {:app_callback, callback, data}} ->

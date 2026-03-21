@@ -2,7 +2,7 @@ defmodule Drafter.ComponentRenderer do
   @moduledoc false
 
   alias Drafter.{WidgetHierarchy, Theme, Layout}
-  alias Drafter.Widget.{Box, Card, Collapsible, Label, OptionList, ScrollableContainer, Switch}
+  alias Drafter.Widget.{Box, Card, Collapsible, Label, OptionList, ScrollableContainer, SplitPaneDivider, Switch}
 
   def send_app_callback(callback_fn, data) when is_function(callback_fn), do: callback_fn.(data)
   def send_app_callback(callback_name, data), do: {:app_callback, callback_name, data}
@@ -157,6 +157,10 @@ defmodule Drafter.ComponentRenderer do
 
   defp render_component_internal(h, {:collapsible, title, content, opts}, rect, theme, app_state, pid, idc, app_mod) do
     render_collapsible(h, title, content, opts, rect, theme, app_state, pid, idc, app_mod)
+  end
+
+  defp render_component_internal(h, {:split_pane, children, opts}, rect, theme, app_state, pid, idc, app_mod) do
+    render_split_pane(h, children, opts, rect, theme, app_state, pid, idc, app_mod)
   end
 
   defp render_component_internal(h, {tag, args, opts}, rect, theme, app_state, pid, idc, app_mod)
@@ -722,6 +726,118 @@ defmodule Drafter.ComponentRenderer do
       end
 
     {hierarchy, id_counter}
+  end
+
+  defp render_split_pane(hierarchy, children, opts, rect, theme, app_state, parent_id, id_counter, app_module) do
+    orientation = Keyword.get(opts, :orientation, :horizontal)
+    default_ratio = Keyword.get(opts, :ratio, 0.5)
+    divider_id = ns_widget_id(opts, app_module, "split_divider", id_counter)
+    divider_size = 1
+
+    total_size = if orientation == :horizontal, do: rect.width, else: rect.height
+
+    divider_pos = get_divider_pos(hierarchy, divider_id, default_ratio, total_size)
+
+    {pane1_rect, divider_rect, pane2_rect} =
+      pane_rects_from_pos(orientation, rect, divider_pos, divider_size)
+
+    divider_mount = %{
+      id: divider_id,
+      ratio: default_ratio,
+      orientation: orientation,
+      total_size: total_size,
+      show_handle: Keyword.get(opts, :show_handle, true)
+    }
+
+    divider_update = %{orientation: orientation, total_size: total_size}
+
+    hierarchy =
+      if Map.has_key?(hierarchy.widgets, divider_id) do
+        hierarchy
+        |> WidgetHierarchy.update_widget_parent(divider_id, parent_id)
+        |> WidgetHierarchy.update_widget_rect(divider_id, divider_rect)
+        |> WidgetHierarchy.update_widget(divider_id, divider_update)
+      else
+        WidgetHierarchy.add_widget(
+          hierarchy,
+          divider_id,
+          SplitPaneDivider,
+          divider_mount,
+          parent_id,
+          divider_rect
+        )
+      end
+
+    {hierarchy, id_counter} =
+      case children do
+        [child1 | [child2 | _]] ->
+          {h, idc} =
+            render_component(
+              hierarchy,
+              child1,
+              pane1_rect,
+              theme,
+              app_state,
+              parent_id,
+              id_counter + 1,
+              app_module
+            )
+
+          render_component(h, child2, pane2_rect, theme, app_state, parent_id, idc, app_module)
+
+        [child1] ->
+          render_component(
+            hierarchy,
+            child1,
+            pane1_rect,
+            theme,
+            app_state,
+            parent_id,
+            id_counter + 1,
+            app_module
+          )
+
+        [] ->
+          {hierarchy, id_counter + 1}
+      end
+
+    {hierarchy, id_counter}
+  end
+
+  defp pane_rects_from_pos(:horizontal, rect, pos, divider_size) do
+    pane1_width = max(1, pos)
+    pane2_width = max(1, rect.width - pane1_width - divider_size)
+
+    pane1 = %{x: rect.x, y: rect.y, width: pane1_width, height: rect.height}
+    divider = %{x: rect.x + pane1_width, y: rect.y, width: divider_size, height: rect.height}
+    pane2 = %{x: rect.x + pane1_width + divider_size, y: rect.y, width: pane2_width, height: rect.height}
+
+    {pane1, divider, pane2}
+  end
+
+  defp pane_rects_from_pos(:vertical, rect, pos, divider_size) do
+    pane1_height = max(1, pos)
+    pane2_height = max(1, rect.height - pane1_height - divider_size)
+
+    pane1 = %{x: rect.x, y: rect.y, width: rect.width, height: pane1_height}
+    divider = %{x: rect.x, y: rect.y + pane1_height, width: rect.width, height: divider_size}
+    pane2 = %{x: rect.x, y: rect.y + pane1_height + divider_size, width: rect.width, height: pane2_height}
+
+    {pane1, divider, pane2}
+  end
+
+  defp get_divider_pos(hierarchy, divider_id, default_ratio, total_size) do
+    case WidgetHierarchy.get_widget_state(hierarchy, divider_id) do
+      nil ->
+        round(default_ratio * (total_size - 1))
+
+      state ->
+        SplitPaneDivider.effective_pos(%{
+          fixed_pos: Map.get(state, :fixed_pos),
+          ratio: Map.get(state, :ratio, default_ratio),
+          total_size: total_size
+        })
+    end
   end
 
 end

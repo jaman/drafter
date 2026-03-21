@@ -18,17 +18,22 @@ defmodule Drafter.MixProject do
       homepage_url: "https://github.com/jaman/drafter",
       docs: [
         main: "Drafter",
-        extras: ["README.md", "CHANGELOG.md", "guides/remote_tui.md": [title: "Remote TUI"]],
+        extras: [
+          "README.md",
+          "CHANGELOG.md",
+          "guides/remote_tui.md": [title: "Remote TUI"],
+          "guides/writing_widgets.md": [title: "Writing Widgets & Libraries"]
+        ],
         groups_for_modules: [
           "Remote Servers": [Drafter.Server],
-          Core: [Drafter, Drafter.App, Drafter.Widget, Drafter.Screen],
+          Core: [Drafter, Drafter.App, Drafter.Widget, Drafter.WidgetLibrary, Drafter.Screen],
           Events: [
             Drafter.Event,
             Drafter.Event.Object,
             Drafter.Event.CustomRegistry,
             Drafter.Event.Delegation
           ],
-          Theming: [Drafter.Theme, Drafter.ThemeManager, Drafter.Color],
+          Theming: [Drafter.Theme, Drafter.ThemeManager, Drafter.Color, Drafter.SkinManager, Drafter.CharacterSet],
           Drawing: [Drafter.Draw.Segment, Drafter.Draw.Strip, Drafter.Draw.Canvas],
           "Display Widgets": [
             Drafter.Widget.Label,
@@ -70,7 +75,8 @@ defmodule Drafter.MixProject do
             Drafter.Widget.Header,
             Drafter.Widget.Footer,
             Drafter.Widget.Collapsible,
-            Drafter.Widget.TabbedContent
+            Drafter.Widget.TabbedContent,
+            Drafter.Widget.SplitPaneDivider
           ],
           Testing: [Drafter.Test, Drafter.Test.Harness],
           Animation: [Drafter.Animation]

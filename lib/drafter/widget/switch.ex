@@ -27,6 +27,7 @@ defmodule Drafter.Widget.Switch do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.CharacterSet
 
   @animation_step_ms 30
   @animation_step_size 0.25
@@ -320,7 +321,7 @@ defmodule Drafter.Widget.Switch do
         segments
       end
 
-    slider_part = String.duplicate("█", slider_width)
+    slider_part = String.duplicate(CharacterSet.fill(:full), slider_width)
     segments = [Segment.new(slider_part, thumb_style) | segments]
 
     segments =

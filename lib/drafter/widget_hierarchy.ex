@@ -948,6 +948,7 @@ defmodule Drafter.WidgetHierarchy do
   defp maybe_start_drag_capture(hierarchy, widget_id, widget_state) do
     if widget_state &&
          (Map.get(widget_state, :dragging_scrollbar, false) ||
+            Map.get(widget_state, :dragging, false) ||
             Map.get(widget_state, :_resize_col) != nil ||
             Map.get(widget_state, :_reorder_col) != nil) do
       %{hierarchy | drag_capture_widget: widget_id}

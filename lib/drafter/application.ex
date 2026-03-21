@@ -15,6 +15,7 @@ defmodule Drafter.Application do
       Drafter.FocusRegistry,
       Drafter.ScreenManager,
       Drafter.ThemeManager,
+      Drafter.SkinManager,
       {Registry, keys: :unique, name: Drafter.Session.Registry},
       Drafter.Session
     ]

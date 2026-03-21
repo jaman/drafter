@@ -31,6 +31,7 @@ defmodule Drafter.Widget.RadioSet do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.CharacterSet
 
   defstruct [
     :options,
@@ -245,7 +246,7 @@ defmodule Drafter.Widget.RadioSet do
     is_selected = index == state.selected_index
     is_highlighted = index == state.highlighted_index && state.focused
 
-    radio_char = if is_selected, do: "●", else: "○"
+    radio_char = if is_selected, do: CharacterSet.indicator(:radio_on), else: CharacterSet.indicator(:radio_off)
 
     option_state = %{
       selected: is_selected,
@@ -262,7 +263,8 @@ defmodule Drafter.Widget.RadioSet do
     bg_style = Computed.to_segment_style(bg_computed)
 
     text = " " <> option.label
-    text_len = String.length(text) + 2
+    indicator_len = String.length(radio_char)
+    text_len = 1 + indicator_len + String.length(text)
     remaining = max(0, width - text_len)
 
     Strip.new([

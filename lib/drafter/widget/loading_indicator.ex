@@ -29,15 +29,12 @@ defmodule Drafter.Widget.LoadingIndicator do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.CharacterSet
 
   @spinner_speed 100
-  @spinner_sets %{
-    default: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-    dots: ["⣾", "⣽", "⣻", "⢿"],
-    line: ["-", "\\", "|", "/"],
+  @fallback_spinner_sets %{
     arrow: ["←", "↑", "→", "↓"],
-    bounce: ["⠁", "⠂", "⠄", "⠂"],
-    points: ["•", "·", "•", "·", "•"]
+    bounce: ["⠁", "⠂", "⠄", "⠂"]
   }
 
   defstruct [
@@ -84,7 +81,11 @@ defmodule Drafter.Widget.LoadingIndicator do
     computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
     computed = Computed.for_widget(:loading_indicator, state, computed_opts)
 
-    spinner_chars = Map.get(@spinner_sets, state.spinner_type, @spinner_sets.default)
+    spinner_chars =
+      case Map.fetch(@fallback_spinner_sets, state.spinner_type) do
+        {:ok, frames} -> frames
+        :error -> CharacterSet.spinner(spinner_type_to_skin_key(state.spinner_type))
+      end
 
     frame = if state.running do
       System.monotonic_time(:millisecond) |> div(@spinner_speed)
@@ -187,6 +188,12 @@ defmodule Drafter.Widget.LoadingIndicator do
   def update_props_from_mount(_mount_props, _existing_state, _opts) do
     %{_render_timestamp: System.monotonic_time(:millisecond)}
   end
+
+  defp spinner_type_to_skin_key(:default), do: :dots
+  defp spinner_type_to_skin_key(:dots), do: :braille
+  defp spinner_type_to_skin_key(:line), do: :line
+  defp spinner_type_to_skin_key(:points), do: :points
+  defp spinner_type_to_skin_key(_), do: :dots
 
   defp interpolate_gradient(colors, frame) do
     num_colors = length(colors)
