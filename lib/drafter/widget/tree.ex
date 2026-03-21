@@ -240,7 +240,7 @@ defmodule Drafter.Widget.Tree do
       {:key, "/"} when state.focused ->
         collapse_all_nodes(state)
 
-      {:mouse, %{type: :click, x: _x, y: y}} ->
+      {:mouse, %{type: :mouse_up, x: _x, y: y}} ->
         handle_mouse_click(state, y)
 
       {:focus} ->
@@ -730,6 +730,47 @@ defmodule Drafter.Widget.Tree do
             trigger_node_highlight(new_state, Enum.at(display_items, new_index))
             {:ok, new_state}
         end
+    end
+  end
+
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, :auto)
+
+  def component_tag, do: :tree
+
+  def from_component_opts(_args, opts) do
+    rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
+    %{
+      data: Keyword.get(opts, :data, []),
+      selection_mode: Keyword.get(opts, :selection_mode, :single),
+      on_select: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_select)),
+      on_expand: Drafter.Widget.Callback.wrap_2(Keyword.get(opts, :on_expand)),
+      on_node_highlight: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_node_highlight)),
+      show_icons: Keyword.get(opts, :show_icons, true),
+      indent_size: Keyword.get(opts, :indent_size, 2),
+      width: Keyword.get(opts, :width, rect.width),
+      height: Keyword.get(opts, :height, rect.height)
+    }
+  end
+
+  def update_props_from_mount(mount_props, existing_state, _opts) do
+    base = %{
+      on_select: mount_props.on_select,
+      on_expand: mount_props.on_expand,
+      on_node_highlight: mount_props.on_node_highlight,
+      selection_mode: mount_props.selection_mode,
+      show_icons: mount_props.show_icons,
+      indent_size: mount_props.indent_size,
+      data: mount_props.data
+    }
+    base = if existing_state.width != mount_props.width do
+      Map.put(base, :width, mount_props.width)
+    else
+      base
+    end
+    if existing_state.height != mount_props.height do
+      Map.put(base, :height, mount_props.height)
+    else
+      base
     end
   end
 

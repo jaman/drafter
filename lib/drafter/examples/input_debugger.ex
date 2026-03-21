@@ -56,7 +56,7 @@ defmodule Drafter.Examples.InputDebugger do
     {:ok, add_event(state, event_str)}
   end
 
-  def handle_event({:mouse, %{type: :click} = data}, state) do
+  def handle_event({:mouse, %{type: :mouse_up} = data}, state) do
     event_str = "MOUSE CLICK: #{inspect(data)}"
     log_event(event_str)
     {:ok, add_event(state, event_str)}

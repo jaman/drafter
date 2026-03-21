@@ -45,8 +45,16 @@ defmodule KeyInspector do
     {:ok, add_event(state, "KEY", inspect(key), inspect({:key, key}))}
   end
 
-  def handle_event({:mouse, %{type: :click, button: btn, x: x, y: y}}, state) do
-    {:ok, add_event(state, "CLICK", "button=#{btn} x=#{x} y=#{y}", "")}
+  def handle_event({:mouse, %{type: :mouse_down, button: btn, x: x, y: y}}, state) do
+    {:ok, add_event(state, "MOUSE_DOWN", "button=#{btn} x=#{x} y=#{y}", "")}
+  end
+
+  def handle_event({:mouse, %{type: :mouse_up, button: btn, x: x, y: y}}, state) do
+    {:ok, add_event(state, "MOUSE_UP", "button=#{btn} x=#{x} y=#{y}", "")}
+  end
+
+  def handle_event({:mouse, %{type: :drag, button: btn, x: x, y: y}}, state) do
+    {:ok, add_event(state, "DRAG", "button=#{btn} x=#{x} y=#{y}", "")}
   end
 
   def handle_event({:mouse, %{type: :scroll, direction: dir, x: x, y: y}}, state) do
@@ -65,8 +73,6 @@ defmodule KeyInspector do
     {:ok, add_event(state, "RESIZE", "#{w}×#{h}", "")}
   end
 
-#  def handle_event({:key, :q}, state), do: {:stop, :normal}
-
   def handle_event(event, state) do
     {:ok, add_event(state, "OTHER", inspect(event), "")}
   end
@@ -77,13 +83,15 @@ defmodule KeyInspector do
     %{state | events: events}
   end
 
-  defp tag_color("KEY+MOD"), do: :magenta
-  defp tag_color("KEY"),     do: :cyan
-  defp tag_color("CLICK"),   do: :green
-  defp tag_color("SCROLL"),  do: :yellow
-  defp tag_color("MOVE"),    do: :bright_black
-  defp tag_color("RESIZE"),  do: :blue
-  defp tag_color(_),         do: :white
+  defp tag_color("KEY+MOD"),   do: :magenta
+  defp tag_color("KEY"),       do: :cyan
+  defp tag_color("MOUSE_DOWN"), do: :green
+  defp tag_color("MOUSE_UP"),  do: :bright_green
+  defp tag_color("DRAG"),      do: :yellow
+  defp tag_color("SCROLL"),    do: :bright_yellow
+  defp tag_color("MOVE"),      do: :bright_black
+  defp tag_color("RESIZE"),    do: :blue
+  defp tag_color(_),           do: :white
 end
 
 Drafter.run(KeyInspector)

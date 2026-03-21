@@ -165,6 +165,32 @@ defmodule Drafter.Widget.RichLog do
     }
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 10)
+
+  def component_tag, do: :rich_log
+
+  def from_component_opts(_args, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      lines: Keyword.get(opts, :lines, []),
+      max_lines: Keyword.get(opts, :max_lines, 1000),
+      auto_scroll: Keyword.get(opts, :auto_scroll, true),
+      wrap: Keyword.get(opts, :wrap, true),
+      reverse: Keyword.get(opts, :reverse, true),
+      show_line_numbers: Keyword.get(opts, :show_line_numbers, false),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(_mount_props, _existing_state, _opts), do: %{}
+
   defp add_line(state, line) do
     new_lines = state.lines ++ [parse_line(line)]
     Enum.take(new_lines, -state.max_lines)

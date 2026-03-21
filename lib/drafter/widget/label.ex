@@ -105,6 +105,29 @@ defmodule Drafter.Widget.Label do
     end)
   end
 
+  def preferred_height(_args, _opts), do: 1
+
+  def component_tag, do: :label
+
+  def from_component_opts(text, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      text: text,
+      style: Keyword.get(opts, :style, %{}),
+      align: Keyword.get(opts, :align, :left),
+      variant: Keyword.get(opts, :variant, :default),
+      classes: classes,
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
+
   defp align_strip(strip, :left, width, bg_style) do
     strip_width = Strip.width(strip)
 

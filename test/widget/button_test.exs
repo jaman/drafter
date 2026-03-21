@@ -85,16 +85,16 @@ defmodule Drafter.Widget.ButtonTest do
     end
   end
 
-  describe "handle_click/3" do
+  describe "handle_mouse_up/3" do
     test "activates button on click" do
       state = Button.mount(%{text: "Test"})
-      assert {:ok, new_state, _actions} = Button.handle_click(0, 0, state)
+      assert {:ok, new_state, _actions} = Button.handle_mouse_up(0, 0, state)
       assert new_state.active == true
     end
 
     test "does not activate when disabled" do
       state = Button.mount(%{text: "Test", disabled: true})
-      assert {:ok, new_state} = Button.handle_click(0, 0, state)
+      assert {:ok, new_state} = Button.handle_mouse_up(0, 0, state)
       assert new_state.active == false
     end
   end

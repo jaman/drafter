@@ -474,7 +474,7 @@ defmodule Drafter.Widget.TextInput do
           {:noreply, state}
         end
 
-      {:mouse, %{type: :click, x: x}} ->
+      {:mouse, %{type: :mouse_up, x: x}} ->
         click_pos = max(0, x - 1)
         actual_pos = min(click_pos + state.scroll_offset, String.length(state.text))
 
@@ -557,6 +557,79 @@ defmodule Drafter.Widget.TextInput do
         type: Map.get(props, :type, state.type),
         select_on_focus: Map.get(props, :select_on_focus, state.select_on_focus)
     }
+  end
+
+  def preferred_height(_args, _opts), do: 3
+
+  def component_tag, do: :text_input
+
+  def from_component_opts(_args, opts) do
+    app_state = Keyword.get(opts, :__app_state__, %{})
+    rect = Keyword.get(opts, :__rect__, %{width: 2})
+    value = Drafter.Binding.get_bound_value(opts, app_state, "")
+    on_submit = Keyword.get(opts, :on_submit)
+    keep_focus = Keyword.get(opts, :keep_focus, false)
+    widget_id = Keyword.get(opts, :__widget_id__)
+    session_pid = self()
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    on_submit_fn = if on_submit do
+      fn {text, _vr} ->
+        Drafter.Widget.Callback.wrap_1(on_submit).(text)
+        if keep_focus, do: send(session_pid, {:focus_widget, widget_id})
+      end
+    else
+      nil
+    end
+    %{
+      text: value,
+      placeholder: Keyword.get(opts, :placeholder, ""),
+      width: rect.width - 2,
+      classes: classes,
+      validators: Keyword.get(opts, :validators),
+      disabled: Keyword.get(opts, :disabled, false),
+      readonly: Keyword.get(opts, :readonly, false),
+      password: Keyword.get(opts, :password, false),
+      restrict: Keyword.get(opts, :restrict),
+      type: Keyword.get(opts, :type, :text),
+      select_on_focus: Keyword.get(opts, :select_on_focus, false),
+      on_change: Drafter.Binding.create_text_input_callback(opts),
+      on_submit: on_submit_fn
+    }
+  end
+
+  def update_props_from_mount(mount_props, existing_state, opts) do
+    base = %{
+      on_change: mount_props.on_change,
+      on_submit: mount_props.on_submit,
+      classes: mount_props.classes,
+      validators: mount_props.validators,
+      disabled: mount_props.disabled,
+      readonly: mount_props.readonly,
+      password: mount_props.password,
+      restrict: mount_props.restrict,
+      type: mount_props.type,
+      select_on_focus: mount_props.select_on_focus
+    }
+    base = if existing_state.width != mount_props.width do
+      Map.put(base, :width, mount_props.width)
+    else
+      base
+    end
+    base = if existing_state.placeholder != mount_props.placeholder do
+      Map.put(base, :placeholder, mount_props.placeholder)
+    else
+      base
+    end
+    if (Keyword.has_key?(opts, :bind) or Keyword.has_key?(opts, :value)) and existing_state.text != mount_props.text do
+      Map.put(base, :text, mount_props.text)
+    else
+      base
+    end
   end
 
   defp normalize_text_prop(text, _fallback) when is_binary(text), do: text

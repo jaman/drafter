@@ -277,6 +277,46 @@ defmodule Drafter.Widget.MaskedInput do
   def get_unmasked_value(%__MODULE__{raw_value: raw_value}), do: raw_value || ""
   def get_unmasked_value(%__MODULE__{value: value, mask: mask}), do: strip_mask(value, mask)
 
+  def preferred_height(_args, _opts), do: 3
+
+  def component_tag, do: :masked_input
+
+  def from_component_opts(_args, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      mask: Keyword.get(opts, :mask),
+      value: Keyword.get(opts, :value, ""),
+      placeholder: Keyword.get(opts, :placeholder, ""),
+      on_change: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_change)),
+      on_submit: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_submit)),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, existing_state, _opts) do
+    base = %{
+      on_change: mount_props.on_change,
+      on_submit: mount_props.on_submit
+    }
+    base = if existing_state.mask != mount_props.mask do
+      Map.put(base, :mask, mount_props.mask)
+    else
+      base
+    end
+    if existing_state.placeholder != mount_props.placeholder do
+      Map.put(base, :placeholder, mount_props.placeholder)
+    else
+      base
+    end
+  end
+
   defp get_mask_positions(mask) when is_binary(mask) do
     mask
     |> String.graphemes()

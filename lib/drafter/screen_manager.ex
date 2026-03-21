@@ -108,6 +108,11 @@ defmodule Drafter.ScreenManager do
     GenServer.cast(resolve(), {:register_app, app_pid})
   end
 
+  @spec reset() :: :ok
+  def reset do
+    GenServer.call(resolve(), :reset)
+  end
+
   @impl true
   def init(_opts) do
     state = %__MODULE__{
@@ -191,8 +196,9 @@ defmodule Drafter.ScreenManager do
                     GenServer.call(sm, {:replace, screen_module, props, opts})
                     :handled
 
-                  :passthrough ->
-                    case Screen.handle_screen_event(screen, event) do
+                  {:passthrough, updated_screen} ->
+                    GenServer.cast(sm, {:update_screen, screen.id, updated_screen})
+                    case Screen.handle_screen_event(updated_screen, event) do
                       {:ok, updated_screen} ->
                         GenServer.cast(sm, {:update_screen, screen.id, updated_screen})
                         send(manager_state.app_pid, :screen_render_needed)
@@ -340,6 +346,17 @@ defmodule Drafter.ScreenManager do
   end
 
   @impl true
+  def handle_call(:reset, _from, state) do
+    Enum.each(state.screen_stack, fn screen ->
+      if screen.widget_hierarchy do
+        Drafter.WidgetHierarchy.stop_all_servers(screen.widget_hierarchy)
+      end
+    end)
+
+    {:reply, :ok, %{state | screen_stack: [], toasts: []}}
+  end
+
+  @impl true
   def handle_cast({:show_toast, message, opts}, state) do
     variant = Keyword.get(opts, :variant, :info)
     duration = Keyword.get(opts, :duration, 3000)
@@ -477,7 +494,7 @@ defmodule Drafter.ScreenManager do
     opts.dismissable
   end
 
-  defp should_capture_event?(%Screen{type: :popover}, {:mouse, %{type: :click}}) do
+  defp should_capture_event?(%Screen{type: :popover}, {:mouse, %{type: :mouse_up}}) do
     true
   end
 
@@ -526,12 +543,13 @@ defmodule Drafter.ScreenManager do
   end
 
   defp handle_widget_hierarchy_event_direct(screen, screen_rect, {:mouse, mouse_data}) do
-    if point_in_rect?(mouse_data.x, mouse_data.y, screen_rect) do
+    if point_in_rect?(mouse_data.x, mouse_data.y, screen_rect) or
+         screen.widget_hierarchy.drag_capture_widget != nil do
       case Drafter.WidgetHierarchy.handle_event(screen.widget_hierarchy, {:mouse, mouse_data}) do
         {updated_hierarchy, []} ->
           if meaningful_hierarchy_change?(screen.widget_hierarchy, updated_hierarchy) do
             updated_screen = %{screen | widget_hierarchy: updated_hierarchy}
-            {:ok, updated_screen}
+            {:passthrough, updated_screen}
           else
             :passthrough
           end

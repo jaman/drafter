@@ -277,4 +277,45 @@ defmodule Drafter.Widget.ProgressBar do
         "#{hours}h #{mins}m"
     end
   end
+
+  def preferred_height(_args, opts) do
+    if Keyword.get(opts, :orientation, :horizontal) == :vertical, do: 8, else: 3
+  end
+
+  def component_tag, do: :progress_bar
+
+  def from_component_opts(_args, opts) do
+    rect = Keyword.get(opts, :__rect__, %{width: 50, height: 1})
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      progress: Keyword.get(opts, :progress, 0.0),
+      max_value: Keyword.get(opts, :max_value, 100.0),
+      label: Keyword.get(opts, :label),
+      show_percentage: Keyword.get(opts, :show_percentage, true),
+      show_value: Keyword.get(opts, :show_value, false),
+      show_eta: Keyword.get(opts, :show_eta, true),
+      indeterminate: Keyword.get(opts, :indeterminate, false),
+      pulse: Keyword.get(opts, :pulse, false),
+      classes: classes,
+      width: Keyword.get(opts, :width, rect.width),
+      height: Keyword.get(opts, :height, rect.height)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      progress: mount_props.progress,
+      max_value: mount_props.max_value,
+      label: mount_props.label,
+      show_percentage: mount_props.show_percentage,
+      show_value: mount_props.show_value,
+      indeterminate: mount_props.indeterminate,
+      classes: mount_props.classes
+    }
+  end
 end

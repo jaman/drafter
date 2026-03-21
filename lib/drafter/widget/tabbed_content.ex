@@ -237,7 +237,7 @@ defmodule Drafter.Widget.TabbedContent do
       {:key, :tab} ->
         {:noreply, state}
 
-      {:mouse, %{type: :click, y: y, x: x}} ->
+      {:mouse, %{type: :mouse_up, y: y, x: x}} ->
         cond do
           y <= 1 ->
             clicked_tab = find_tab_at_x(state, x)
@@ -257,7 +257,7 @@ defmodule Drafter.Widget.TabbedContent do
               dispatch_event_to_child(
                 state,
                 active_child,
-                {:mouse, %{type: :click, y: click_y, x: x}},
+                {:mouse, %{type: :mouse_up, y: click_y, x: x}},
                 state.active_tab
               )
             else
@@ -295,6 +295,39 @@ defmodule Drafter.Widget.TabbedContent do
     end
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 8)
+
+  def component_tag, do: :tabbed_content
+
+  def from_component_opts(tabs, opts) do
+    rect = Keyword.get(opts, :__rect__, %{width: 80})
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    all_tabs = if is_list(tabs) and length(tabs) > 0, do: tabs, else: Keyword.get(opts, :tabs, [])
+    %{
+      tabs: all_tabs,
+      active_tab: Keyword.get(opts, :active_tab, 0),
+      title: Keyword.get(opts, :title),
+      title_align: Keyword.get(opts, :title_align, :left),
+      on_tab_change: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_tab_change)),
+      width: Keyword.get(opts, :width, rect.width),
+      classes: classes
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      tabs: mount_props.tabs,
+      title_align: mount_props.title_align,
+      width: mount_props.width,
+      classes: mount_props.classes
+    }
+  end
+
   defp change_tab(state, new_tab) do
     new_state = %{state | active_tab: new_tab, highlighted_item: 0}
 
@@ -304,7 +337,7 @@ defmodule Drafter.Widget.TabbedContent do
       try do
         case Drafter.ScreenManager.get_active_screen() do
           nil ->
-            send(:tui_app_loop, {:app_event, state.on_tab_change, tab.id})
+            Drafter.AppRegistry.send_to_loop( {:app_event, state.on_tab_change, tab.id})
 
           _screen ->
             send(self(), {:tui_event, {:app_callback, state.on_tab_change, tab.id}})
@@ -650,7 +683,7 @@ defmodule Drafter.Widget.TabbedContent do
       if on_select do
         fn option ->
           case Drafter.ScreenManager.get_active_screen() do
-            nil -> send(:tui_app_loop, {:app_event, on_select, option.id})
+            nil -> Drafter.AppRegistry.send_to_loop( {:app_event, on_select, option.id})
             _screen -> send(self(), {:tui_event, {:app_callback, on_select, option.id}})
           end
         end
@@ -662,7 +695,7 @@ defmodule Drafter.Widget.TabbedContent do
       if on_highlight do
         fn option ->
           case Drafter.ScreenManager.get_active_screen() do
-            nil -> send(:tui_app_loop, {:app_event, on_highlight, option.id})
+            nil -> Drafter.AppRegistry.send_to_loop( {:app_event, on_highlight, option.id})
             _screen -> send(self(), {:tui_event, {:app_callback, on_highlight, option.id}})
           end
         end

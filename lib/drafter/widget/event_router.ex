@@ -29,9 +29,16 @@ defmodule Drafter.Widget.EventRouter do
             {:bubble, state}
         end
 
-      {:mouse, %{type: :click, x: x, y: y}} ->
-        if :click in handles and function_exported?(module, :handle_click, 3) do
-          module.handle_click(x, y, state)
+      {:mouse, %{type: :mouse_down, x: x, y: y}} ->
+        if :press in handles and function_exported?(module, :handle_press, 3) do
+          module.handle_press(x, y, state)
+        else
+          {:bubble, state}
+        end
+
+      {:mouse, %{type: :mouse_up, x: x, y: y}} ->
+        if :mouse_up in handles and function_exported?(module, :handle_mouse_up, 3) do
+          module.handle_mouse_up(x, y, state)
         else
           {:bubble, state}
         end

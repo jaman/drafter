@@ -434,6 +434,64 @@ defmodule Drafter.Widget.TextArea do
     }
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 6)
+
+  def component_tag, do: :text_area
+
+  def from_component_opts(_args, opts) do
+    app_state = Keyword.get(opts, :__app_state__, %{})
+    rect = Keyword.get(opts, :__rect__, %{width: 40, height: 6})
+    value = Drafter.Binding.get_bound_value(opts, app_state, "")
+    %{
+      text: value,
+      placeholder: Keyword.get(opts, :placeholder, ""),
+      width: rect.width,
+      height: rect.height,
+      on_change: Drafter.Binding.create_bound_callback(opts, :text),
+      max_lines: Keyword.get(opts, :max_lines),
+      show_line_numbers: Keyword.get(opts, :show_line_numbers, false),
+      language: Keyword.get(opts, :language),
+      style: Keyword.get(opts, :style, %{}),
+      read_only: Keyword.get(opts, :read_only, false),
+      tab_behavior: Keyword.get(opts, :tab_behavior, :focus),
+      tab_size: Keyword.get(opts, :tab_size, 2),
+      highlight_cursor_line: Keyword.get(opts, :highlight_cursor_line, false)
+    }
+  end
+
+  def update_props_from_mount(mount_props, existing_state, opts) do
+    base = %{
+      on_change: mount_props.on_change,
+      max_lines: mount_props.max_lines,
+      show_line_numbers: mount_props.show_line_numbers,
+      language: mount_props.language,
+      read_only: mount_props.read_only,
+      tab_behavior: mount_props.tab_behavior,
+      tab_size: mount_props.tab_size,
+      highlight_cursor_line: mount_props.highlight_cursor_line
+    }
+    base = if existing_state.width != mount_props.width do
+      Map.put(base, :width, mount_props.width)
+    else
+      base
+    end
+    base = if existing_state.height != mount_props.height do
+      Map.put(base, :height, mount_props.height)
+    else
+      base
+    end
+    base = if existing_state.placeholder != mount_props.placeholder do
+      Map.put(base, :placeholder, mount_props.placeholder)
+    else
+      base
+    end
+    if (Keyword.has_key?(opts, :bind) or Keyword.has_key?(opts, :value)) and existing_state.text != mount_props.text do
+      Map.put(base, :text, mount_props.text)
+    else
+      base
+    end
+  end
+
   defp render_content(state, content_width, content_height, effective_style) do
     lines = state.lines
     focused = state.focused

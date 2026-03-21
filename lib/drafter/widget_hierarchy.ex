@@ -790,7 +790,7 @@ defmodule Drafter.WidgetHierarchy do
         relative_event = make_relative_mouse_event(hierarchy, capture_id, mouse_event)
         handle_event_with_phases(hierarchy, capture_id, {:mouse, relative_event})
 
-      {:mouse_up, capture_id} when capture_id != nil ->
+      {type, capture_id} when type == :mouse_up and capture_id != nil ->
         relative_event = make_relative_mouse_event(hierarchy, capture_id, mouse_event)
 
         {new_hierarchy, actions} =
@@ -822,48 +822,19 @@ defmodule Drafter.WidgetHierarchy do
         relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
         handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
 
-      {:click, widget_id} ->
-        if :ctrl in Map.get(mouse_event, :mods, []) do
-          hierarchy =
-            toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y)
-
-          {hierarchy, []}
-        else
-          hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
-          hierarchy = focus_widget(hierarchy, widget_id)
-          relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
-
-          {new_hierarchy, actions} =
-            handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
-
-          widget_state = get_widget_state(new_hierarchy, widget_id)
-          new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
-          {new_hierarchy, actions}
-        end
-
-      {:press, widget_id} ->
-        if :ctrl in Map.get(mouse_event, :mods, []) do
-          hierarchy =
-            toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y)
-
-          {hierarchy, []}
-        else
-          hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
-          hierarchy = focus_widget(hierarchy, widget_id)
-          relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
-
-          {new_hierarchy, actions} =
-            handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
-
-          widget_state = get_widget_state(new_hierarchy, widget_id)
-          new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
-          {new_hierarchy, actions}
-        end
-
       {:mouse_up, widget_id} ->
-        hierarchy = focus_widget(hierarchy, widget_id)
-        relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
-        handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+        if :ctrl in Map.get(mouse_event, :mods, []) do
+          hierarchy =
+            toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y)
+
+          {hierarchy, []}
+        else
+          hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
+          hierarchy = focus_widget(hierarchy, widget_id)
+          relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
+
+          handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+        end
 
       {:drag, widget_id} ->
         relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
@@ -878,6 +849,21 @@ defmodule Drafter.WidgetHierarchy do
       {:scroll, widget_id} ->
         relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
         handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+
+      {:mouse_down, widget_id} ->
+        if :ctrl in Map.get(mouse_event, :mods, []) do
+          hierarchy = toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y)
+          {hierarchy, []}
+        else
+          hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
+          hierarchy = focus_widget(hierarchy, widget_id)
+          relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
+          {new_hierarchy, actions} =
+            handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+          widget_state = get_widget_state(new_hierarchy, widget_id)
+          new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
+          {new_hierarchy, actions}
+        end
 
       {_, _widget_id} ->
         {hierarchy, []}
@@ -1206,23 +1192,8 @@ defmodule Drafter.WidgetHierarchy do
   end
 
   defp is_focusable_widget?(module) do
-    module in [
-      Drafter.Widget.TextInput,
-      Drafter.Widget.TextArea,
-      Drafter.Widget.Button,
-      Drafter.Widget.Checkbox,
-      Drafter.Widget.OptionList,
-      Drafter.Widget.DataTable,
-      Drafter.Widget.Tree,
-      Drafter.Widget.DirectoryTree,
-      Drafter.Widget.Switch,
-      Drafter.Widget.RadioSet,
-      Drafter.Widget.SelectionList,
-      Drafter.Widget.Collapsible,
-      Drafter.Widget.TabbedContent,
-      Drafter.Widget.Link,
-      Drafter.Widget.MaskedInput
-    ]
+    function_exported?(module, :__widget_capabilities__, 0) and
+      Map.get(module.__widget_capabilities__(), :focusable, false)
   end
 
   @doc "Query widgets by selector string"

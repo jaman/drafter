@@ -88,7 +88,7 @@ defmodule Drafter.Widget.DataTable do
   """
 
   use Drafter.Widget,
-    handles: [:scroll, :keyboard, :click, :drag, :hover],
+    handles: [:scroll, :keyboard, :mouse_up, :drag, :hover],
     focusable: true
 
   alias Drafter.Draw.{Segment, Strip}
@@ -407,7 +407,7 @@ defmodule Drafter.Widget.DataTable do
   end
 
   @impl Drafter.Widget
-  def handle_click(x, y, state) do
+  def handle_mouse_up(x, y, state) do
     was_resizing = state._resize_col != nil
     was_reordering = state._reorder_col != nil
     state = %{state | _resize_col: nil, _resize_start_x: nil, _resize_start_width: nil, _reorder_col: nil}
@@ -1347,6 +1347,83 @@ defmodule Drafter.Widget.DataTable do
       rescue
         _error -> :ok
       end
+    end
+  end
+
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, :auto)
+
+  def component_tag, do: :data_table
+
+  def from_component_opts(_args, opts) do
+    rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
+    theme = Keyword.get(opts, :__theme__)
+    custom_styles = Keyword.get(opts, :styles, %{})
+    base = %{
+      columns: Keyword.get(opts, :columns, []),
+      data: Keyword.get(opts, :data, []),
+      sort_by: Keyword.get(opts, :sort_by),
+      selection_mode: Keyword.get(opts, :selection_mode, :single),
+      show_header: Keyword.get(opts, :show_header, true),
+      show_cursor: Keyword.get(opts, :show_cursor, true),
+      zebra_stripes: Keyword.get(opts, :zebra_stripes, true),
+      show_scrollbars: Keyword.get(opts, :show_scrollbars, true),
+      column_fit_mode: Keyword.get(opts, :column_fit_mode, :fit),
+      mouse_scroll_moves_selection: Keyword.get(opts, :mouse_scroll_moves_selection, true),
+      width: Keyword.get(opts, :width, rect.width),
+      height: (case Keyword.get(opts, :height, rect.height) do
+        :auto -> 8
+        h -> h
+      end),
+      fixed_columns: Keyword.get(opts, :fixed_columns, 0),
+      sortable: Keyword.get(opts, :sortable, true),
+      locked: Keyword.get(opts, :locked, true),
+      col_widths: Keyword.get(opts, :col_widths),
+      col_order: Keyword.get(opts, :col_order),
+      cursor_type: Keyword.get(opts, :cursor_type, :row),
+      cell_padding: Keyword.get(opts, :cell_padding, 0),
+      on_select: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_select)),
+      on_sort: Drafter.Widget.Callback.wrap_2(Keyword.get(opts, :on_sort)),
+      on_layout_change: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_layout_change)),
+      on_row_highlight: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_row_highlight)),
+      on_header_select: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_header_select))
+    }
+    if theme do
+      Map.merge(base, %{
+        style: Map.get(custom_styles, :style, %{fg: theme.text_primary, bg: theme.background}),
+        header_style: Map.get(custom_styles, :header_style, %{fg: theme.text_primary, bg: theme.surface, bold: true}),
+        selected_style: Map.get(custom_styles, :selected_style, %{fg: theme.text_primary, bg: theme.primary}),
+        cursor_style: Map.get(custom_styles, :cursor_style, %{fg: theme.text_primary, bg: theme.primary, bold: true})
+      })
+    else
+      base
+    end
+  end
+
+  def update_props_from_mount(mount_props, existing_state, _opts) do
+    base = %{
+      on_select: mount_props.on_select,
+      on_sort: mount_props.on_sort,
+      on_layout_change: mount_props.on_layout_change,
+      on_row_highlight: mount_props.on_row_highlight,
+      on_header_select: mount_props.on_header_select,
+      columns: mount_props.columns,
+      data: mount_props.data,
+      selection_mode: mount_props.selection_mode,
+      sortable: mount_props.sortable,
+      locked: mount_props.locked,
+      cursor_type: mount_props.cursor_type,
+      cell_padding: mount_props.cell_padding,
+      fixed_columns: mount_props.fixed_columns
+    }
+    base = if existing_state.width != mount_props.width do
+      Map.put(base, :width, mount_props.width)
+    else
+      base
+    end
+    if existing_state.height != mount_props.height do
+      Map.put(base, :height, mount_props.height)
+    else
+      base
     end
   end
 

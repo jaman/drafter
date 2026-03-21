@@ -169,6 +169,29 @@ defmodule Drafter.Widget.CodeView do
     end
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 20)
+
+  def component_tag, do: :code_view
+
+  def from_component_opts(_args, opts) do
+    %{
+      source: Keyword.get(opts, :source, ""),
+      path: Keyword.get(opts, :path),
+      language: Keyword.get(opts, :language, :text),
+      show_line_numbers: Keyword.get(opts, :show_line_numbers, false),
+      hex_view: Keyword.get(opts, :hex_view, false)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      source: mount_props.source,
+      path: mount_props.path,
+      language: mount_props.language,
+      hex_view: mount_props.hex_view
+    }
+  end
+
   defp load_content(nil, source, language, hex_view) do
     content_to_lines(source, language, nil, hex_view)
   end

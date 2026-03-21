@@ -51,7 +51,7 @@ defmodule Drafter.Widget.CheckboxTest do
 
     test "click toggles checked" do
       state = Checkbox.mount(%{checked: false})
-      assert {:ok, new_state} = Checkbox.handle_event({:mouse, %{type: :click}}, state)
+      assert {:ok, new_state} = Checkbox.handle_event({:mouse, %{type: :mouse_up}}, state)
       assert new_state.checked == true
     end
 
@@ -118,8 +118,8 @@ defmodule Drafter.Widget.CheckboxTest do
     end
   end
 
-  describe "component_renderer fix: checked synced on re-render" do
-    test "re-rendering with checked: false updates previously true widget" do
+  describe "re-render prop update behavior" do
+    test "re-rendering without bind: preserves internal checked state" do
       rect = %{x: 0, y: 0, width: 20, height: 1}
       theme = Theme.dark_theme()
 
@@ -130,21 +130,20 @@ defmodule Drafter.Widget.CheckboxTest do
       hierarchy2 = ComponentRenderer.render_tree(tree_false, rect, theme, %{}, hierarchy)
 
       widget_state = Drafter.WidgetHierarchy.get_widget_state(hierarchy2, :cb3)
-      assert widget_state.checked == false
+      assert widget_state.checked == true
     end
 
-    test "re-rendering with checked: true updates previously false widget" do
+    test "re-rendering with bind: syncs checked from app state" do
       rect = %{x: 0, y: 0, width: 20, height: 1}
       theme = Theme.dark_theme()
 
-      tree_false = {:layout, :vertical, [{:checkbox, "Option", [id: :cb4, checked: false]}], []}
-      hierarchy = ComponentRenderer.render_tree(tree_false, rect, theme, %{})
+      tree_true = {:layout, :vertical, [{:checkbox, "Option", [id: :cb4, bind: :flag]}], []}
+      hierarchy = ComponentRenderer.render_tree(tree_true, rect, theme, %{flag: true})
 
-      tree_true = {:layout, :vertical, [{:checkbox, "Option", [id: :cb4, checked: true]}], []}
-      hierarchy2 = ComponentRenderer.render_tree(tree_true, rect, theme, %{}, hierarchy)
+      hierarchy2 = ComponentRenderer.render_tree(tree_true, rect, theme, %{flag: false}, hierarchy)
 
       widget_state = Drafter.WidgetHierarchy.get_widget_state(hierarchy2, :cb4)
-      assert widget_state.checked == true
+      assert widget_state.checked == false
     end
   end
 end

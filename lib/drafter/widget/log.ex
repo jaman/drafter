@@ -110,6 +110,39 @@ defmodule Drafter.Widget.Log do
     end
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 10)
+
+  def component_tag, do: :log
+
+  def from_component_opts(_args, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      lines: Keyword.get(opts, :lines, []),
+      file_path: Keyword.get(opts, :file_path),
+      max_lines: Keyword.get(opts, :max_lines, 1000),
+      auto_scroll: Keyword.get(opts, :auto_scroll, true),
+      wrap: Keyword.get(opts, :wrap, true),
+      highlight: Keyword.get(opts, :highlight, false),
+      border: Keyword.get(opts, :border, false),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      file_path: mount_props.file_path,
+      lines: mount_props.lines,
+      app_module: mount_props.app_module
+    }
+  end
+
   defp render_plain(state, rect, line_style) do
     visible_lines = get_visible_lines(state, rect.height)
 

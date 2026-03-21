@@ -21,7 +21,7 @@ defmodule Drafter.Widget.Button do
   """
 
   use Drafter.Widget,
-    handles: [:click, :keyboard],
+    handles: [:mouse_up, :keyboard],
     focusable: true
 
   alias Drafter.Draw.{Segment, Strip}
@@ -158,7 +158,7 @@ defmodule Drafter.Widget.Button do
   end
 
   @impl Drafter.Widget
-  def handle_click(_x, _y, state) do
+  def handle_mouse_up(_x, _y, state) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
     if state.disabled do
@@ -255,6 +255,33 @@ defmodule Drafter.Widget.Button do
         disabled: disabled
     }
   end
+
+  def preferred_height(_args, _opts), do: 3
+
+  def component_tag, do: :button
+
+  def from_component_opts(text, opts) do
+    app_module = Keyword.get(opts, :__app_module__)
+    disabled = Keyword.get(opts, :disabled, false)
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    on_click = if not disabled, do: Drafter.Widget.Callback.wrap_0(Keyword.get(opts, :on_click)), else: nil
+    %{
+      text: text,
+      button_type: Keyword.get(opts, :variant, Keyword.get(opts, :type, :default)),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      disabled: disabled,
+      on_click: on_click,
+      app_module: app_module
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
 
   defp trigger_click(state) do
     if state.on_click do

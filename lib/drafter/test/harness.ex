@@ -95,7 +95,7 @@ defmodule Drafter.Test.Harness do
   end
 
   defp run_headless_app(app_module, props) do
-    Process.register(self(), :tui_app_loop)
+    Drafter.AppRegistry.register()
 
     Drafter.ThemeManager.register_app(self())
     Drafter.ScreenManager.register_app(self())

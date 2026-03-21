@@ -18,7 +18,7 @@ defmodule ExamplesLauncher do
   def render(state) do
     vertical([
       header("Drafter — Example Gallery"),
-      option_list(state.examples, id: :example_list, on_select: :run_example, flex: 1),
+      option_list(state.examples, id: :example_list, on_select: :run_example, trigger: :mouse_up, flex: 1),
       footer()
     ])
   end

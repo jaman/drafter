@@ -84,20 +84,48 @@ defmodule MultiSeriesCharts do
             _render_timestamp: state.timestamp
           ),
           gap(),
-          section("Clustered Bar: Monthly revenue by product line (12 groups × 3 series)"),
-          chart([monthly_a, monthly_b, monthly_c],
-            id: :cbar,
-            chart_type: :clustered_bar,
-            height: 8,
-            colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)]
+          section("Clustered Bar: Monthly revenue — bar_gap: 0 (default) vs bar_gap: 1"),
+          horizontal(
+            [
+              chart([monthly_a, monthly_b, monthly_c],
+                id: :cbar,
+                chart_type: :clustered_bar,
+                height: 8,
+                colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)],
+                flex: 1
+              ),
+              chart([monthly_a, monthly_b, monthly_c],
+                id: :cbar_gap,
+                chart_type: :clustered_bar,
+                height: 8,
+                bar_gap: 1,
+                colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)],
+                flex: 1
+              )
+            ],
+            gap: 2
           ),
           gap(),
-          section("Stacked Bar: Cumulative contributions per period"),
-          chart([stacked_a, stacked_b, stacked_c],
-            id: :sbar,
-            chart_type: :stacked_bar,
-            height: 8,
-            colors: [Enum.at(@palette, 2), Enum.at(@palette, 4), Enum.at(@palette, 5)]
+          section("Stacked Bar: side by side — no gap (left) vs gap: 1 (right)"),
+          horizontal(
+            [
+              chart([stacked_a, stacked_b, stacked_c],
+                id: :sbar,
+                chart_type: :stacked_bar,
+                height: 8,
+                colors: [Enum.at(@palette, 2), Enum.at(@palette, 4), Enum.at(@palette, 5)],
+                flex: 1
+              ),
+              chart([stacked_a, stacked_b, stacked_c],
+                id: :sbar_gap,
+                chart_type: :stacked_bar,
+                height: 8,
+                bar_gap: 1,
+                colors: [Enum.at(@palette, 2), Enum.at(@palette, 4), Enum.at(@palette, 5)],
+                flex: 1
+              )
+            ],
+            gap: 2
           ),
           gap(),
           section("Range Bar: Monthly temperature range °C (low → high)"),

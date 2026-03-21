@@ -118,6 +118,30 @@ defmodule Drafter.Widget.Gauge do
     }
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 5)
+
+  def component_tag, do: :gauge
+
+  def from_component_opts(_args, opts) do
+    %{
+      value: Keyword.get(opts, :value, 0.0),
+      label: Keyword.get(opts, :label),
+      low_threshold: Keyword.get(opts, :low_threshold, 0.8),
+      high_threshold: Keyword.get(opts, :high_threshold, 0.9),
+      low_color: Keyword.get(opts, :low_color, {80, 200, 80}),
+      mid_color: Keyword.get(opts, :mid_color, {220, 140, 0}),
+      high_color: Keyword.get(opts, :high_color, {220, 60, 60}),
+      track_color: Keyword.get(opts, :track_color, {55, 55, 55})
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      value: mount_props.value,
+      label: mount_props.label
+    }
+  end
+
   defp build_arc_map(state, cx, cy, radius, thickness) do
     value_angle = @arc_start + state.value * @arc_sweep
     inner_r2 = (radius - thickness / 2.0) ** 2

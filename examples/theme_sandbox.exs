@@ -6,7 +6,7 @@ defmodule InputModal do
 
   def mount(_props), do: %{value: ""}
 
-  def render(state) do
+  def render(_state) do
     vertical([
       label("Enter a value:"),
       text_input(on_change: :value_changed, placeholder: "Type here...", on_submit: :submit),
@@ -24,7 +24,7 @@ defmodule InputModal do
   def handle_event(:value_changed, {text, _}, state), do: {:ok, %{state | value: text}}
 
   def handle_event(:submit, _data, state) do
-    send(:tui_app_loop, {:app_event, :modal_submitted, state.value})
+    Drafter.send_app_event(:modal_submitted, state.value)
     {:pop, :submitted}
   end
 

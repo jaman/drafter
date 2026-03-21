@@ -105,7 +105,7 @@ static ERL_NIF_TERM enter_raw_mode(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
     raw.c_cc[VMIN] = 1;
     raw.c_cc[VTIME] = 0;
 
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+    if (tcsetattr(STDIN_FILENO, TCSADRAIN, &raw) == -1) {
         return atom_error;
     }
 
@@ -121,13 +121,19 @@ static ERL_NIF_TERM exit_raw_mode(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
     return atom_ok;
 }
 
+static ERL_NIF_TERM flush_stdin(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    tcflush(STDIN_FILENO, TCIFLUSH);
+    return atom_ok;
+}
+
 static ErlNifFunc nif_funcs[] = {
     {"disable_flow_control", 0, disable_flow_control},
     {"enable_flow_control", 0, enable_flow_control},
     {"enter_raw_mode", 0, enter_raw_mode},
     {"exit_raw_mode", 0, exit_raw_mode},
     {"set_tui_active", 0, set_tui_active},
-    {"set_tui_inactive", 0, set_tui_inactive}
+    {"set_tui_inactive", 0, set_tui_inactive},
+    {"flush_stdin", 0, flush_stdin}
 };
 
 ERL_NIF_INIT(Elixir.Drafter.Terminal.TermiosNif, nif_funcs, load, NULL, NULL, NULL)

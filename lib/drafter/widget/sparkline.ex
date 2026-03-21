@@ -190,6 +190,35 @@ defmodule Drafter.Widget.Sparkline do
     }
   end
 
+  def preferred_height(_args, _opts), do: 1
+
+  def component_tag, do: :sparkline
+
+  def from_component_opts(data, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    all_data = if is_list(data), do: data, else: Keyword.get(opts, :data, [])
+    %{
+      data: all_data,
+      min_value: Keyword.get(opts, :min_value),
+      max_value: Keyword.get(opts, :max_value),
+      color: Keyword.get(opts, :color),
+      min_color: Keyword.get(opts, :min_color),
+      max_color: Keyword.get(opts, :max_color),
+      summary: Keyword.get(opts, :summary, false),
+      orientation: Keyword.get(opts, :orientation, :vertical),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
+
   defp render_horizontal(state, rect, bg, min_color, max_color) do
     data = state.data
     min_val = state.min_value

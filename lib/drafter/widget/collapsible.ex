@@ -148,10 +148,10 @@ defmodule Drafter.Widget.Collapsible do
       {:key, :" "} ->
         toggle(state)
 
-      {:mouse, %{type: :click, y: 0} = _mouse_data} ->
+      {:mouse, %{type: :mouse_up, y: 0} = _mouse_data} ->
         toggle(state)
 
-      {:mouse, %{type: :click} = _mouse_data} ->
+      {:mouse, %{type: :mouse_up} = _mouse_data} ->
         {:noreply, state}
 
       {:focus} ->

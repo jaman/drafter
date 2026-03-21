@@ -59,6 +59,18 @@ defmodule Drafter.Terminal.Driver do
     GenServer.call(__MODULE__, :get_size)
   end
 
+  @doc "Discard any pending stdin input not yet processed"
+  @spec drain_pending_input() :: :ok
+  def drain_pending_input() do
+    GenServer.call(__MODULE__, :drain_pending_input)
+  end
+
+  @doc "Begin reading stdin — call once after startup drain sequence"
+  @spec start_input() :: :ok
+  def start_input() do
+    GenServer.call(__MODULE__, :start_input)
+  end
+
   @doc "Enable mouse events"
   @spec enable_mouse() :: :ok
   def enable_mouse() do
@@ -108,6 +120,21 @@ defmodule Drafter.Terminal.Driver do
 
   def handle_call(:get_size, _from, state) do
     {:reply, state.size, state}
+  end
+
+  def handle_call(:drain_pending_input, _from, state) do
+    drain_stdin_messages()
+    flush_os_stdin_buffer()
+    {:reply, :ok, %{state | buffer: ""}}
+  end
+
+  def handle_call(:start_input, _from, state) do
+    if state.stdin_reader_pid do
+      {:reply, :ok, state}
+    else
+      pid = setup_stdin()
+      {:reply, :ok, %{state | stdin_reader_pid: pid}}
+    end
   end
 
   @impl GenServer
@@ -176,7 +203,6 @@ defmodule Drafter.Terminal.Driver do
       case enter_terminal_mode() do
         {:ok, terminal_mode} ->
           maybe_stop_stdin_reader(state.stdin_reader_pid)
-          stdin_reader_pid = setup_stdin()
           setup_signal_handling()
           setup_exit_handler()
 
@@ -190,7 +216,7 @@ defmodule Drafter.Terminal.Driver do
           new_state = %{
             state
             | shell_pid: shell_pid,
-              stdin_reader_pid: stdin_reader_pid,
+              stdin_reader_pid: nil,
               terminal_mode: terminal_mode,
               raw_mode: true,
               alt_screen: true,
@@ -327,6 +353,29 @@ defmodule Drafter.Terminal.Driver do
     :ok
   end
 
+  defp drain_stdin_messages do
+    receive do
+      {:stdin, _} -> drain_stdin_messages()
+    after
+      0 -> :ok
+    end
+  end
+
+  defp flush_os_stdin_buffer do
+    case :os.type() do
+      {:unix, _} ->
+        try do
+          apply(Drafter.Terminal.TermiosNif, :flush_stdin, [])
+        rescue
+          _ -> :ok
+        catch
+          :error, :undef -> :ok
+        end
+      _ ->
+        :ok
+    end
+  end
+
   defp stdin_reader() do
     case IO.binread(:stdio, 1) do
       :eof ->
@@ -345,36 +394,47 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp read_escape_sequence(buffer) do
-    reader_pid = self()
-    timer_ref = Process.send_after(reader_pid, :escape_timeout, 100)
+    drain_stale_escape_timeouts()
+    timer_ref = Process.send_after(self(), :escape_timeout, 100)
 
-    receive do
-      :escape_timeout ->
+    case IO.binread(:stdio, 1) do
+      :eof ->
+        cancel_escape_timer(timer_ref)
+        send(__MODULE__, {:stdin, buffer})
+        :ok
+
+      {:error, _} ->
+        cancel_escape_timer(timer_ref)
         send(__MODULE__, {:stdin, buffer})
         stdin_reader()
+
+      "[" ->
+        cancel_escape_timer(timer_ref)
+        read_csi_sequence(buffer <> "[")
+
+      char when is_binary(char) ->
+        cancel_escape_timer(timer_ref)
+        complete_sequence = buffer <> char
+        send(__MODULE__, {:stdin, complete_sequence})
+        stdin_reader()
+    end
+  end
+
+  defp drain_stale_escape_timeouts do
+    receive do
+      :escape_timeout -> drain_stale_escape_timeouts()
     after
-      0 ->
-        case IO.binread(:stdio, 1) do
-          :eof ->
-            Process.cancel_timer(timer_ref)
-            send(__MODULE__, {:stdin, buffer})
-            :ok
+      0 -> :ok
+    end
+  end
 
-          {:error, _} ->
-            Process.cancel_timer(timer_ref)
-            send(__MODULE__, {:stdin, buffer})
-            stdin_reader()
+  defp cancel_escape_timer(timer_ref) do
+    Process.cancel_timer(timer_ref)
 
-          "[" ->
-            Process.cancel_timer(timer_ref)
-            read_csi_sequence(buffer <> "[")
-
-          char when is_binary(char) ->
-            Process.cancel_timer(timer_ref)
-            complete_sequence = buffer <> char
-            send(__MODULE__, {:stdin, complete_sequence})
-            stdin_reader()
-        end
+    receive do
+      :escape_timeout -> :ok
+    after
+      0 -> :ok
     end
   end
 

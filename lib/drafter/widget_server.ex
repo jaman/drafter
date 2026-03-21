@@ -241,19 +241,15 @@ defmodule Drafter.WidgetServer do
   end
 
   defp notify_render_needed(widget_id) do
-    app_pid = Process.whereis(:tui_app_loop)
-
-    if app_pid do
-      send(:tui_app_loop, {:widget_render_needed, widget_id})
+    if Drafter.AppRegistry.whereis() do
+      Drafter.AppRegistry.send_to_loop({:widget_render_needed, widget_id})
     end
   end
 
   defp handle_actions(widget_id, actions) do
-    app_pid = Process.whereis(:tui_app_loop)
-
-    if app_pid do
+    if Drafter.AppRegistry.whereis() do
       Enum.each(actions, fn action ->
-        send(:tui_app_loop, {:widget_action, widget_id, action})
+        Drafter.AppRegistry.send_to_loop({:widget_action, widget_id, action})
       end)
     end
   end

@@ -126,7 +126,7 @@ defmodule Drafter.Widget.Checkbox do
       {:key, :" "} ->
         toggle_checkbox(state)
 
-      {:mouse, %{type: :click}} ->
+      {:mouse, %{type: :mouse_up}} ->
         toggle_checkbox(state)
 
       :hover ->
@@ -158,6 +158,40 @@ defmodule Drafter.Widget.Checkbox do
         _ -> acc
       end
     end)
+  end
+
+  def preferred_height(_args, _opts), do: 1
+
+  def component_tag, do: :checkbox
+
+  def from_component_opts(label, opts) do
+    app_state = Keyword.get(opts, :__app_state__, %{})
+    checked = Drafter.Binding.get_bound_value(opts, app_state, Keyword.get(opts, :checked, false))
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      label: label,
+      checked: checked,
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      on_change: Drafter.Binding.create_bound_callback(opts, :checked)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, opts) do
+    base = %{
+      on_change: mount_props.on_change,
+      classes: mount_props.classes
+    }
+    if Drafter.Binding.has_binding?(opts) do
+      Map.put(base, :checked, mount_props.checked)
+    else
+      base
+    end
   end
 
   defp toggle_checkbox(state) do

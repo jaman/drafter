@@ -80,12 +80,29 @@ defmodule Drafter.Widget.Markdown do
     end
   end
 
+  def preferred_height(args, opts) do
+    lines = String.split(args || "", "\n") |> length()
+    Keyword.get(opts, :height, max(lines, 3))
+  end
+
+  def component_tag, do: :markdown
+
+  def from_component_opts(content, opts) do
+    %{
+      content: content || Keyword.get(opts, :content, ""),
+      style: Keyword.get(opts, :style, %{}),
+      padding: Keyword.get(opts, :padding, 1)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{content: mount_props.content}
+  end
+
   defp apply_inline_style(base_style, :bold), do: Map.put(base_style, :bold, true)
   defp apply_inline_style(base_style, :italic), do: Map.put(base_style, :italic, true)
-
   defp apply_inline_style(base_style, :code),
     do: Map.merge(base_style, %{bg: {60, 60, 60}, fg: {200, 200, 100}})
-
   defp apply_inline_style(base_style, :normal), do: base_style
 
   defp parse_markdown(content, width) do

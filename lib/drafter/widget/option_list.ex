@@ -43,7 +43,7 @@ defmodule Drafter.Widget.OptionList do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :click, :scroll],
+    handles: [:keyboard, :press, :mouse_up, :scroll],
     focusable: true
 
   alias Drafter.Draw.{Segment, Strip}
@@ -60,7 +60,8 @@ defmodule Drafter.Widget.OptionList do
     :last_scroll_time,
     :scroll_throttle_ms,
     :inverted_scroll,
-    :expand_height
+    :expand_height,
+    trigger: :press
   ]
 
   @type option :: %{
@@ -81,7 +82,8 @@ defmodule Drafter.Widget.OptionList do
           last_scroll_time: integer(),
           scroll_throttle_ms: integer(),
           inverted_scroll: boolean(),
-          expand_height: Drafter.Widget.expand_option()
+          expand_height: Drafter.Widget.expand_option(),
+          trigger: :press | :mouse_up
         }
 
   def option(id, label, disabled \\ false)
@@ -103,8 +105,8 @@ defmodule Drafter.Widget.OptionList do
     scroll_throttle_ms = Map.get(props, :scroll_throttle_ms, 150)
     inverted_scroll = Map.get(props, :inverted_scroll, false)
     expand_height = Map.get(props, :expand_height, :content)
+    trigger = Map.get(props, :trigger, :press)
 
-    # Find first enabled option for initial highlight
     highlighted_index = find_first_enabled(options)
 
     %__MODULE__{
@@ -118,7 +120,8 @@ defmodule Drafter.Widget.OptionList do
       last_scroll_time: 0,
       scroll_throttle_ms: scroll_throttle_ms,
       inverted_scroll: inverted_scroll,
-      expand_height: expand_height
+      expand_height: expand_height,
+      trigger: trigger
     }
   end
 
@@ -170,9 +173,23 @@ defmodule Drafter.Widget.OptionList do
   def handle_key(_key, state), do: {:bubble, state}
 
   @impl Drafter.Widget
-  def handle_click(_x, y, state) do
-    clicked_index = state.scroll_offset + y
-    action_click_option(state, clicked_index)
+  def handle_press(_x, y, state) do
+    if state.trigger == :press do
+      clicked_index = y + state.scroll_offset
+      action_click_option(state, clicked_index)
+    else
+      {:bubble, state}
+    end
+  end
+
+  @impl Drafter.Widget
+  def handle_mouse_up(_x, y, state) do
+    if state.trigger == :mouse_up do
+      clicked_index = state.scroll_offset + y
+      action_click_option(state, clicked_index)
+    else
+      {:bubble, state}
+    end
   end
 
   @impl Drafter.Widget
@@ -212,6 +229,61 @@ defmodule Drafter.Widget.OptionList do
   end
 
   # Action implementations
+
+  def preferred_height(args, opts), do: Keyword.get(opts, :height, length(args || []))
+
+  def component_tag, do: :option_list
+
+  def from_component_opts(items, opts) do
+    rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    selected = Keyword.get(opts, :selected)
+    raw_items = if is_list(items) and items != [], do: items, else: Keyword.get(opts, :options, [])
+    options = Enum.map(raw_items, fn
+      {label, id} -> %{id: id, label: to_string(label), selected: id == selected, disabled: false}
+      label when is_binary(label) -> %{id: label, label: label, selected: label == selected, disabled: false}
+      %{id: id} = item -> Map.merge(%{selected: id == selected, disabled: false}, item)
+    end)
+    highlighted_index = if selected do
+      Enum.find_index(options, fn opt -> opt.id == selected end) || 0
+    else
+      0
+    end
+    %{
+      options: options,
+      highlighted_index: highlighted_index,
+      visible_height: Keyword.get(opts, :visible_height, rect.height),
+      on_select: wrap_id_callback(Keyword.get(opts, :on_select)),
+      on_highlight: wrap_id_callback(Keyword.get(opts, :on_highlight)),
+      scroll_throttle_ms: Keyword.get(opts, :scroll_throttle_ms, 150),
+      inverted_scroll: Keyword.get(opts, :inverted_scroll, false),
+      expand_height: Keyword.get(opts, :expand_height, :content),
+      trigger: Keyword.get(opts, :trigger, :press),
+      classes: classes
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      options: mount_props.options,
+      on_select: mount_props.on_select,
+      on_highlight: mount_props.on_highlight,
+      trigger: mount_props.trigger,
+      classes: mount_props.classes
+    }
+  end
+
+  defp wrap_id_callback(nil), do: nil
+  defp wrap_id_callback(cb) when is_function(cb), do: cb
+  defp wrap_id_callback(name) when is_atom(name) do
+    wrapped = Drafter.Widget.Callback.wrap_1(name)
+    fn option -> wrapped.(option.id) end
+  end
 
   defp action_cursor_up(state) do
     case find_previous_enabled(state.options, state.highlighted_index) do

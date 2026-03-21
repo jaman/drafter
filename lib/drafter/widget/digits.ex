@@ -147,6 +147,36 @@ defmodule Drafter.Widget.Digits do
     {1, 3} => 0x80
   }
 
+  def preferred_height(_args, opts) do
+    if Keyword.get(opts, :size, :large) == :small, do: 3, else: 5
+  end
+
+  def component_tag, do: :digits
+
+  def from_component_opts(value, opts) do
+    %{
+      text: to_string(value),
+      style: Keyword.get(opts, :style, %{}),
+      align: Keyword.get(opts, :align, :left),
+      size: Keyword.get(opts, :size, :large),
+      bg_data: Keyword.get(opts, :bg_data),
+      color: Keyword.get(opts, :color, {0, 150, 255}),
+      bg_min: Keyword.get(opts, :bg_min, 0),
+      bg_max: Keyword.get(opts, :bg_max)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      text: mount_props.text,
+      size: mount_props.size,
+      bg_data: mount_props.bg_data,
+      color: mount_props.color,
+      bg_min: mount_props.bg_min,
+      bg_max: mount_props.bg_max
+    }
+  end
+
   defp render_with_bg(digits, data, state, rect) do
     {patterns, digit_height} =
       if state.size == :small, do: {@small_patterns, 3}, else: {@large_patterns, 5}

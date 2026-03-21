@@ -1,20 +1,14 @@
 defmodule Drafter.Examples.CalculatorTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Drafter.Examples.Calculator
 
   setup do
-    if pid = Process.whereis(:tui_app_loop) do
-      Process.unregister(:tui_app_loop)
-      on_exit(fn -> Process.register(pid, :tui_app_loop) end)
-    end
-
-    Process.register(self(), :tui_app_loop)
+    Drafter.AppRegistry.ensure_table()
+    Drafter.AppRegistry.register()
 
     on_exit(fn ->
-      if Process.whereis(:tui_app_loop) == self() do
-        Process.unregister(:tui_app_loop)
-      end
+      Drafter.AppRegistry.unregister()
     end)
 
     :ok

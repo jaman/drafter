@@ -96,7 +96,7 @@ defmodule Drafter.Widget.Chart do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :click, :drag],
+    handles: [:keyboard, :mouse_up, :drag],
     scroll: [direction: :horizontal, step: 5],
     focusable: true
 
@@ -177,6 +177,7 @@ defmodule Drafter.Widget.Chart do
     :_y_offset,
     :_data_tuple,
     :_data_hash,
+    bar_gap: 0,
     dragging_scrollbar: false,
     focused: false
   ]
@@ -229,6 +230,7 @@ defmodule Drafter.Widget.Chart do
       classes: Map.get(props, :classes, []),
       app_module: Map.get(props, :app_module),
       max_data_points: max_data_points,
+      bar_gap: Map.get(props, :bar_gap, 0),
       area_fill: Map.get(props, :area_fill, :below),
       _render_timestamp: Map.get(props, :_render_timestamp, 0),
       _animation_offset: 0,
@@ -244,7 +246,7 @@ defmodule Drafter.Widget.Chart do
   end
 
   @impl Drafter.Widget
-  def handle_click(_x, _y, state) do
+  def handle_mouse_up(_x, _y, state) do
     {:ok, %{state | dragging_scrollbar: true, _drag_last_x: nil}}
   end
 
@@ -271,6 +273,51 @@ defmodule Drafter.Widget.Chart do
     new_x_offset = max(0, (state._scroll_offset || 0) + dx)
     new_y_offset = (state._y_offset || 0) + dy
     {:ok, %{state | _scroll_offset: new_x_offset, _drag_last_x: x, _y_offset: new_y_offset, _drag_last_y: y}}
+  end
+
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 5)
+
+  def component_tag, do: :chart
+
+  def from_component_opts(data, opts) do
+    rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    all_data = if is_list(data), do: data, else: Keyword.get(opts, :data, [])
+    %{
+      data: all_data,
+      chart_type: Keyword.get(opts, :chart_type, :line),
+      marker: Keyword.get(opts, :marker, :braille),
+      pixel_style: Keyword.get(opts, :pixel_style, :braille),
+      min_value: Keyword.get(opts, :min_value),
+      max_value: Keyword.get(opts, :max_value),
+      width: Keyword.get(opts, :width, rect.width),
+      height: Keyword.get(opts, :height, rect.height),
+      color: Keyword.get(opts, :color),
+      colors: Keyword.get(opts, :colors, []),
+      show_axes: Keyword.get(opts, :show_axes, false),
+      show_labels: Keyword.get(opts, :show_labels, false),
+      title: Keyword.get(opts, :title),
+      x_labels: Keyword.get(opts, :x_labels, []),
+      y_labels: Keyword.get(opts, :y_labels, []),
+      animated: Keyword.get(opts, :animated, false),
+      animation_speed: Keyword.get(opts, :animation_speed, 100),
+      max_data_points: Keyword.get(opts, :max_data_points),
+      bar_gap: Keyword.get(opts, :bar_gap, 0),
+      area_fill: Keyword.get(opts, :area_fill, :below),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      app_module: Keyword.get(opts, :__app_module__),
+      _render_timestamp: System.monotonic_time(:millisecond)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    Map.put(mount_props, :_render_timestamp, System.monotonic_time(:millisecond))
   end
 
   defp scroll_left(state), do: {:ok, %{state | _scroll_offset: max(0, (state._scroll_offset || 0) - 5)}}
@@ -432,6 +479,7 @@ defmodule Drafter.Widget.Chart do
         style: Map.get(props, :style, state.style),
         classes: Map.get(props, :classes, state.classes),
         max_data_points: max_data_points,
+        bar_gap: Map.get(props, :bar_gap, state.bar_gap),
         area_fill: Map.get(props, :area_fill) || state.area_fill,
         _render_timestamp: Map.get(props, :_render_timestamp, state._render_timestamp),
         _live_candle: live_candle,
@@ -1004,9 +1052,11 @@ defmodule Drafter.Widget.Chart do
         colors = if state.colors != [], do: state.colors, else: @default_series_colors
         num_series = length(data)
         num_groups = data |> Enum.map(&length/1) |> Enum.max()
+        gap = max(0, state.bar_gap || 0)
+        group_width = num_series + gap
 
         scroll_offset = state._scroll_offset || 0
-        viewport_groups = div(width, max(1, num_series))
+        viewport_groups = div(width, max(1, group_width))
         end_g = num_groups - scroll_offset
         start_g = max(0, end_g - viewport_groups)
         actual_groups = min(end_g, num_groups) - start_g
@@ -1026,17 +1076,23 @@ defmodule Drafter.Widget.Chart do
             end
           end
 
+        gap_seg = Segment.new(String.duplicate(" ", gap), %{bg: bg})
+
         for row <- 0..(height - 1) do
           segments =
-            (for g <- 0..(actual_groups - 1), s <- 0..(num_series - 1) do
-               col = g * num_series + s
+            Enum.flat_map(0..(actual_groups - 1), fn g ->
+              bar_segs =
+                for s <- 0..(num_series - 1) do
+                  col = g * group_width + s
+                  if col < width do
+                    {zpb, bpb, color} = bars |> Enum.at(g) |> Enum.at(s)
+                    half_block_bar_char(row, height, zpb, bpb, total_px, color, bg)
+                  end
+                end
+                |> Enum.reject(&is_nil/1)
 
-               if col < width do
-                 {zpb, bpb, color} = bars |> Enum.at(g) |> Enum.at(s)
-                 half_block_bar_char(row, height, zpb, bpb, total_px, color, bg)
-               end
-             end)
-            |> Enum.reject(&is_nil/1)
+              if gap > 0 and g < actual_groups - 1, do: bar_segs ++ [gap_seg], else: bar_segs
+            end)
 
           padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
           Strip.new(segments ++ padding)
@@ -1059,10 +1115,12 @@ defmodule Drafter.Widget.Chart do
         colors = if state.colors != [], do: state.colors, else: @default_series_colors
         num_series = length(data)
         num_positions = data |> Enum.map(&length/1) |> Enum.max()
+        gap = max(0, state.bar_gap || 0)
+        bar_width = 1 + gap
 
         scroll_offset = state._scroll_offset || 0
         end_p = num_positions - scroll_offset
-        start_p = max(0, end_p - width)
+        start_p = max(0, end_p - div(width, max(1, bar_width)))
         actual = min(end_p, num_positions) - start_p
 
         sliced = Enum.map(data, fn s -> Enum.slice(s, start_p, actual) end)
@@ -1090,12 +1148,14 @@ defmodule Drafter.Widget.Chart do
             |> Enum.reverse()
           end
 
+        gap_seg = Segment.new(String.duplicate(" ", gap), %{bg: bg})
+
         for row <- 0..(height - 1) do
           segments =
-            for p <- 0..(actual - 1) do
-              segs = Enum.at(stacks, p, [])
-              stacked_bar_char(row, height, segs, total_px, bg)
-            end
+            Enum.flat_map(0..(actual - 1), fn p ->
+              seg = stacked_bar_char(row, height, Enum.at(stacks, p, []), total_px, bg)
+              if gap > 0 and p < actual - 1, do: [seg, gap_seg], else: [seg]
+            end)
 
           padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
           Strip.new(segments ++ padding)

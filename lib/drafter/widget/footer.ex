@@ -111,6 +111,22 @@ defmodule Drafter.Widget.Footer do
     {:noreply, state}
   end
 
+  def preferred_height(_args, _opts), do: 1
+
+  def component_tag, do: :footer
+
+  def from_component_opts(_args, opts) do
+    %{
+      bindings: Keyword.get(opts, :bindings),
+      separator: Keyword.get(opts, :separator, " "),
+      style: Keyword.get(opts, :style),
+      key_style: Keyword.get(opts, :key_style),
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
+
   defp resolve_bindings(state) do
     cond do
       state.bindings != nil ->

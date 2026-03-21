@@ -32,4 +32,14 @@ defmodule Drafter.WidgetStripCache do
   def delete(widget_id) do
     :ets.delete(@table, widget_id)
   end
+
+  @spec clear() :: :ok
+  def clear do
+    case :ets.whereis(@table) do
+      :undefined -> :ok
+      _ ->
+        :ets.delete_all_objects(@table)
+        :ok
+    end
+  end
 end

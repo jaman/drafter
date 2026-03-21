@@ -55,14 +55,14 @@ defmodule Drafter.Test do
   end
 
   def send_click(_ctx, x, y) when is_integer(x) and is_integer(y) do
-    event = {:mouse, %{type: :click, x: x, y: y, button: :left}}
+    event = {:mouse, %{type: :mouse_up, x: x, y: y, button: :left}}
     HeadlessDriver.inject_event(event)
     Process.sleep(10)
     :ok
   end
 
   def send_click(_ctx, widget_id) when is_atom(widget_id) do
-    send(:tui_app_loop, {:widget_click, widget_id})
+    Drafter.AppRegistry.send_to_loop( {:widget_click, widget_id})
     Process.sleep(10)
     :ok
   end
@@ -74,7 +74,7 @@ defmodule Drafter.Test do
   end
 
   def get_state(_ctx) do
-    send(:tui_app_loop, {:get_state, self()})
+    Drafter.AppRegistry.send_to_loop( {:get_state, self()})
 
     receive do
       {:state, state} -> state
@@ -84,7 +84,7 @@ defmodule Drafter.Test do
   end
 
   def get_widget_value(_ctx, widget_id) do
-    send(:tui_app_loop, {:get_widget_value, widget_id, self()})
+    Drafter.AppRegistry.send_to_loop( {:get_widget_value, widget_id, self()})
 
     receive do
       {:widget_value, ^widget_id, value} -> value
@@ -94,7 +94,7 @@ defmodule Drafter.Test do
   end
 
   def get_widget_state(_ctx, widget_id) do
-    send(:tui_app_loop, {:get_widget_state, widget_id, self()})
+    Drafter.AppRegistry.send_to_loop( {:get_widget_state, widget_id, self()})
 
     receive do
       {:widget_state, ^widget_id, state} -> state
@@ -104,7 +104,7 @@ defmodule Drafter.Test do
   end
 
   def query_one(_ctx, selector) do
-    send(:tui_app_loop, {:query_one, selector, self()})
+    Drafter.AppRegistry.send_to_loop( {:query_one, selector, self()})
 
     receive do
       {:query_result, :one, result} -> result
@@ -114,7 +114,7 @@ defmodule Drafter.Test do
   end
 
   def query_all(_ctx, selector) do
-    send(:tui_app_loop, {:query_all, selector, self()})
+    Drafter.AppRegistry.send_to_loop( {:query_all, selector, self()})
 
     receive do
       {:query_result, :all, result} -> result
@@ -128,7 +128,7 @@ defmodule Drafter.Test do
   end
 
   def get_widget_hierarchy(_ctx) do
-    send(:tui_app_loop, {:get_hierarchy, self()})
+    Drafter.AppRegistry.send_to_loop( {:get_hierarchy, self()})
 
     receive do
       {:hierarchy, hierarchy} -> hierarchy

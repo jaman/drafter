@@ -254,7 +254,7 @@ defmodule Drafter.Terminal.ANSI do
           {:scroll, direction}
 
         action_char == "m" ->
-          {:click, nil}
+          {:mouse_up, nil}
 
         action_char == "M" and motion and base == 3 ->
           {:move, nil}
@@ -325,7 +325,7 @@ defmodule Drafter.Terminal.ANSI do
           {:scroll, direction}
 
         action_char == "m" ->
-          {:click, nil}
+          {:mouse_up, nil}
 
         action_char == "M" and motion and base == 3 ->
           {:move, nil}
@@ -334,7 +334,7 @@ defmodule Drafter.Terminal.ANSI do
           {:drag, nil}
 
         action_char == "M" and base == 3 ->
-          {:click, nil}
+          {:mouse_up, nil}
 
         action_char == "M" ->
           {:mouse_down, nil}
@@ -429,13 +429,13 @@ defmodule Drafter.Terminal.ANSI do
   @doc "Enable mouse reporting"
   @spec enable_mouse() :: String.t()
   def enable_mouse() do
-    "\e[?1000h\e[?1002h\e[?1015h\e[?1006h"
+    "\e[?1002h\e[?1006h"
   end
 
   @doc "Disable mouse reporting"
   @spec disable_mouse() :: String.t()
   def disable_mouse() do
-    "\e[?1006l\e[?1015l\e[?1002l\e[?1000l"
+    "\e[?1006l\e[?1002l"
   end
 
   @doc "Enter alternative screen buffer"

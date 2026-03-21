@@ -139,7 +139,7 @@ defmodule Drafter.Widget.CollapsibleTest do
 
     test "click on title row (y: 0) toggles expanded" do
       state = Collapsible.mount(%{title: "T", content: "body"})
-      assert {:ok, new_state, _actions} = Collapsible.handle_event({:mouse, %{type: :click, y: 0}}, state)
+      assert {:ok, new_state, _actions} = Collapsible.handle_event({:mouse, %{type: :mouse_up, y: 0}}, state)
       assert new_state.expanded == true
     end
 

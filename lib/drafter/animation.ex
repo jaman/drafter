@@ -275,7 +275,7 @@ defmodule Drafter.Animation do
   end
 
   defp get_value_from_widget(widget_id, property) do
-    send(:tui_app_loop, {:get_animated_property, widget_id, property, self()})
+    Drafter.AppRegistry.send_to_loop( {:get_animated_property, widget_id, property, self()})
 
     receive do
       {:animated_property, ^widget_id, ^property, value} -> {:ok, value}
@@ -439,6 +439,6 @@ defmodule Drafter.Animation do
   end
 
   defp apply_animated_value(widget_id, property, value) do
-    send(:tui_app_loop, {:apply_animation, widget_id, property, value})
+    Drafter.AppRegistry.send_to_loop( {:apply_animation, widget_id, property, value})
   end
 end

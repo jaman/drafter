@@ -35,7 +35,7 @@ defmodule Drafter.Widget.DirectoryTree do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :click, :scroll],
+    handles: [:keyboard, :mouse_up, :scroll],
     focusable: true
 
   alias Drafter.Draw.{Segment, Strip}
@@ -83,7 +83,7 @@ defmodule Drafter.Widget.DirectoryTree do
     :scroll_offset,
     h_scroll_offset: 0,
     viewport_height: 10,
-    handles: [:keyboard, :click, :scroll]
+    handles: [:keyboard, :mouse_up, :scroll]
   ]
 
   @impl Drafter.Widget
@@ -106,7 +106,7 @@ defmodule Drafter.Widget.DirectoryTree do
       cursor_pos: 0,
       scroll_offset: 0,
       h_scroll_offset: 0,
-      handles: Map.get(props, :handles, [:keyboard, :click, :scroll])
+      handles: Map.get(props, :handles, [:keyboard, :mouse_up, :scroll])
     }
   end
 
@@ -334,10 +334,10 @@ defmodule Drafter.Widget.DirectoryTree do
   end
 
   @impl Drafter.Widget
-  def handle_click(_x, y, state) do
+  def handle_mouse_up(_x, y, state) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
-    if :click not in state.handles do
+    if :mouse_up not in state.handles do
       {:ok, state}
     else
       tree_items = build_tree(state)
@@ -365,6 +365,47 @@ defmodule Drafter.Widget.DirectoryTree do
         on_file_select: Map.get(props, :on_file_select, state.on_file_select),
         handles: Map.get(props, :handles, state.handles)
     }
+  end
+
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, :auto)
+
+  def component_tag, do: :directory_tree
+
+  def from_component_opts(_args, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    base = %{
+      path: Keyword.get(opts, :path, File.cwd!()),
+      show_hidden: Keyword.get(opts, :show_hidden, false),
+      on_select: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_select)),
+      on_file_select: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_file_select)),
+      target: Keyword.get(opts, :target),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+    case Keyword.get(opts, :handles) do
+      nil -> base
+      handles -> Map.put(base, :handles, handles)
+    end
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    base = %{
+      path: mount_props.path,
+      show_hidden: mount_props.show_hidden,
+      on_select: mount_props.on_select,
+      on_file_select: mount_props.on_file_select,
+      target: mount_props.target
+    }
+    case Map.get(mount_props, :handles) do
+      nil -> base
+      handles -> Map.put(base, :handles, handles)
+    end
   end
 
   defp build_tree(state) do
@@ -451,19 +492,6 @@ defmodule Drafter.Widget.DirectoryTree do
     actions = file_select_actions(state, path)
     {:ok, new_state, actions}
   end
-
-  #  defp detect_language(path) do
-  #    case Path.extname(path) do
-  #      ".ex" -> :elixir
-  #      ".exs" -> :elixir
-  #      ".erl" -> :erlang
-  #      ".py" -> :python
-  #      ".js" -> :javascript
-  #      ".json" -> :json
-  #      ".md" -> :markdown
-  #      _ -> nil
-  #    end
-  #  end
 
   defp toggle_directory(state, dir_path) do
     if MapSet.member?(state.expanded_dirs, dir_path) do

@@ -53,6 +53,11 @@ defmodule Drafter.Event.Manager do
     GenServer.call(resolve(), :queue_size)
   end
 
+  @spec drain_queue() :: :ok
+  def drain_queue() do
+    GenServer.call(resolve(), :drain_queue)
+  end
+
   @impl GenServer
   def init(opts) do
     app_pid = Keyword.get(opts, :app_pid)
@@ -87,6 +92,10 @@ defmodule Drafter.Event.Manager do
   def handle_call(:queue_size, _from, state) do
     size = :queue.len(state.event_queue)
     {:reply, size, state}
+  end
+
+  def handle_call(:drain_queue, _from, state) do
+    {:reply, :ok, %{state | event_queue: :queue.new(), processing: false}}
   end
 
   @impl GenServer

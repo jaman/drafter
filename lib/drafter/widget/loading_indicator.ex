@@ -161,11 +161,38 @@ defmodule Drafter.Widget.LoadingIndicator do
     System.monotonic_time(:millisecond)
   end
 
+  def preferred_height(_args, _opts), do: 1
+
+  def component_tag, do: :loading_indicator
+
+  def from_component_opts(_args, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      text: Keyword.get(opts, :text, "Loading..."),
+      spinner_type: Keyword.get(opts, :spinner_type, :default),
+      running: Keyword.get(opts, :running, true),
+      gradient_colors: Keyword.get(opts, :gradient_colors),
+      gradient_speed: Keyword.get(opts, :gradient_speed, 50),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      _render_timestamp: System.monotonic_time(:millisecond)
+    }
+  end
+
+  def update_props_from_mount(_mount_props, _existing_state, _opts) do
+    %{_render_timestamp: System.monotonic_time(:millisecond)}
+  end
+
   defp interpolate_gradient(colors, frame) do
     num_colors = length(colors)
 
     if num_colors < 2 do
-      hd(colors) || {200, 200, 200}
+      List.first(colors) || {200, 200, 200}
     else
       pos = rem(frame, num_colors * 100) / 100
       idx_float = pos * (num_colors - 1)

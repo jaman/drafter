@@ -96,7 +96,7 @@ defmodule Drafter.Examples.Calculator do
   defp do_handle(:percent, state), do: {:ok, %{state | value: state.value / 100}}
 
   defp do_handle({:key, k}, state) when k in ~w(0 1 2 3 4 5 6 7 8 9)a do
-    send(:tui_app_loop, {:activate_widget, :"btn_#{k}"})
+    Drafter.activate_widget(:"btn_#{k}")
     {:noreply, state}
   end
 
@@ -106,11 +106,11 @@ defmodule Drafter.Examples.Calculator do
   defp do_handle({:key, key}, state) when is_atom(key) do
     case Map.get(@key_mappings, key) do
       {_action, _param, btn_id} ->
-        send(:tui_app_loop, {:activate_widget, btn_id})
+        Drafter.activate_widget(btn_id)
         {:noreply, state}
 
       {_action, btn_id} ->
-        send(:tui_app_loop, {:activate_widget, btn_id})
+        Drafter.activate_widget(btn_id)
         {:noreply, state}
 
       nil ->
@@ -119,7 +119,7 @@ defmodule Drafter.Examples.Calculator do
   end
 
   defp do_handle({:key, :enter}, state) do
-    send(:tui_app_loop, {:activate_widget, :btn_equals})
+    Drafter.activate_widget(:btn_equals)
     {:noreply, state}
   end
 

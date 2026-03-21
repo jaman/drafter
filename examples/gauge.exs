@@ -6,17 +6,27 @@ defmodule GaugeDemo do
 
   @step 0.004
   @min_distance 0.10
+  @min_gauge_height 3
+  @max_gauge_height 30
 
-  def keybindings, do: [{"q", "quit"}]
+  def keybindings, do: [{"q", "quit"}, {"+", "grow"}, {"-", "shrink"}]
 
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
+
+  def handle_event(:grow_gauge, _data, state),
+    do: {:ok, %{state | gauge_height: min(@max_gauge_height, state.gauge_height + 1)}}
+
+  def handle_event(:shrink_gauge, _data, state),
+    do: {:ok, %{state | gauge_height: max(@min_gauge_height, state.gauge_height - 1)}}
+
   def handle_event(_event, state), do: {:noreply, state}
 
   def mount(_props) do
     %{
       animated_value: 0.20,
       target: random_target(0.20, :up),
-      direction: :up
+      direction: :up,
+      gauge_height: 7
     }
   end
 
@@ -55,7 +65,18 @@ defmodule GaugeDemo do
           gauge(value: state.animated_value, label: "Sys Load", flex: 1, height: 6)
         ],
         gap: 2
-      )
+      ),
+      label(""),
+      label("Resize Gauge  (height: #{state.gauge_height})", style: %{bold: true, fg: :cyan}),
+      horizontal(
+        [
+          button("−", on_click: :shrink_gauge),
+          button("+", on_click: :grow_gauge)
+        ],
+        gap: 1
+      ),
+      gauge(value: 0.65, label: "Resize Me", height: state.gauge_height, flex: 1),
+      footer(bindings: [{"q", "Quit"}, {"+/-", "Resize"}])
     ])
   end
 

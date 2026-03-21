@@ -38,7 +38,8 @@ defmodule Drafter.Widget.RadioSet do
     :highlighted_index,
     :focused,
     :on_change,
-    :visible_height
+    :visible_height,
+    cols: 1
   ]
 
   def mount(props) do
@@ -58,39 +59,63 @@ defmodule Drafter.Widget.RadioSet do
         0
       end
 
+    normalized = normalize_options(options)
     %__MODULE__{
-      options: normalize_options(options),
+      options: normalized,
       selected_index: selected_index,
       highlighted_index: selected_index,
       focused: Map.get(props, :focused, false),
       on_change: Map.get(props, :on_change),
-      visible_height: Map.get(props, :visible_height, length(options))
+      visible_height: Map.get(props, :visible_height, length(options)),
+      cols: Map.get(props, :cols, 1)
     }
   end
 
   def render(state, rect) do
     computed = Computed.for_widget(:radio_set, state)
     bg_style = Computed.to_segment_style(computed)
-
-    visible_options = Enum.take(state.options, rect.height)
+    empty_line = Segment.new(String.duplicate(" ", rect.width), bg_style)
+    empty_strip = Strip.new([empty_line])
 
     strips =
-      visible_options
-      |> Enum.with_index()
-      |> Enum.map(fn {option, index} ->
-        render_option(state, option, index, rect.width)
-      end)
+      if state.cols > 1 do
+        render_columns(state, rect, computed)
+      else
+        visible = Enum.take(state.options, rect.height)
+        visible
+        |> Enum.with_index()
+        |> Enum.map(fn {option, index} -> render_option(state, option, index, rect.width) end)
+      end
 
     current_height = length(strips)
 
     if current_height < rect.height do
-      empty_line = Segment.new(String.duplicate(" ", rect.width), bg_style)
-      empty_strip = Strip.new([empty_line])
-      padding = List.duplicate(empty_strip, rect.height - current_height)
-      strips ++ padding
+      strips ++ List.duplicate(empty_strip, rect.height - current_height)
     else
       strips
     end
+  end
+
+  defp render_columns(state, rect, computed) do
+    cols = state.cols
+    col_width = div(rect.width, cols)
+    options = state.options
+    row_count = ceil(length(options) / cols)
+    bg_style = Computed.to_segment_style(computed)
+
+    Enum.map(0..(row_count - 1), fn row ->
+      segments =
+        Enum.flat_map(0..(cols - 1), fn col ->
+          index = col * row_count + row
+          option = Enum.at(options, index)
+          if option do
+            render_option(state, option, index, col_width).segments
+          else
+            [Segment.new(String.duplicate(" ", col_width), bg_style)]
+          end
+        end)
+      Strip.new(segments)
+    end)
   end
 
   def update(props, state) do
@@ -144,7 +169,7 @@ defmodule Drafter.Widget.RadioSet do
       {:key, :" "} ->
         select_current(state)
 
-      {:mouse, %{type: :click, y: y}} ->
+      {:mouse, %{type: :mouse_up, y: y}} ->
         if y >= 0 and y < length(state.options) do
           new_state = %{state | selected_index: y, highlighted_index: y}
           trigger_change(new_state)
@@ -161,6 +186,44 @@ defmodule Drafter.Widget.RadioSet do
 
       _ ->
         {:noreply, state}
+    end
+  end
+
+  def preferred_height(args, opts), do: Keyword.get(opts, :height, length(args || []))
+
+  def component_tag, do: :radio_set
+
+  def from_component_opts(options, opts) do
+    app_state = Keyword.get(opts, :__app_state__, %{})
+    rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    all_options = if is_list(options) and length(options) > 0, do: options, else: Keyword.get(opts, :options, [])
+    selected = Drafter.Binding.get_bound_value(opts, app_state, Keyword.get(opts, :selected))
+    %{
+      options: all_options,
+      selected: selected,
+      on_change: Drafter.Binding.create_bound_callback(opts, :selected),
+      visible_height: Keyword.get(opts, :visible_height, rect.height),
+      cols: Keyword.get(opts, :cols, 1),
+      classes: classes
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, opts) do
+    base = %{
+      options: mount_props.options,
+      on_change: mount_props.on_change,
+      classes: mount_props.classes
+    }
+    if Drafter.Binding.has_binding?(opts) do
+      Map.put(base, :selected, mount_props.selected)
+    else
+      base
     end
   end
 

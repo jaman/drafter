@@ -97,7 +97,7 @@ defmodule Drafter.Widget.Link do
         open_link(state)
         {:ok, state}
 
-      {:mouse, %{type: :click}} ->
+      {:mouse, %{type: :mouse_up}} ->
         open_link(state)
         {:ok, state}
 
@@ -128,6 +128,35 @@ defmodule Drafter.Widget.Link do
         classes: Map.get(props, :classes, state.classes),
         app_module: Map.get(props, :app_module, state.app_module),
         tooltip: Map.get(props, :tooltip, state.tooltip)
+    }
+  end
+
+  def preferred_height(_args, _opts), do: 1
+
+  def component_tag, do: :link
+
+  def from_component_opts(text, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      text: text || Keyword.get(opts, :text),
+      url: Keyword.get(opts, :url),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      tooltip: Keyword.get(opts, :tooltip),
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      text: mount_props.text,
+      url: mount_props.url,
+      app_module: mount_props.app_module
     }
   end
 

@@ -89,6 +89,24 @@ defmodule Drafter.Widget.Placeholder do
     {:noreply, state}
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 3)
+
+  def component_tag, do: :placeholder
+
+  def from_component_opts(_args, opts) do
+    %{
+      text: Keyword.get(opts, :label, Keyword.get(opts, :text, "Placeholder")),
+      padding: Keyword.get(opts, :padding, 2),
+      align: Keyword.get(opts, :align, :center),
+      border: Keyword.get(opts, :border, false),
+      style: Keyword.get(opts, :style, %{})
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{text: mount_props.text}
+  end
+
   defp render_placeholder(state, rect) do
     padding = state.padding
     content_width = rect.width - padding * 2

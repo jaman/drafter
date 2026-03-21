@@ -38,8 +38,11 @@ defmodule Drafter.Widget do
   @doc "Handle keyboard events"
   @callback handle_key(key(), state()) :: event_result()
 
-  @doc "Handle click events"
-  @callback handle_click(x :: integer(), y :: integer(), state()) :: event_result()
+  @doc "Handle mouse press (button down) events"
+  @callback handle_press(x :: integer(), y :: integer(), state()) :: event_result()
+
+  @doc "Handle mouse up events"
+  @callback handle_mouse_up(x :: integer(), y :: integer(), state()) :: event_result()
 
   @doc "Handle drag events"
   @callback handle_drag(x :: integer(), y :: integer(), state()) :: event_result()
@@ -61,7 +64,8 @@ defmodule Drafter.Widget do
     unmount: 1,
     handle_scroll: 2,
     handle_key: 2,
-    handle_click: 3,
+    handle_press: 3,
+    handle_mouse_up: 3,
     handle_drag: 3,
     handle_hover: 3,
     handle_custom_event: 2,
@@ -131,7 +135,12 @@ defmodule Drafter.Widget do
 
       def focused(_state), do: false
 
-      defoverridable mount: 1, render: 2, handle_event: 2, update: 2, unmount: 1, focused: 1
+      def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
+
+      def preferred_height(_args, _opts), do: 1
+
+      defoverridable mount: 1, render: 2, handle_event: 2, update: 2, unmount: 1, focused: 1,
+                     update_props_from_mount: 3, preferred_height: 2
     end
   end
 

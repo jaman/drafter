@@ -121,8 +121,28 @@ defmodule Drafter.Widget.Header do
     {:noreply, state}
   end
 
+  def preferred_height(_args, _opts), do: 1
+
+  def component_tag, do: :header
+
+  def from_component_opts(title, opts) do
+    %{
+      title: title || Keyword.get(opts, :title, ""),
+      show_clock: Keyword.get(opts, :show_clock, true),
+      clock_format: Keyword.get(opts, :clock_format, :time),
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      title: mount_props.title,
+      app_module: mount_props.app_module
+    }
+  end
+
   defp start_clock_timer do
-    if Process.whereis(:tui_app_loop) do
+    if Drafter.AppRegistry.whereis() do
       Process.send_after(self(), :clock_tick, 1000)
     else
       nil

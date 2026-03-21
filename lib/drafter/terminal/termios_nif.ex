@@ -17,4 +17,5 @@ defmodule Drafter.Terminal.TermiosNif do
   def exit_raw_mode, do: :nif_not_loaded
   def set_tui_active, do: :nif_not_loaded
   def set_tui_inactive, do: :nif_not_loaded
+  def flush_stdin, do: :nif_not_loaded
 end

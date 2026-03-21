@@ -111,7 +111,7 @@ defmodule ScreensExample.ConfirmModal do
   end
 
   def handle_event(:confirm, _data, _state) do
-    send(:tui_app_loop, {:app_event, :modal_result, :confirmed})
+    Drafter.send_app_event(:modal_result, :confirmed)
     {:pop, :confirmed}
   end
 
@@ -122,7 +122,7 @@ defmodule ScreensExample.ConfirmModal do
 
   def handle_event({:key, :enter}, _data, state) do
     result = if state.selected == :yes, do: :confirmed, else: :cancelled
-    send(:tui_app_loop, {:app_event, :modal_result, result})
+    Drafter.send_app_event(:modal_result, result)
     {:pop, result}
   end
 

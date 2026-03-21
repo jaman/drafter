@@ -1,239 +1,410 @@
 defmodule Drafter.Layout do
-  @moduledoc false
+  @moduledoc """
+  Pure layout calculation for the component tree.
 
-  @type rect :: %{
-    x: non_neg_integer(),
-    y: non_neg_integer(), 
-    width: pos_integer(),
-    height: pos_integer()
-  }
+  All functions are stateless. They take component descriptors and rects,
+  return geometry (rects or size lists), and have no side effects.
+  """
 
-  @type size_constraint :: :auto | :fill | pos_integer() | {:percent, float()}
-  @type alignment :: :start | :center | :end | :stretch
+  alias Drafter.Widget.Registry
 
-  @type layout_spec :: %{
-    type: :vertical | :horizontal | :grid | :absolute,
-    spacing: non_neg_integer(),
-    padding: non_neg_integer(),
-    align_items: alignment(),
-    justify_content: alignment()
-  }
+  @type rect :: %{x: integer(), y: integer(), width: pos_integer(), height: pos_integer()}
+  @type component :: tuple()
+  @type hierarchy :: Drafter.WidgetHierarchy.t()
 
-  @type widget_constraints :: %{
-    width: size_constraint(),
-    height: size_constraint(),
-    min_width: pos_integer(),
-    min_height: pos_integer(),
-    max_width: pos_integer() | :infinity,
-    max_height: pos_integer() | :infinity,
-    flex_grow: float(),
-    flex_shrink: float()
-  }
-
-  @doc "Create a rectangle"
   @spec rect(non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()) :: rect()
-  def rect(x, y, width, height) do
-    %{x: x, y: y, width: width, height: height}
-  end
+  def rect(x, y, width, height), do: %{x: x, y: y, width: width, height: height}
 
-  @doc "Calculate layouts for children in a container"
-  @spec layout_children([widget_constraints()], rect(), layout_spec()) :: [rect()]
-  def layout_children(child_constraints, container_rect, layout_spec) do
-    case layout_spec.type do
-      :vertical ->
-        layout_vertical(child_constraints, container_rect, layout_spec)
-      
-      :horizontal ->
-        layout_horizontal(child_constraints, container_rect, layout_spec)
-      
-      :grid ->
-        layout_grid(child_constraints, container_rect, layout_spec)
-      
-      :absolute ->
-        layout_absolute(child_constraints, container_rect, layout_spec)
+  @spec get_preferred_height(component(), hierarchy() | nil) :: pos_integer() | :auto
+  def get_preferred_height(component, hierarchy \\ nil) do
+    case component do
+      {:layout, :horizontal, children, _opts} ->
+        children |> Enum.map(&get_preferred_height/1) |> Enum.max(fn -> 1 end)
+
+      {:layout, :vertical, children, _opts} ->
+        children |> Enum.map(&get_preferred_height/1) |> Enum.sum()
+
+      {:scrollable, children, opts} ->
+        Keyword.get(opts, :height, children |> Enum.map(&get_preferred_height/1) |> Enum.sum())
+
+      {:box, children, opts} ->
+        border = Keyword.get(opts, :border, :rounded)
+        padding = Keyword.get(opts, :padding, 1)
+        border_height = if border == :none, do: 0, else: 2
+        content_height = children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
+        Keyword.get(opts, :height, border_height + padding * 2 + content_height)
+
+      {:card, children, opts} ->
+        padding = Keyword.get(opts, :padding, 1)
+        content_height = children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
+        Keyword.get(opts, :height, padding * 2 + content_height)
+
+      {:collapsible, title, content, opts} ->
+        if hierarchy do
+          collapsible_state = find_collapsible_state(hierarchy, title)
+
+          case collapsible_state do
+            %{expanded: true} ->
+              estimate_collapsible_height(collapsible_state)
+
+            nil ->
+              if Keyword.get(opts, :expanded, false) do
+                estimate_collapsible_height(%{content: content, content_height: Keyword.get(opts, :content_height)})
+              else
+                1
+              end
+
+            _ ->
+              1
+          end
+        else
+          1
+        end
+
+      {:theme_selector, _opts} ->
+        10
+
+      {tag, opts} when is_atom(tag) and is_list(opts) ->
+        case Registry.lookup(tag) do
+          nil -> 1
+          module -> module.preferred_height(nil, opts)
+        end
+
+      {tag, args, opts} when is_atom(tag) and is_list(opts) ->
+        case Registry.lookup(tag) do
+          nil -> 1
+          module -> module.preferred_height(args, opts)
+        end
+
+      _ ->
+        1
     end
   end
 
-  @doc "Create default widget constraints"
-  @spec default_constraints() :: widget_constraints()
-  def default_constraints() do
-    %{
-      width: :auto,
-      height: :auto,
-      min_width: 0,
-      min_height: 0,
-      max_width: :infinity,
-      max_height: :infinity,
-      flex_grow: 0.0,
-      flex_shrink: 1.0
-    }
+  @spec get_child_vertical_spec(component(), hierarchy() | nil) ::
+          {pos_integer() | :auto, non_neg_integer(), boolean()}
+  def get_child_vertical_spec(child, hierarchy) do
+    case child do
+      {:layout, _direction, _children, opts} ->
+        flex = Keyword.get(opts, :flex, 0)
+        height = Keyword.get(opts, :height)
+        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
+
+        preferred =
+          cond do
+            height -> height
+            has_flex -> 1
+            true -> get_preferred_height(child, hierarchy)
+          end
+
+        {preferred, max(flex, 1), has_flex}
+
+      {:scrollable, _children, opts} ->
+        flex = Keyword.get(opts, :flex, 0)
+        height = Keyword.get(opts, :height)
+        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
+
+        preferred =
+          cond do
+            height -> height
+            has_flex -> 1
+            true -> get_preferred_height(child, hierarchy)
+          end
+
+        {preferred, max(flex, 1), has_flex}
+
+      {:collapsible, title, content, opts} ->
+        preferred =
+          if hierarchy do
+            collapsible_state = find_collapsible_state(hierarchy, title)
+
+            case collapsible_state do
+              %{expanded: true} ->
+                estimate_collapsible_height(collapsible_state)
+
+              nil ->
+                if Keyword.get(opts, :expanded, false) do
+                  estimate_collapsible_height(%{
+                    content: content,
+                    content_height: Keyword.get(opts, :content_height)
+                  })
+                else
+                  1
+                end
+
+              _ ->
+                1
+            end
+          else
+            1
+          end
+
+        {preferred, 0, false}
+
+      _ ->
+        preferred = get_preferred_height(child, hierarchy)
+
+        if preferred == :auto do
+          {1, 1, true}
+        else
+          {preferred, 0, false}
+        end
+    end
   end
 
-  @doc "Create default layout spec"
-  @spec default_layout_spec(atom()) :: layout_spec()
-  def default_layout_spec(type \\ :vertical) do
-    %{
-      type: type,
-      spacing: 0,
-      padding: 0,
-      align_items: :stretch,
-      justify_content: :start
-    }
-  end
+  @spec calculate_vertical_layout(
+          [component()],
+          rect(),
+          keyword(),
+          hierarchy() | nil
+        ) :: [%{y: integer(), height: pos_integer()}]
+  def calculate_vertical_layout(children, rect, opts, hierarchy) do
+    gap = Keyword.get(opts, :gap, 0)
+    num_children = length(children)
+    total_gap = if num_children > 1, do: gap * (num_children - 1), else: 0
 
-  defp layout_vertical(child_constraints, container_rect, layout_spec) do
-    content_rect = apply_padding(container_rect, layout_spec.padding)
-    available_height = content_rect.height
-    
-    child_heights = calculate_vertical_heights(child_constraints, available_height, layout_spec.spacing)
-    
-    {_current_y, child_rects} = Enum.reduce(
-      Enum.zip(child_constraints, child_heights),
-      {content_rect.y, []},
-      fn {constraints, height}, {current_y, acc} ->
-        width = calculate_width(constraints, content_rect.width)
-        x = calculate_x_position(width, content_rect, layout_spec.align_items)
-        
-        child_rect = rect(x, current_y, width, height)
-        next_y = current_y + height + layout_spec.spacing
-        
-        {next_y, [child_rect | acc]}
-      end
-    )
-    
-    Enum.reverse(child_rects)
-  end
-
-  defp layout_horizontal(child_constraints, container_rect, layout_spec) do
-    content_rect = apply_padding(container_rect, layout_spec.padding)
-    available_width = content_rect.width
-    
-    child_widths = calculate_horizontal_widths(child_constraints, available_width, layout_spec.spacing)
-    
-    {_current_x, child_rects} = Enum.reduce(
-      Enum.zip(child_constraints, child_widths),
-      {content_rect.x, []},
-      fn {constraints, width}, {current_x, acc} ->
-        height = calculate_height(constraints, content_rect.height)
-        y = calculate_y_position(height, content_rect, layout_spec.align_items)
-        
-        child_rect = rect(current_x, y, width, height)
-        next_x = current_x + width + layout_spec.spacing
-        
-        {next_x, [child_rect | acc]}
-      end
-    )
-    
-    Enum.reverse(child_rects)
-  end
-
-  defp layout_grid(child_constraints, container_rect, layout_spec) do
-    content_rect = apply_padding(container_rect, layout_spec.padding)
-    child_count = length(child_constraints)
-    
-    if child_count == 0 do
-      []
-    else
-      cols = calculate_grid_columns(content_rect, child_count)
-      rows = div(child_count + cols - 1, cols)
-      
-      cell_width = div(content_rect.width, cols)
-      cell_height = div(content_rect.height, rows)
-      
-      child_constraints
-      |> Enum.with_index()
-      |> Enum.map(fn {_constraints, index} ->
-        col = rem(index, cols)
-        row = div(index, cols)
-        
-        rect(
-          content_rect.x + col * cell_width,
-          content_rect.y + row * cell_height,
-          cell_width,
-          cell_height
-        )
+    child_specs =
+      Enum.map(children, fn child ->
+        {preferred, flex, has_flex} = get_child_vertical_spec(child, hierarchy)
+        %{preferred: preferred, flex: flex, has_flex: has_flex}
       end)
+
+    fixed_total =
+      child_specs
+      |> Enum.filter(fn spec -> not spec.has_flex end)
+      |> Enum.map(fn spec -> spec.preferred end)
+      |> Enum.sum()
+
+    flex_children =
+      child_specs
+      |> Enum.with_index()
+      |> Enum.filter(fn {spec, _idx} -> spec.has_flex end)
+
+    total_flex =
+      flex_children
+      |> Enum.map(fn {spec, _idx} -> spec.flex end)
+      |> Enum.sum()
+      |> max(1)
+
+    available_for_flex = max(0, rect.height - fixed_total - total_gap)
+
+    actual_heights =
+      Enum.map(child_specs, fn spec ->
+        if spec.has_flex do
+          flex_share = spec.flex / total_flex
+          max(1, round(available_for_flex * flex_share))
+        else
+          spec.preferred
+        end
+      end)
+
+    {sizes, _} =
+      Enum.reduce(Enum.with_index(actual_heights), {[], rect.y}, fn {height, idx},
+                                                                    {acc, current_y} ->
+        size = %{y: current_y, height: height}
+        next_y = current_y + height + if idx < num_children - 1, do: gap, else: 0
+        {[size | acc], next_y}
+      end)
+
+    Enum.reverse(sizes)
+  end
+
+  @spec calculate_horizontal_layout([component()], rect(), keyword()) ::
+          [%{x: integer(), width: pos_integer()}]
+  def calculate_horizontal_layout(children, rect, opts) do
+    children_opts = Keyword.get(opts, :children_opts, [])
+    gap = Keyword.get(opts, :gap, 0)
+
+    has_width_or_flex =
+      Enum.any?(children_opts, fn child_opts ->
+        Keyword.has_key?(child_opts, :width) or Keyword.has_key?(child_opts, :flex)
+      end)
+
+    if has_width_or_flex do
+      calculate_horizontal_layout_with_opts(children, rect, children_opts)
+    else
+      calculate_horizontal_layout_no_opts(children, rect, gap)
     end
   end
 
-  defp layout_absolute(child_constraints, container_rect, _layout_spec) do
-    List.duplicate(container_rect, length(child_constraints))
+  @spec count_component_slots(component()) :: pos_integer()
+  def count_component_slots({:layout, _dir, children, _opts}) do
+    Enum.sum(Enum.map(children, &count_component_slots/1))
   end
 
-  defp apply_padding(container_rect, padding) do
+  def count_component_slots({:scrollable, children, _opts}) do
+    1 + Enum.sum(Enum.map(children, &count_component_slots/1))
+  end
+
+  def count_component_slots({:box, children, _opts}) do
+    1 + Enum.sum(Enum.map(List.wrap(children), &count_component_slots/1))
+  end
+
+  def count_component_slots({:card, children, _opts}) do
+    1 + Enum.sum(Enum.map(List.wrap(children), &count_component_slots/1))
+  end
+
+  def count_component_slots(_), do: 1
+
+  @spec get_padding(keyword()) :: {integer(), integer(), integer(), integer()}
+  def get_padding(opts) do
+    case Keyword.get(opts, :padding) do
+      nil -> {0, 0, 0, 0}
+      {top, right, bottom, left} -> {top, right, bottom, left}
+      {vertical, horizontal} -> {vertical, horizontal, vertical, horizontal}
+      n when is_integer(n) -> {n, n, n, n}
+      _ -> {0, 0, 0, 0}
+    end
+  end
+
+  @spec apply_padding(rect(), {integer(), integer(), integer(), integer()}) :: rect()
+  def apply_padding(rect, {top, right, bottom, left}) do
     %{
-      x: container_rect.x + padding,
-      y: container_rect.y + padding,
-      width: max(0, container_rect.width - padding * 2),
-      height: max(0, container_rect.height - padding * 2)
+      x: rect.x + left,
+      y: rect.y + top,
+      width: max(1, rect.width - left - right),
+      height: max(1, rect.height - top - bottom)
     }
   end
 
-  defp calculate_vertical_heights(child_constraints, available_height, spacing) do
-    child_count = length(child_constraints)
-    total_spacing = max(0, (child_count - 1) * spacing)
-    usable_height = max(0, available_height - total_spacing)
-    
-    if child_count > 0 do
-      base_height = div(usable_height, child_count)
-      List.duplicate(base_height, child_count)
+  @spec component_visible?(component()) :: boolean()
+  def component_visible?(component) do
+    case component do
+      {_type, opts} when is_list(opts) -> Keyword.get(opts, :visible, true)
+      {_type, _children, opts} when is_list(opts) -> Keyword.get(opts, :visible, true)
+      {_type, _a, _b, opts} when is_list(opts) -> Keyword.get(opts, :visible, true)
+      _ -> true
+    end
+  end
+
+  defp calculate_horizontal_layout_with_opts(children, rect, children_opts) do
+    child_specs = Enum.zip(children, children_opts)
+
+    {fixed_total, flexible_count, width_specs} =
+      Enum.reduce(child_specs, {0, 0, []}, fn {_child_item, child_opts},
+                                              {fixed_sum, flex_count, acc_specs} ->
+        width = Keyword.get(child_opts, :width)
+        flex = Keyword.get(child_opts, :flex, 0)
+
+        cond do
+          width ->
+            {fixed_sum + width, flex_count, acc_specs ++ [{:fixed, width}]}
+
+          flex > 0 ->
+            {fixed_sum, flex_count + 1, acc_specs ++ [{:flex, flex}]}
+
+          true ->
+            {fixed_sum, flex_count + 1, acc_specs ++ [{:flex, 1}]}
+        end
+      end)
+
+    available_for_flex = max(0, rect.width - fixed_total)
+
+    {base_flex_width, remainder} =
+      if flexible_count > 0 do
+        {div(available_for_flex, flexible_count), rem(available_for_flex, flexible_count)}
+      else
+        {0, 0}
+      end
+
+    {final_widths, _} =
+      Enum.reduce(width_specs, {[], remainder}, fn spec, {acc, remaining_pixels} ->
+        case spec do
+          {:fixed, w} ->
+            {acc ++ [w], remaining_pixels}
+
+          {:flex, _} ->
+            extra = if remaining_pixels > 0, do: 1, else: 0
+            {acc ++ [base_flex_width + extra], remaining_pixels - extra}
+        end
+      end)
+
+    {sizes, _} =
+      Enum.reduce(final_widths, {[], rect.x}, fn width, {acc, current_x} ->
+        size = %{x: current_x, width: max(1, width)}
+        {acc ++ [size], current_x + width}
+      end)
+
+    sizes
+  end
+
+  defp calculate_horizontal_layout_no_opts(children, rect, gap) do
+    child_colspans = Enum.map(children, &get_colspan/1)
+    has_colspan = Enum.any?(child_colspans, &(&1 > 1))
+    num_children = length(children)
+
+    if has_colspan do
+      total_cols = Enum.sum(child_colspans)
+      total_virtual_gaps = total_cols - 1
+      total_gap_space = gap * total_virtual_gaps
+      available_width = rect.width - total_gap_space
+      base_col_width = div(available_width, total_cols)
+      remainder = rem(available_width, total_cols)
+
+      {sizes, _, _} =
+        Enum.reduce(Enum.with_index(child_colspans), {[], rect.x, remainder}, fn {colspan, idx},
+                                                                                 {acc, current_x,
+                                                                                  remaining_pixels} ->
+          extra = min(colspan, remaining_pixels)
+          cell_width = base_col_width * colspan + extra
+          internal_gaps = gap * (colspan - 1)
+          w = cell_width + internal_gaps
+          next_x = current_x + w + if idx < num_children - 1, do: gap, else: 0
+          {[%{x: current_x, width: w} | acc], next_x, remaining_pixels - extra}
+        end)
+
+      Enum.reverse(sizes)
     else
-      []
+      total_gap = if num_children > 1, do: gap * (num_children - 1), else: 0
+      available_width = rect.width - total_gap
+      base_width = div(available_width, num_children)
+      remainder = rem(available_width, num_children)
+
+      {sizes, _, _} =
+        Enum.reduce(Enum.with_index(children), {[], rect.x, remainder}, fn {_child, idx},
+                                                                           {acc, current_x,
+                                                                            remaining_pixels} ->
+          extra = if remaining_pixels > 0, do: 1, else: 0
+          w = base_width + extra
+          next_x = current_x + w + if idx < num_children - 1, do: gap, else: 0
+          {[%{x: current_x, width: w} | acc], next_x, remaining_pixels - extra}
+        end)
+
+      Enum.reverse(sizes)
     end
   end
 
-  defp calculate_horizontal_widths(child_constraints, available_width, spacing) do
-    child_count = length(child_constraints)
-    total_spacing = max(0, (child_count - 1) * spacing)
-    usable_width = max(0, available_width - total_spacing)
-    
-    if child_count > 0 do
-      base_width = div(usable_width, child_count)
-      List.duplicate(base_width, child_count)
-    else
-      []
-    end
+  defp get_colspan(child) do
+    opts =
+      case child do
+        {:layout, _, _, opts} -> opts
+        {_, opts} when is_list(opts) -> opts
+        {_, _, opts} when is_list(opts) -> opts
+        {_, _, _, opts} when is_list(opts) -> opts
+        _ -> []
+      end
+
+    Keyword.get(opts, :colspan, 1)
   end
 
-  defp calculate_width(constraints, container_width) do
-    case constraints.width do
-      :auto -> container_width
-      :fill -> container_width
-      value when is_integer(value) -> min(value, container_width)
-      {:percent, pct} -> round(container_width * pct)
-    end
+  defp find_collapsible_state(hierarchy, title) do
+    hierarchy.widgets
+    |> Enum.find_value(fn {_id, widget_info} ->
+      case widget_info do
+        %{module: Drafter.Widget.Collapsible, state: %{title: ^title} = state} -> state
+        _ -> nil
+      end
+    end)
   end
 
-  defp calculate_height(constraints, container_height) do
-    case constraints.height do
-      :auto -> container_height
-      :fill -> container_height
-      value when is_integer(value) -> min(value, container_height)
-      {:percent, pct} -> round(container_height * pct)
-    end
+  defp estimate_collapsible_height(%{content: content, content_height: content_height}) when is_list(content) do
+    1 + (content_height || 10)
   end
 
-  defp calculate_x_position(width, content_rect, align) do
-    case align do
-      :start -> content_rect.x
-      :center -> content_rect.x + div(content_rect.width - width, 2)
-      :end -> content_rect.x + content_rect.width - width
-      :stretch -> content_rect.x
-    end
+  defp estimate_collapsible_height(%{content: content}) when is_binary(content) do
+    lines = Drafter.Text.wrap(content, 80, :word)
+    1 + length(lines)
   end
 
-  defp calculate_y_position(height, content_rect, align) do
-    case align do
-      :start -> content_rect.y
-      :center -> content_rect.y + div(content_rect.height - height, 2)
-      :end -> content_rect.y + content_rect.height - height
-      :stretch -> content_rect.y
-    end
-  end
-
-  defp calculate_grid_columns(content_rect, child_count) do
-    aspect_ratio = content_rect.width / content_rect.height
-    ideal_cols = :math.sqrt(child_count * aspect_ratio) |> round()
-    max(1, ideal_cols)
-  end
+  defp estimate_collapsible_height(_state), do: 2
 end

@@ -111,7 +111,7 @@ defmodule Drafter.Widget.Switch do
       {:key, :left} -> handle_turn_off(widget_state)
       {:key, :right} -> handle_turn_on(widget_state)
 
-      {:mouse, %{type: :click}} ->
+      {:mouse, %{type: :mouse_up}} ->
         handle_toggle(%{widget_state | focused: true})
 
       {:mouse, %{type: :hover}} -> {:ok, %{widget_state | hovered: true}}
@@ -182,6 +182,43 @@ defmodule Drafter.Widget.Switch do
             height: Map.get(props, :height, widget_state.height),
             size: Map.get(props, :size, widget_state.size)}
         end
+    end
+  end
+
+  def preferred_height(_args, _opts), do: 3
+
+  def component_tag, do: :switch
+
+  def from_component_opts(_args, opts) do
+    app_state = Keyword.get(opts, :__app_state__, %{})
+    rect = Keyword.get(opts, :__rect__, %{width: 12, height: 1})
+    enabled = Drafter.Binding.get_bound_value(opts, app_state, Keyword.get(opts, :enabled, false))
+    %{
+      enabled: enabled,
+      label: Keyword.get(opts, :label),
+      on_change: Drafter.Binding.create_bound_callback(opts, :enabled),
+      size: Keyword.get(opts, :size, :normal),
+      width: Keyword.get(opts, :width, rect.width),
+      height: Keyword.get(opts, :height, rect.height)
+    }
+  end
+
+  def update_props_from_mount(mount_props, existing_state, opts) do
+    base = %{
+      on_change: mount_props.on_change,
+      label: mount_props.label,
+      size: mount_props.size
+    }
+    if Drafter.Binding.has_binding?(opts) do
+      current_enabled = existing_state.state == :on
+      new_enabled = mount_props.enabled
+      if new_enabled != current_enabled do
+        Map.put(base, :enabled, new_enabled)
+      else
+        base
+      end
+    else
+      base
     end
   end
 
@@ -310,7 +347,7 @@ defmodule Drafter.Widget.Switch do
 
       case Drafter.ScreenManager.get_active_screen() do
         nil ->
-          send(:tui_app_loop, {:app_event, widget_state.on_change, enabled})
+          Drafter.AppRegistry.send_to_loop( {:app_event, widget_state.on_change, enabled})
 
         _screen ->
           send(self(), {:tui_event, {:app_callback, widget_state.on_change, enabled}})

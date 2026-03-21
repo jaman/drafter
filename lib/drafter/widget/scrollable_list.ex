@@ -68,7 +68,7 @@ defmodule Drafter.Widget.ScrollableList do
       {:key, :space} ->
         action_toggle_selection(widget_state, callbacks)
 
-      {:mouse, %{type: :click, y: y}} ->
+      {:mouse, %{type: :mouse_up, y: y}} ->
         clicked_index = widget_state.scroll_offset + y
         action_click_item(widget_state, clicked_index, callbacks)
 

@@ -83,6 +83,34 @@ defmodule Drafter.Widget.Pretty do
     end)
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 5)
+
+  def component_tag, do: :pretty
+
+  def from_component_opts(data, opts) do
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    %{
+      data: data,
+      expand: Keyword.get(opts, :expand, false),
+      syntax_highlighting: Keyword.get(opts, :syntax_highlighting, true),
+      style: Keyword.get(opts, :style, %{}),
+      classes: classes,
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      data: mount_props.data,
+      app_module: mount_props.app_module
+    }
+  end
+
   defp parse_colorized_line(line, bg) do
     case line do
       "" -> [Segment.new(" ", %{fg: @syntax_colors.default, bg: bg})]

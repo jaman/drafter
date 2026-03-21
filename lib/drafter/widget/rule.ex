@@ -91,6 +91,23 @@ defmodule Drafter.Widget.Rule do
     {:noreply, state}
   end
 
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 1)
+
+  def component_tag, do: :rule
+
+  def from_component_opts(_args, opts) do
+    %{
+      orientation: Keyword.get(opts, :orientation, :horizontal),
+      title: Keyword.get(opts, :title),
+      title_align: Keyword.get(opts, :title_align, :center),
+      style: Keyword.get(opts, :style, %{}),
+      line_style: Keyword.get(opts, :line_style, :solid),
+      app_module: Keyword.get(opts, :__app_module__)
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
+
   defp render_horizontal(state, rect, segment_style) do
     line_char = Map.fetch!(@horizontal_chars, state.line_style)
     mid_row = div(rect.height, 2)

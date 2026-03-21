@@ -41,6 +41,26 @@ defmodule Drafter.Binding do
     end
   end
 
+  def create_text_input_callback(opts) do
+    session_pid = self()
+
+    case Keyword.get(opts, :bind) do
+      nil ->
+        case Keyword.get(opts, :on_change) do
+          nil -> nil
+          callback -> fn {text, vr} -> send_app_callback(session_pid, callback, {text, vr}) end
+        end
+
+      bind_key when is_atom(bind_key) ->
+        on_change = Keyword.get(opts, :on_change)
+
+        fn {text, vr} ->
+          send(session_pid, {:bound_state_update, bind_key, text})
+          if on_change, do: send_app_callback(session_pid, on_change, {text, vr})
+        end
+    end
+  end
+
   def has_binding?(opts) do
     Keyword.has_key?(opts, :bind)
   end

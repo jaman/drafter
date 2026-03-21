@@ -166,7 +166,7 @@ defmodule Drafter.Widget.SelectionList do
       {:key, :" "} ->
         select_at(state, state.highlighted_index)
 
-      {:mouse, %{type: :click, y: y}} ->
+      {:mouse, %{type: :mouse_up, y: y}} ->
         actual_index = state.scroll_offset + y
 
         if actual_index >= 0 and actual_index < length(state.options) do
@@ -185,6 +185,39 @@ defmodule Drafter.Widget.SelectionList do
       _ ->
         {:noreply, state}
     end
+  end
+
+  def preferred_height(args, opts), do: Keyword.get(opts, :height, min(length(args || []), 5))
+
+  def component_tag, do: :selection_list
+
+  def from_component_opts(options, opts) do
+    rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
+    raw_classes = Keyword.get(opts, :class, [])
+    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
+    classes = Enum.map(raw_classes, fn
+      c when is_binary(c) -> String.to_atom(c)
+      c when is_atom(c) -> c
+    end)
+    all_options = if is_list(options) and length(options) > 0, do: options, else: Keyword.get(opts, :options, [])
+    %{
+      options: all_options,
+      selected: Keyword.get(opts, :selected, []),
+      selection_mode: Keyword.get(opts, :selection_mode, :multiple),
+      on_change: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_change)),
+      on_item_toggle: Drafter.Widget.Callback.wrap_2(Keyword.get(opts, :on_item_toggle)),
+      visible_height: Keyword.get(opts, :visible_height, rect.height),
+      classes: classes
+    }
+  end
+
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    %{
+      on_change: mount_props.on_change,
+      on_item_toggle: mount_props.on_item_toggle,
+      selection_mode: mount_props.selection_mode,
+      classes: mount_props.classes
+    }
   end
 
   defp select_at(state, index) do
