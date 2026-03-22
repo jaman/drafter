@@ -268,14 +268,24 @@ defmodule Drafter.Widget.OptionList do
     }
   end
 
-  def update_props_from_mount(mount_props, _existing_state, _opts) do
-    %{
+  def update_props_from_mount(mount_props, existing_state, _opts) do
+    current_selected = Enum.find(existing_state.options, fn o -> o.selected end)
+    new_selected = Enum.find(mount_props.options, fn o -> o.selected end)
+    selected_changed = Map.get(current_selected || %{}, :id) != Map.get(new_selected || %{}, :id)
+
+    base = %{
       options: mount_props.options,
       on_select: mount_props.on_select,
       on_highlight: mount_props.on_highlight,
       trigger: mount_props.trigger,
       classes: mount_props.classes
     }
+
+    if selected_changed do
+      Map.put(base, :highlighted_index, mount_props.highlighted_index)
+    else
+      base
+    end
   end
 
   defp wrap_id_callback(nil), do: nil

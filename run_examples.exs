@@ -18,7 +18,12 @@ defmodule ExamplesLauncher do
   def render(state) do
     vertical([
       header("Drafter — Example Gallery"),
-      option_list(state.examples, id: :example_list, on_select: :run_example, trigger: :mouse_up, flex: 1),
+      option_list(state.examples,
+        id: :example_list,
+        on_select: :run_example,
+        trigger: :mouse_up,
+        flex: 1
+      ),
       footer()
     ])
   end
@@ -40,6 +45,8 @@ defmodule ExamplesLauncher do
   end
 
   defp eval_example(path) do
+    IEx.Helpers.recompile()
+
     source =
       File.read!(path)
       |> String.replace(~r/^Mix\.install\(.*\)\n?/m, "")
