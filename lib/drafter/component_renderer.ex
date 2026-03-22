@@ -1,7 +1,7 @@
 defmodule Drafter.ComponentRenderer do
   @moduledoc false
 
-  alias Drafter.{WidgetHierarchy, Theme, Layout}
+  alias Drafter.{WidgetHierarchy, Theme, Layout, CharacterSet}
   alias Drafter.Widget.{Box, Card, Collapsible, Label, OptionList, ScrollableContainer, SplitPaneDivider, Switch}
 
   def send_app_callback(callback_fn, data) when is_function(callback_fn), do: callback_fn.(data)
@@ -34,6 +34,7 @@ defmodule Drafter.ComponentRenderer do
     Process.put(:rendered_widget_ids, MapSet.new())
 
     hierarchy = existing_hierarchy || WidgetHierarchy.new()
+    hierarchy = %{hierarchy | widget_scroll_parents: %{}}
 
     {hierarchy, _} =
       render_component(hierarchy, component_tree, rect, theme, app_state, nil, 1, app_module)
@@ -258,8 +259,8 @@ defmodule Drafter.ComponentRenderer do
   defp render_box(hierarchy, children, opts, rect, theme, app_state, parent_id, id_counter, app_module) do
     widget_id = ns_widget_id(opts, app_module, "box", id_counter)
     title = Keyword.get(opts, :title)
-    border = Keyword.get(opts, :border, :rounded)
-    padding = Keyword.get(opts, :padding, 1)
+    border = Keyword.get(opts, :border, CharacterSet.style(:border) || :rounded)
+    padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
     custom_style = Keyword.get(opts, :style, %{})
     border_offset = if border == :none, do: 0, else: 1
 
@@ -275,17 +276,24 @@ defmodule Drafter.ComponentRenderer do
 
     new_h = upsert_named_widget(hierarchy, widget_id, Box, mount_props, update_props, parent_id, rect)
 
-    children
-    |> List.wrap()
-    |> Enum.reduce({new_h, id_counter + 1}, fn child, {acc_h, acc_idc} ->
-      render_component(acc_h, child, content_rect, theme, app_state, widget_id, acc_idc, app_module)
-    end)
+    wrapped = List.wrap(children)
+
+    case wrapped do
+      [] ->
+        {new_h, id_counter + 1}
+
+      [single] ->
+        render_component(new_h, single, content_rect, theme, app_state, widget_id, id_counter + 1, app_module)
+
+      many ->
+        render_layout(new_h, :vertical, many, content_rect, theme, app_state, widget_id, id_counter + 1, [], app_module)
+    end
   end
 
   defp render_card(hierarchy, children, opts, rect, parent_id, id_counter, app_module) do
     widget_id = ns_widget_id(opts, app_module, "card", id_counter)
     title = Keyword.get(opts, :title)
-    border = Keyword.get(opts, :border, :rounded)
+    border = Keyword.get(opts, :border, CharacterSet.style(:border) || :rounded)
     custom_style = Keyword.get(opts, :style, %{})
     classes = normalize_classes(Keyword.get(opts, :class, []))
     content_lines = List.wrap(children) |> Enum.map(&to_string/1)
@@ -731,7 +739,11 @@ defmodule Drafter.ComponentRenderer do
   defp render_split_pane(hierarchy, children, opts, rect, theme, app_state, parent_id, id_counter, app_module) do
     orientation = Keyword.get(opts, :orientation, :horizontal)
     default_ratio = Keyword.get(opts, :ratio, 0.5)
-    divider_id = ns_widget_id(opts, app_module, "split_divider", id_counter)
+    divider_id =
+      case Keyword.get(opts, :id) do
+        nil -> ns_widget_id(opts, app_module, "split_divider", id_counter)
+        id -> String.to_atom("#{id}_divider")
+      end
     divider_size = 1
 
     total_size = if orientation == :horizontal, do: rect.width, else: rect.height

@@ -280,7 +280,7 @@ defmodule Drafter.Widget.ProgressBar do
   end
 
   def preferred_height(_args, opts) do
-    if Keyword.get(opts, :orientation, :horizontal) == :vertical, do: 8, else: 3
+    if Keyword.get(opts, :orientation, :horizontal) == :vertical, do: 8, else: 1
   end
 
   def component_tag, do: :progress_bar

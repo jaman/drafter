@@ -4,6 +4,14 @@ defmodule SkinSandbox do
   use Drafter.App
   import Drafter.App
 
+  @skins [
+    {:graphical, "Graphical (1)", "1"},
+    {:wireframe, "Wireframe (2)", "2"},
+    {:ascii,     "ASCII     (3)", "3"},
+    {:classic,   "Classic   (4)", "4"},
+    {:retro,     "Retro     (5)", "5"}
+  ]
+
   @monthly_sales [
     {"Jan", 42}, {"Feb", 58}, {"Mar", 71}, {"Apr", 33},
     {"May", 89}, {"Jun", 95}, {"Jul", 61}, {"Aug", 78},
@@ -41,6 +49,8 @@ defmodule SkinSandbox do
       {"1", "graphical skin"},
       {"2", "wireframe skin"},
       {"3", "ascii skin"},
+      {"4", "classic skin"},
+      {"5", "retro skin"},
       {"tab", "focus next"},
       {"q", "quit"}
     ]
@@ -61,19 +71,17 @@ defmodule SkinSandbox do
     dept_series = Enum.map(@departments, fn {_, vs} -> vs end)
     dept_labels = Enum.map(@departments, fn {label, _} -> label end)
 
+    skin_options = Enum.map(@skins, fn {id, label, _key} -> {label, id} end)
+
     vertical([
-      header("Skin Sandbox — press 1 / 2 / 3 to switch skins"),
+      header("Skin Sandbox — press 1–5 to switch skins"),
       horizontal(
         [
           vertical(
             [
-              label("Skins:", style: %{bold: true}),
+              label("Skin:", style: %{bold: true}),
               option_list(
-                [
-                  {"Graphical (1)", :graphical},
-                  {"Wireframe (2)", :wireframe},
-                  {"ASCII    (3)", :ascii}
-                ],
+                skin_options,
                 on_select: :skin_selected,
                 selected: state.current_skin
               ),
@@ -188,26 +196,18 @@ defmodule SkinSandbox do
     ])
   end
 
-  def handle_event(:skin_selected, skin, state) do
+  defp apply_skin(skin, state) do
     Drafter.set_skin(skin)
-    {:ok, %{state | current_skin: skin}}
+    Drafter.set_theme(Drafter.CharacterSet.preferred_theme(skin))
+    %{state | current_skin: skin}
   end
 
-  def handle_event({:key, ?1}, state) do
-    Drafter.set_skin(:graphical)
-    {:ok, %{state | current_skin: :graphical}}
-  end
-
-  def handle_event({:key, ?2}, state) do
-    Drafter.set_skin(:wireframe)
-    {:ok, %{state | current_skin: :wireframe}}
-  end
-
-  def handle_event({:key, ?3}, state) do
-    Drafter.set_skin(:ascii)
-    {:ok, %{state | current_skin: :ascii}}
-  end
-
+  def handle_event(:skin_selected, skin, state), do: {:ok, apply_skin(skin, state)}
+  def handle_event({:key, ?1}, state), do: {:ok, apply_skin(:graphical, state)}
+  def handle_event({:key, ?2}, state), do: {:ok, apply_skin(:wireframe, state)}
+  def handle_event({:key, ?3}, state), do: {:ok, apply_skin(:ascii, state)}
+  def handle_event({:key, ?4}, state), do: {:ok, apply_skin(:classic, state)}
+  def handle_event({:key, ?5}, state), do: {:ok, apply_skin(:retro, state)}
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end

@@ -29,6 +29,7 @@ defmodule Drafter.CharacterSet do
   """
 
   @graphical %{
+    style: %{border: :rounded, padding: 1, preferred_theme: "textual-dark"},
     fill: %{
       full:         "█",
       seven_eights: "▉",
@@ -117,6 +118,7 @@ defmodule Drafter.CharacterSet do
   }
 
   @wireframe %{
+    style: %{border: :single, padding: 0, preferred_theme: "textual-dark"},
     fill: %{
       full:         "█",
       seven_eights: "█",
@@ -205,6 +207,7 @@ defmodule Drafter.CharacterSet do
   }
 
   @ascii %{
+    style: %{border: :ascii, padding: 0, preferred_theme: "textual-dark"},
     fill: %{
       full:         "#",
       seven_eights: "#",
@@ -292,7 +295,201 @@ defmodule Drafter.CharacterSet do
     }
   }
 
-  @skins %{graphical: @graphical, wireframe: @wireframe, ascii: @ascii}
+  @classic %{
+    style: %{border: :single, padding: 0, preferred_theme: "classic"},
+    fill: %{
+      full:         "█",
+      seven_eights: "▉",
+      three_quarter: "▊",
+      five_eights:  "▋",
+      half:         "▌",
+      three_eights: "▍",
+      quarter:      "▎",
+      one_eighth:   "▏",
+      empty:        "░",
+      medium:       "▒",
+      dark:         "▓",
+      lower_half:   "▄",
+      upper_half:   "▀",
+      left_half:    "▌",
+      right_half:   "▐"
+    },
+    box: %{
+      h_line:    "─",
+      v_line:    "│",
+      tl:        "┌",
+      tr:        "┐",
+      bl:        "└",
+      br:        "┘",
+      cross:     "┼",
+      t_down:    "┬",
+      t_up:      "┴",
+      t_right:   "├",
+      t_left:    "┤",
+      h_bold:    "━",
+      v_bold:    "┃",
+      tl_bold:   "┏",
+      tr_bold:   "┓",
+      bl_bold:   "┗",
+      br_bold:   "┛",
+      h_double:  "═",
+      v_double:  "║",
+      tl_double: "╔",
+      tr_double: "╗",
+      bl_double: "╚",
+      br_double: "╝",
+      h_dashed:  "╌",
+      v_dashed:  "╎"
+    },
+    arrow: %{
+      up:         "▲",
+      down:       "▼",
+      left:       "◀",
+      right:      "▶",
+      up_small:   "↑",
+      down_small: "↓",
+      left_small: "←",
+      right_small: "→",
+      up_down:    "↕",
+      left_right: "↔",
+      expand:     "▼",
+      collapse:   "▶"
+    },
+    indicator: %{
+      radio_on:    "●",
+      radio_off:   "○",
+      check_on:    "✓",
+      check_off:   " ",
+      bullet:      "•",
+      dot:         "·",
+      diamond_on:  "◆",
+      diamond_off: "◇",
+      circle:      "◉"
+    },
+    scroll: %{
+      thumb:      "█",
+      track:      "░",
+      thumb_drag: "▓",
+      thumb_hover: "▒"
+    },
+    sparkline: %{
+      levels_v: ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"],
+      levels_h: [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
+    },
+    spinner: %{
+      dots:    ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+      braille: ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
+      line:    ["|", "/", "-", "\\"],
+      points:  ["•", "·", "•", "·", "•"]
+    }
+  }
+
+  @retro %{
+    style: %{border: :double, padding: 0, preferred_theme: "retro"},
+    fill: %{
+      full:         "█",
+      seven_eights: "▉",
+      three_quarter: "▊",
+      five_eights:  "▋",
+      half:         "▌",
+      three_eights: "▍",
+      quarter:      "▎",
+      one_eighth:   "▏",
+      empty:        "░",
+      medium:       "▒",
+      dark:         "▓",
+      lower_half:   "▄",
+      upper_half:   "▀",
+      left_half:    "▌",
+      right_half:   "▐"
+    },
+    box: %{
+      h_line:    "═",
+      v_line:    "║",
+      tl:        "╔",
+      tr:        "╗",
+      bl:        "╚",
+      br:        "╝",
+      cross:     "╬",
+      t_down:    "╦",
+      t_up:      "╩",
+      t_right:   "╠",
+      t_left:    "╣",
+      h_bold:    "═",
+      v_bold:    "║",
+      tl_bold:   "╔",
+      tr_bold:   "╗",
+      bl_bold:   "╚",
+      br_bold:   "╝",
+      h_double:  "═",
+      v_double:  "║",
+      tl_double: "╔",
+      tr_double: "╗",
+      bl_double: "╚",
+      br_double: "╝",
+      h_dashed:  "─",
+      v_dashed:  "│"
+    },
+    arrow: %{
+      up:         "▲",
+      down:       "▼",
+      left:       "◀",
+      right:      "▶",
+      up_small:   "↑",
+      down_small: "↓",
+      left_small: "←",
+      right_small: "→",
+      up_down:    "↕",
+      left_right: "↔",
+      expand:     "▼",
+      collapse:   "▶"
+    },
+    indicator: %{
+      radio_on:    "●",
+      radio_off:   "○",
+      check_on:    "✓",
+      check_off:   " ",
+      bullet:      "•",
+      dot:         "·",
+      diamond_on:  "◆",
+      diamond_off: "◇",
+      circle:      "◉"
+    },
+    scroll: %{
+      thumb:      "█",
+      track:      "░",
+      thumb_drag: "▓",
+      thumb_hover: "▒"
+    },
+    sparkline: %{
+      levels_v: ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"],
+      levels_h: [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
+    },
+    spinner: %{
+      dots:    ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+      braille: ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
+      line:    ["|", "/", "-", "\\"],
+      points:  ["•", "·", "•", "·", "•"]
+    }
+  }
+
+  @skins %{graphical: @graphical, wireframe: @wireframe, ascii: @ascii, classic: @classic, retro: @retro}
+
+  @doc "Returns the full style preferences map for the current skin."
+  @spec style() :: map()
+  def style(), do: get_in(@skins, [current_skin(), :style]) || %{border: :rounded, padding: 1, preferred_theme: "textual-dark"}
+
+  @doc "Returns a single style preference key for the current skin."
+  @spec style(atom()) :: term()
+  def style(key), do: Map.get(style(), key)
+
+  @doc "Returns the preferred theme name for the current skin."
+  @spec preferred_theme() :: String.t()
+  def preferred_theme(), do: style(:preferred_theme) || "textual-dark"
+
+  @doc "Returns the preferred theme name for the given skin atom."
+  @spec preferred_theme(atom()) :: String.t()
+  def preferred_theme(skin), do: get_in(@skins, [skin, :style, :preferred_theme]) || "textual-dark"
 
   @doc "Look up a fill character for the current skin."
   @spec fill(atom()) :: String.t()

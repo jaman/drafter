@@ -3,6 +3,7 @@ defmodule Drafter.Widget.Box do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.CharacterSet
 
   @border_chars %{
     none: %{tl: " ", tr: " ", bl: " ", br: " ", h: " ", v: " "},
@@ -29,7 +30,7 @@ defmodule Drafter.Widget.Box do
   def mount(props) do
     %__MODULE__{
       title: Map.get(props, :title),
-      border: Map.get(props, :border, :rounded),
+      border: Map.get(props, :border, CharacterSet.style(:border) || :rounded),
       padding: Map.get(props, :padding, 0),
       style: Map.get(props, :style, %{}),
       border_style: Map.get(props, :border_style, %{}),

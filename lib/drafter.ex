@@ -259,6 +259,12 @@ defmodule Drafter do
     :ok
   end
 
+  @doc "Switches the active theme by name."
+  @spec set_theme(String.t()) :: :ok
+  def set_theme(theme_name) when is_binary(theme_name) do
+    Drafter.ThemeManager.set_theme(theme_name)
+  end
+
   @doc "Returns the currently active skin atom."
   @spec current_skin() :: atom()
   def current_skin, do: Drafter.SkinManager.get_current_skin()

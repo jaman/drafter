@@ -7,6 +7,7 @@ defmodule Drafter.Layout do
   """
 
   alias Drafter.Widget.Registry
+  alias Drafter.CharacterSet
 
   @type rect :: %{x: integer(), y: integer(), width: pos_integer(), height: pos_integer()}
   @type component :: tuple()
@@ -28,14 +29,14 @@ defmodule Drafter.Layout do
         Keyword.get(opts, :height, children |> Enum.map(&get_preferred_height/1) |> Enum.sum())
 
       {:box, children, opts} ->
-        border = Keyword.get(opts, :border, :rounded)
-        padding = Keyword.get(opts, :padding, 1)
+        border = Keyword.get(opts, :border, CharacterSet.style(:border) || :rounded)
+        padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
         border_height = if border == :none, do: 0, else: 2
         content_height = children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
         Keyword.get(opts, :height, border_height + padding * 2 + content_height)
 
       {:card, children, opts} ->
-        padding = Keyword.get(opts, :padding, 1)
+        padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
         content_height = children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
         Keyword.get(opts, :height, padding * 2 + content_height)
 
@@ -128,6 +129,26 @@ defmodule Drafter.Layout do
             true -> 1
           end
 
+        {preferred, max(flex, 1), has_flex}
+
+      {:box, children, opts} ->
+        flex = Keyword.get(opts, :flex, 0)
+        height = Keyword.get(opts, :height)
+        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
+
+        preferred =
+          cond do
+            height -> height
+            has_flex -> 1
+            true -> get_preferred_height({:box, children, opts}, hierarchy)
+          end
+
+        {preferred, max(flex, 1), has_flex}
+
+      {:card, children, opts} ->
+        flex = Keyword.get(opts, :flex, 0)
+        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
+        preferred = if has_flex, do: 1, else: get_preferred_height({:card, children, opts}, hierarchy)
         {preferred, max(flex, 1), has_flex}
 
       {:collapsible, title, content, opts} ->

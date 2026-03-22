@@ -321,7 +321,7 @@ defmodule Drafter.Runtime.Renderer do
                 end
 
               if length(final_strips) > 0 do
-                layer = LayerCompositor.widget_layer(widget_id, final_strips, final_rect, z_base)
+                layer = LayerCompositor.widget_layer(widget_id, final_strips, final_rect, z_base, widget_info.module)
                 [layer]
               else
                 []

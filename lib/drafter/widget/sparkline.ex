@@ -177,7 +177,7 @@ defmodule Drafter.Widget.Sparkline do
     }
   end
 
-  def preferred_height(_args, _opts), do: 1
+  def preferred_height(_args, opts), do: Keyword.get(opts, :height, 3)
 
   def component_tag, do: :sparkline
 

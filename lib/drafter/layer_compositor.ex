@@ -79,10 +79,17 @@ defmodule Drafter.LayerCompositor do
   @doc """
   Create a widget layer for interactive elements.
   """
-  def widget_layer(widget_id, strips, bounds, z_base \\ 0) do
+  @container_modules [
+    Drafter.Widget.Box,
+    Drafter.Widget.Card,
+    Drafter.Widget.ScrollableContainer
+  ]
+
+  def widget_layer(widget_id, strips, bounds, z_base \\ 0, widget_module \\ nil) do
     z_index = cond do
       :erlang.atom_to_binary(widget_id) |> String.starts_with?("footer") -> z_base + 50
       :erlang.atom_to_binary(widget_id) |> String.starts_with?("header") -> z_base + 40
+      widget_module in @container_modules -> z_base + 10
       true -> z_base + 20
     end
 

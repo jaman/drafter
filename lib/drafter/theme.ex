@@ -221,7 +221,9 @@ defmodule Drafter.Theme do
       "gruvbox-dark" => gruvbox_dark_theme(),
       "gruvbox-light" => gruvbox_light_theme(),
       "tokyo-night" => tokyo_night_theme(),
-      "catppuccin-mocha" => catppuccin_mocha_theme()
+      "catppuccin-mocha" => catppuccin_mocha_theme(),
+      "classic" => classic_theme(),
+      "retro" => retro_theme()
     }
   end
 
@@ -554,6 +556,80 @@ defmodule Drafter.Theme do
       block_cursor_foreground: {24, 24, 37},
       block_cursor_blurred: {123, 97, 116},
       block_hover: {49, 50, 68}
+    }
+    %{base | syntax: default_syntax_colors(base)}
+  end
+
+  def classic_theme do
+    base = %__MODULE__{
+      name: "classic",
+      dark: true,
+      primary: {0, 175, 215},
+      secondary: {0, 135, 175},
+      accent: {215, 175, 0},
+      warning: {215, 135, 0},
+      error: {215, 0, 0},
+      success: {0, 175, 0},
+      background: {8, 8, 8},
+      foreground: {215, 215, 215},
+      surface: {18, 18, 18},
+      panel: {28, 28, 28},
+      border: {0, 175, 215},
+      text_primary: {215, 215, 215},
+      text_secondary: {175, 175, 175},
+      text_muted: {0, 175, 215},
+      text_disabled: {95, 95, 95},
+      text_accent: {215, 175, 0},
+      text_warning: {215, 135, 0},
+      text_error: {215, 0, 0},
+      text_success: {0, 175, 0},
+      primary_muted: {0, 95, 135},
+      secondary_muted: {0, 68, 95},
+      accent_muted: {135, 110, 0},
+      warning_muted: {135, 68, 0},
+      error_muted: {135, 0, 0},
+      success_muted: {0, 95, 0},
+      block_cursor: {0, 175, 215},
+      block_cursor_foreground: {8, 8, 8},
+      block_cursor_blurred: {0, 95, 135},
+      block_hover: {28, 28, 48}
+    }
+    %{base | syntax: default_syntax_colors(base)}
+  end
+
+  def retro_theme do
+    base = %__MODULE__{
+      name: "retro",
+      dark: true,
+      primary: {255, 176, 0},
+      secondary: {215, 135, 0},
+      accent: {0, 215, 95},
+      warning: {215, 135, 0},
+      error: {255, 80, 0},
+      success: {0, 215, 95},
+      background: {10, 6, 0},
+      foreground: {255, 200, 80},
+      surface: {20, 12, 0},
+      panel: {30, 18, 0},
+      border: {215, 135, 0},
+      text_primary: {255, 200, 80},
+      text_secondary: {215, 155, 40},
+      text_muted: {175, 115, 0},
+      text_disabled: {95, 68, 0},
+      text_accent: {0, 215, 95},
+      text_warning: {215, 135, 0},
+      text_error: {255, 80, 0},
+      text_success: {0, 215, 95},
+      primary_muted: {135, 95, 0},
+      secondary_muted: {95, 68, 0},
+      accent_muted: {0, 135, 60},
+      warning_muted: {135, 68, 0},
+      error_muted: {135, 40, 0},
+      success_muted: {0, 135, 60},
+      block_cursor: {255, 176, 0},
+      block_cursor_foreground: {10, 6, 0},
+      block_cursor_blurred: {135, 95, 0},
+      block_hover: {30, 20, 0}
     }
     %{base | syntax: default_syntax_colors(base)}
   end
