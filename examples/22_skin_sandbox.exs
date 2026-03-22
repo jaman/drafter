@@ -7,28 +7,37 @@ defmodule SkinSandbox do
   @skins [
     {:graphical, "Graphical (1)", "1"},
     {:wireframe, "Wireframe (2)", "2"},
-    {:ascii,     "ASCII     (3)", "3"},
-    {:classic,   "Classic   (4)", "4"},
-    {:retro,     "Retro     (5)", "5"}
+    {:ascii, "ASCII     (3)", "3"},
+    {:classic, "Classic   (4)", "4"},
+    {:retro, "Retro     (5)", "5"}
   ]
 
   @monthly_sales [
-    {"Jan", 42}, {"Feb", 58}, {"Mar", 71}, {"Apr", 33},
-    {"May", 89}, {"Jun", 95}, {"Jul", 61}, {"Aug", 78},
-    {"Sep", 54}, {"Oct", 82}, {"Nov", 67}, {"Dec", 91}
+    {"Jan", 42},
+    {"Feb", 58},
+    {"Mar", 71},
+    {"Apr", 33},
+    {"May", 89},
+    {"Jun", 95},
+    {"Jul", 61},
+    {"Aug", 78},
+    {"Sep", 54},
+    {"Oct", 82},
+    {"Nov", 67},
+    {"Dec", 91}
   ]
 
   @quarterly [
-    {[42, 58, 71],  "Q1"},
-    {[33, 89, 95],  "Q2"},
-    {[61, 78, 54],  "Q3"},
-    {[82, 67, 91],  "Q4"}
+    {[42, 58, 71], "Q1"},
+    {[33, 89, 95], "Q2"},
+    {[61, 78, 54], "Q3"},
+    {[82, 67, 91], "Q4"}
   ]
 
   @departments [
     {"Engineering", [84, 61, 72, 91]},
-    {"Sales",       [55, 78, 63, 88]},
-    {"Support",     [40, 52, 48, 60]}
+    {"Sales", [55, 78, 63, 88]},
+    {"Support", [40, 52, 48, 60]}
   ]
 
   def mount(_props) do
@@ -203,11 +212,11 @@ defmodule SkinSandbox do
   end
 
   def handle_event(:skin_selected, skin, state), do: {:ok, apply_skin(skin, state)}
-  def handle_event({:key, ?1}, state), do: {:ok, apply_skin(:graphical, state)}
-  def handle_event({:key, ?2}, state), do: {:ok, apply_skin(:wireframe, state)}
-  def handle_event({:key, ?3}, state), do: {:ok, apply_skin(:ascii, state)}
-  def handle_event({:key, ?4}, state), do: {:ok, apply_skin(:classic, state)}
-  def handle_event({:key, ?5}, state), do: {:ok, apply_skin(:retro, state)}
+  def handle_event({:key, :"1"}, state), do: {:ok, apply_skin(:graphical, state)}
+  def handle_event({:key, :"2"}, state), do: {:ok, apply_skin(:wireframe, state)}
+  def handle_event({:key, :"3"}, state), do: {:ok, apply_skin(:ascii, state)}
+  def handle_event({:key, :"4"}, state), do: {:ok, apply_skin(:classic, state)}
+  def handle_event({:key, :"5"}, state), do: {:ok, apply_skin(:retro, state)}
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
