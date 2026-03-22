@@ -2,6 +2,8 @@
 
 An Elixir Terminal User Interface framework inspired by Python's Textual. Build rich, interactive terminal applications with a declarative API similar to Phoenix LiveView.
 
+[![asciicast](https://asciinema.org/a/uSauYhLa8aW4fHPq.svg)](https://asciinema.org/a/uSauYhLa8aW4fHPq)
+
 ## Features
 
 - **Declarative API** - Phoenix LiveView-inspired component model
