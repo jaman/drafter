@@ -6,21 +6,21 @@ defmodule Dashboard do
 
   @skins [
     {:graphical, "Graphical", "1"},
-    {:classic,   "Classic",   "2"},
-    {:retro,     "Retro",     "3"},
+    {:classic, "Classic", "2"},
+    {:retro, "Retro", "3"},
     {:wireframe, "Wireframe", "4"},
-    {:ascii,     "ASCII",     "5"}
+    {:ascii, "ASCII", "5"}
   ]
 
   @services [
-    %{name: "api-gateway",   status: "up",   latency: "12ms",  req_s: "4821"},
-    %{name: "auth-service",  status: "up",   latency: "8ms",   req_s: "2103"},
-    %{name: "data-store",    status: "up",   latency: "34ms",  req_s: "1892"},
-    %{name: "cache",         status: "WARN", latency: "91ms",  req_s: "3441"},
-    %{name: "message-queue", status: "up",   latency: "5ms",   req_s: "9812"},
-    %{name: "worker-pool",   status: "DOWN", latency: "-",     req_s: "0"},
-    %{name: "metrics",       status: "up",   latency: "18ms",  req_s: "441"},
-    %{name: "notifier",      status: "WARN", latency: "142ms", req_s: "228"}
+    %{name: "api-gateway", status: "up", latency: "12ms", req_s: "4821"},
+    %{name: "auth-service", status: "up", latency: "8ms", req_s: "2103"},
+    %{name: "data-store", status: "up", latency: "34ms", req_s: "1892"},
+    %{name: "cache", status: "WARN", latency: "91ms", req_s: "3441"},
+    %{name: "message-queue", status: "up", latency: "5ms", req_s: "9812"},
+    %{name: "worker-pool", status: "DOWN", latency: "-", req_s: "0"},
+    %{name: "metrics", status: "up", latency: "18ms", req_s: "441"},
+    %{name: "notifier", status: "WARN", latency: "142ms", req_s: "228"}
   ]
 
   @log_messages [
@@ -50,12 +50,12 @@ defmodule Dashboard do
       net_rx: 42,
       net_tx: 18,
       uptime_secs: 93_847,
-      cpu_hist:    gen_hist(60, 10, 60),
-      mem_hist:    gen_hist(60, 45, 30),
+      cpu_hist: gen_hist(60, 10, 60),
+      mem_hist: gen_hist(60, 45, 30),
       net_rx_hist: gen_hist(60, 5, 80),
       net_tx_hist: gen_hist(60, 2, 40),
-      log_lines:   Enum.take(@log_messages, 8),
-      log_index:   8
+      log_lines: Enum.take(@log_messages, 8),
+      log_index: 8
     }
   end
 
@@ -70,27 +70,28 @@ defmodule Dashboard do
   end
 
   def on_timer(:tick, state) do
-    cpu    = clamp(:rand.uniform(100), 5, 95)
+    cpu = clamp(:rand.uniform(100), 5, 95)
     memory = clamp(state.memory + :rand.uniform(7) - 3, 30, 90)
-    rx     = clamp(:rand.uniform(100), 5, 99)
-    tx     = clamp(:rand.uniform(60), 2, 60)
+    rx = clamp(:rand.uniform(100), 5, 99)
+    tx = clamp(:rand.uniform(60), 2, 60)
 
     msg = Enum.at(@log_messages, rem(state.log_index, length(@log_messages)))
     new_line = timestamp_prefix() <> msg
 
-    %{state |
-      tick:        state.tick + 1,
-      cpu:         cpu,
-      memory:      memory,
-      net_rx:      rx,
-      net_tx:      tx,
-      uptime_secs: state.uptime_secs + 1,
-      cpu_hist:    tl(state.cpu_hist) ++ [cpu],
-      mem_hist:    tl(state.mem_hist) ++ [memory],
-      net_rx_hist: tl(state.net_rx_hist) ++ [rx],
-      net_tx_hist: tl(state.net_tx_hist) ++ [tx],
-      log_lines:   Enum.take(state.log_lines ++ [new_line], -200),
-      log_index:   state.log_index + 1
+    %{
+      state
+      | tick: state.tick + 1,
+        cpu: cpu,
+        memory: memory,
+        net_rx: rx,
+        net_tx: tx,
+        uptime_secs: state.uptime_secs + 1,
+        cpu_hist: tl(state.cpu_hist) ++ [cpu],
+        mem_hist: tl(state.mem_hist) ++ [memory],
+        net_rx_hist: tl(state.net_rx_hist) ++ [rx],
+        net_tx_hist: tl(state.net_tx_hist) ++ [tx],
+        log_lines: Enum.take(state.log_lines ++ [new_line], -200),
+        log_index: state.log_index + 1
     }
   end
 
@@ -123,7 +124,7 @@ defmodule Dashboard do
     vertical([
       box(
         [
-          label("CPU    #{state.cpu}%",    style: bar_style(state.cpu)),
+          label("CPU    #{state.cpu}%", style: bar_style(state.cpu)),
           progress_bar(progress: state.cpu * 1.0, show_percentage: false),
           label(""),
           label("Memory #{state.memory}%", style: bar_style(state.memory)),
@@ -178,19 +179,39 @@ defmodule Dashboard do
         box(
           [
             label("CPU", style: %{bold: true}),
-            sparkline(state.cpu_hist, height: 4, min_value: 0, max_value: 100,
-              min_color: {80, 200, 100}, max_color: {215, 60, 60}),
+            sparkline(state.cpu_hist,
+              height: 4,
+              min_value: 0,
+              max_value: 100,
+              min_color: {80, 200, 100},
+              max_color: {215, 60, 60}
+            ),
             label(""),
             label("Memory", style: %{bold: true}),
-            sparkline(state.mem_hist, height: 4, min_value: 0, max_value: 100,
-              min_color: {80, 140, 215}, max_color: {215, 60, 60}),
+            sparkline(state.mem_hist,
+              height: 4,
+              min_value: 0,
+              max_value: 100,
+              min_color: {80, 140, 215},
+              max_color: {215, 60, 60}
+            ),
             label(""),
             label("Net RX", style: %{bold: true}),
-            sparkline(state.net_rx_hist, height: 3, min_value: 0, max_value: 100,
-              min_color: {80, 200, 140}, max_color: {80, 200, 140}),
+            sparkline(state.net_rx_hist,
+              height: 3,
+              min_value: 0,
+              max_value: 100,
+              min_color: {80, 200, 140},
+              max_color: {80, 200, 140}
+            ),
             label("Net TX", style: %{bold: true}),
-            sparkline(state.net_tx_hist, height: 3, min_value: 0, max_value: 100,
-              min_color: {215, 140, 60}, max_color: {215, 140, 60})
+            sparkline(state.net_tx_hist,
+              height: 3,
+              min_value: 0,
+              max_value: 100,
+              min_color: {215, 140, 60},
+              max_color: {215, 140, 60}
+            )
           ],
           title: "History"
         ),
@@ -198,10 +219,10 @@ defmodule Dashboard do
           [
             data_table(
               columns: [
-                %{key: :name,    label: "Service",  width: 15},
-                %{key: :status,  label: "Status",   width: 6},
-                %{key: :latency, label: "Latency",  width: 8, align: :right},
-                %{key: :req_s,   label: "Req/s",    width: 6, align: :right}
+                %{key: :name, label: "Service", width: 15},
+                %{key: :status, label: "Status", width: 6},
+                %{key: :latency, label: "Latency", width: 8, align: :right},
+                %{key: :req_s, label: "Req/s", width: 6, align: :right}
               ],
               data: @services
             )
@@ -227,9 +248,9 @@ defmodule Dashboard do
     ])
   end
 
-  defp bar_style(pct) when pct >= 85, do: %{fg: {215, 60, 60},  bold: true}
-  defp bar_style(pct) when pct >= 70, do: %{fg: {215, 160, 0},  bold: true}
-  defp bar_style(_),                  do: %{fg: {80, 200, 100},  bold: true}
+  defp bar_style(pct) when pct >= 85, do: %{fg: {215, 60, 60}, bold: true}
+  defp bar_style(pct) when pct >= 70, do: %{fg: {215, 160, 0}, bold: true}
+  defp bar_style(_), do: %{fg: {80, 200, 100}, bold: true}
 
   defp clamp(v, lo, hi), do: max(lo, min(hi, v))
 
@@ -257,11 +278,11 @@ defmodule Dashboard do
   end
 
   def handle_event(:skin_selected, skin, state), do: {:ok, apply_skin(skin, state)}
-  def handle_event({:key, ?1}, state), do: {:ok, apply_skin(:graphical, state)}
-  def handle_event({:key, ?2}, state), do: {:ok, apply_skin(:classic, state)}
-  def handle_event({:key, ?3}, state), do: {:ok, apply_skin(:retro, state)}
-  def handle_event({:key, ?4}, state), do: {:ok, apply_skin(:wireframe, state)}
-  def handle_event({:key, ?5}, state), do: {:ok, apply_skin(:ascii, state)}
+  def handle_event({:key, :"1"}, state), do: {:ok, apply_skin(:graphical, state)}
+  def handle_event({:key, :"2"}, state), do: {:ok, apply_skin(:classic, state)}
+  def handle_event({:key, :"3"}, state), do: {:ok, apply_skin(:retro, state)}
+  def handle_event({:key, :"4"}, state), do: {:ok, apply_skin(:wireframe, state)}
+  def handle_event({:key, :"5"}, state), do: {:ok, apply_skin(:ascii, state)}
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
