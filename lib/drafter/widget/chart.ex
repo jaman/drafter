@@ -2,8 +2,8 @@ defmodule Drafter.Widget.Chart do
   @moduledoc """
   Renders time-series and financial data as interactive charts with multiple styles.
 
-  Supported chart types: `:line`, `:area`, `:bar`, `:clustered_bar`, `:stacked_bar`,
-  `:range_bar`, `:scatter`, and `:candlestick`. Braille-dot rendering provides the
+  Supported chart types: `:line`, `:area`, `:braille_area`, `:bar`, `:clustered_bar`,
+  `:stacked_bar`, `:range_bar`, `:scatter`, and `:candlestick`. Braille-dot rendering provides the
   highest resolution (two data points per column, four per row). Quadrant-block
   rendering provides 2×2 pixel resolution per cell (coarser but larger dots). Bar
   charts use half-block characters for 2× vertical resolution.
@@ -65,8 +65,8 @@ defmodule Drafter.Widget.Chart do
 
     * `:data` — numeric list; list of series for multi-series types; `[low, high]`
       pairs for `:range_bar`
-    * `:chart_type` — `:line` (default), `:area`, `:bar`, `:clustered_bar`,
-      `:stacked_bar`, `:range_bar`, `:scatter`, `:candlestick`
+    * `:chart_type` — `:line` (default), `:area`, `:braille_area`, `:bar`,
+      `:clustered_bar`, `:stacked_bar`, `:range_bar`, `:scatter`, `:candlestick`
     * `:marker` — render density: `:braille` (default), `:half_block`, `:block`, `:dot`
     * `:pixel_style` — pixel rendering style for line and scatter: `:braille` (default) or `:quadrant`
     * `:min_value` — explicit Y minimum; auto-detected when omitted

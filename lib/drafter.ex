@@ -7,7 +7,7 @@ defmodule Drafter do
   - Event-driven architecture  
   - Flexible layout system
   - Self-implemented drawing primitives
-  - Zero external dependencies
+  - Minimal dependencies
 
   defmodule MyApp do
         use Drafter.App

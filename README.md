@@ -14,7 +14,7 @@ An Elixir Terminal User Interface framework inspired by Python's Textual. Build 
 - **Theming System** - Built-in themes with customization support
 - **Animation Support** - Smooth property animations with easing functions
 - **Remote TUI** - Serve apps over SSH or Telnet with isolated or shared sessions (see [Remote TUI](guides/remote_tui.md))
-- **Zero Runtime Dependencies** - Pure Elixir implementation
+- **Minimal Dependencies** - Elixir implementation with NIF-based terminal I/O
 
 ## Requirements
 
@@ -218,7 +218,7 @@ Handlers are checked in registration order. Returning `{:ok, new_state}` stops
 dispatch; returning `:unhandled` passes control to the next handler. The built-in
 handler runs last and covers all standard return values.
 
-See `examples/custom_action.exs` for a complete working example that demonstrates
+See `examples/16_custom_actions.exs` for a complete working example that demonstrates
 custom action types, state mutation, and native desktop notifications.
 
 ### Screens and Navigation
@@ -341,7 +341,7 @@ Available easing functions: `:linear`, `:ease`, `:ease_in`, `:ease_out`, `:ease_
 ## Complete Example
 
 ```elixir
-Mix.install([{:drafter, "~> 0.1"}])
+Mix.install([{:drafter, "~> 0.1"}, {:elixir_make, "~> 0.9"}])
 defmodule TodoApp do
   use Drafter.App
 
@@ -453,23 +453,32 @@ When `path:` is given, tree-sitter reads the file directly (one system call, no 
 Standalone scripts in the `examples/` directory can be run directly with `elixir`:
 
 ```bash
-elixir examples/hello_world.exs
-elixir examples/counter.exs
-elixir examples/animation.exs
-elixir examples/clock.exs
-elixir examples/calculator.exs
-elixir examples/charts.exs
-elixir examples/widgets.exs
-elixir examples/theme_sandbox.exs
-elixir examples/themes.exs
-elixir examples/hsl_colors.exs
-elixir examples/data_table.exs
-elixir examples/screens.exs
-elixir examples/key_inspector.exs
-elixir examples/code_browser.exs
-elixir examples/syntax_highlight.exs
-elixir examples/custom_loop.exs
-elixir examples/custom_action.exs
+elixir examples/01_hello_world.exs
+elixir examples/02_clock.exs
+elixir examples/03_digits.exs
+elixir examples/04_counter.exs
+elixir examples/05_calculator.exs
+elixir examples/06_collapsible.exs
+elixir examples/07_todo.exs
+elixir examples/08_animation.exs
+elixir examples/09_hsl_colors.exs
+elixir examples/10_themes.exs
+elixir examples/11_data_table.exs
+elixir examples/12_key_inspector.exs
+elixir examples/13_syntax_highlight.exs
+elixir examples/14_code_browser.exs
+elixir examples/15_screens.exs
+elixir examples/16_custom_actions.exs
+elixir examples/17_charts.exs
+elixir examples/18_chart_perf.exs
+elixir examples/19_gauge.exs
+elixir examples/20_multi_series_charts.exs
+elixir examples/21_theme_sandbox.exs
+elixir examples/22_skin_sandbox.exs
+elixir examples/23_split_pane.exs
+elixir examples/24_dashboard.exs
+elixir examples/25_file_picker.exs
+elixir examples/26_braille_area.exs
 ```
 
 Examples that are compiled into the library can be run via `mix run`:
