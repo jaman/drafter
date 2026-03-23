@@ -11,7 +11,7 @@ defmodule Drafter.Layout do
 
   @type rect :: %{x: integer(), y: integer(), width: pos_integer(), height: pos_integer()}
   @type component :: tuple()
-  @type hierarchy :: Drafter.WidgetHierarchy.t()
+  @type hierarchy :: map()
 
   @spec rect(non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()) :: rect()
   def rect(x, y, width, height), do: %{x: x, y: y, width: width, height: height}

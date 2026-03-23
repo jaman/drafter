@@ -317,7 +317,7 @@ end
 `use Drafter.WidgetLibrary` generates two functions on your module:
 
 - `__widget_library__/0` — returns the widget module list
-- `register/0` — registers all widgets with `Drafter.Widget.Registry`
+- `register/0` — makes all widgets available to the framework
 
 Users never need to call these directly; Drafter calls them automatically.
 

@@ -58,7 +58,7 @@ defmodule Drafter.WidgetLibrary do
   @callback __widget_library__() :: [module()]
 
   @doc """
-  Registers all widgets in the library with `Drafter.Widget.Registry`.
+  Makes all widgets in the library available to the framework.
 
   Called automatically by `Drafter.run/2` when the library is listed
   under `:widget_libraries`. You can also call it manually at any point
