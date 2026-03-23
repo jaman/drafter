@@ -26,7 +26,7 @@ defmodule Drafter.ThemeManager do
   end
 
   @spec get_current_theme() :: Drafter.Theme.t()
-  def get_current_theme() do
+  def get_current_theme do
     GenServer.call(resolve(), :get_current_theme)
   end
 
@@ -80,5 +80,8 @@ defmodule Drafter.ThemeManager do
     {:noreply, %{state | app_pid: app_pid}}
   end
 
-  defp resolve(), do: Process.get(:drafter_theme_manager, __MODULE__)
+  defp resolve do
+    Process.get(:drafter_theme_manager) ||
+      raise "No ThemeManager in process dictionary. Ensure a Drafter session is running."
+  end
 end

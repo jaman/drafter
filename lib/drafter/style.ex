@@ -7,6 +7,8 @@ defmodule Drafter.Style do
   sequence helpers.
   """
 
+  alias Drafter.Style.CSSParser
+
   @type rgb :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   @type rgba :: {:rgba, rgb(), float()}
   @type color :: rgb() | rgba() | String.t() | atom()
@@ -139,21 +141,21 @@ defmodule Drafter.Style do
   end
 
   def resolve_color("#" <> _hex_str = hex_color, theme) do
-    case Drafter.Style.CSSParser.parse_hex_color(hex_color) do
+    case CSSParser.parse_hex_color(hex_color) do
       {:ok, rgb} -> rgb
       :error -> resolve_color_fallback(hex_color, theme)
     end
   end
 
   def resolve_color("rgb(" <> _ = rgb_str, theme) do
-    case Drafter.Style.CSSParser.parse_rgb_color(rgb_str) do
+    case CSSParser.parse_rgb_color(rgb_str) do
       {:ok, rgb} -> rgb
       :error -> resolve_color_fallback(rgb_str, theme)
     end
   end
 
   def resolve_color("rgba(" <> _ = rgba_str, theme) do
-    case Drafter.Style.CSSParser.parse_rgba_color(rgba_str) do
+    case CSSParser.parse_rgba_color(rgba_str) do
       {:ok, {:rgba, rgb, alpha}} ->
         bg = resolve_color(:background, theme) || {0, 0, 0}
         mix(bg, rgb, alpha)

@@ -123,7 +123,8 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:skin_updated, _skin}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg({:skin_updated, skin}, {app_module, app_state, rect, timers, wh, ss}) do
+    Process.put(:drafter_skin, skin)
     {_, new_wh} = immediate_render(app_module, app_state, rect, wh)
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
@@ -328,9 +329,11 @@ defmodule Drafter.Runtime.AppLoop do
     handle_stop(reason, app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:push_session, new_module, opts, from_pid, ref}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg({:push_session, new_module, opts, action_handlers, from_pid, ref}, {app_module, app_state, rect, timers, wh, ss}) do
     mount_props = opts |> Keyword.drop([:scroll_optimization, :syntax_highlighting, :refresh_rate]) |> Map.new()
     setup_frame_rate(new_module, opts)
+    prev_handlers = Drafter.ActionRegistry.collect()
+    Drafter.ActionRegistry.init(action_handlers)
     new_state = new_module.mount(mount_props)
     {_, new_wh} = Renderer.render_app(new_module, new_state, rect)
     Process.put(:pending_intervals, [])
@@ -338,7 +341,7 @@ defmodule Drafter.Runtime.AppLoop do
     initial_timers = collect_pending_intervals()
     drain_stale_events()
     {_, new_wh} = Renderer.render_app(new_module, ready_state, rect, new_wh)
-    current = {app_module, app_state, wh, timers, from_pid, ref}
+    current = {app_module, app_state, wh, timers, from_pid, ref, prev_handlers}
     app_event_loop(new_module, ready_state, rect, initial_timers, new_wh, [current | ss])
   end
 
@@ -493,10 +496,11 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp handle_stop(_reason, _app_module, _app_state, screen_rect, timers, widget_hierarchy, session_stack) do
-    {prev_module, prev_state, prev_hierarchy, prev_timers, prev_from, prev_ref} = hd(session_stack)
+    {prev_module, prev_state, prev_hierarchy, prev_timers, prev_from, prev_ref, prev_handlers} = hd(session_stack)
     cleanup_timers(timers)
     Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
     if prev_from, do: send(prev_from, {:session_result, prev_ref, :ok})
+    Drafter.ActionRegistry.init(prev_handlers)
     {_, restored_hierarchy} = Renderer.render_app(prev_module, prev_state, screen_rect, prev_hierarchy)
     app_event_loop(prev_module, prev_state, screen_rect, prev_timers, restored_hierarchy, tl(session_stack))
   end

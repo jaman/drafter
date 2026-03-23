@@ -10,11 +10,11 @@ defmodule Drafter.Draw.Canvas do
   canvas onto another at an offset.
   """
 
-  alias Drafter.Draw.{Segment, Strip, BoxDrawing}
+  alias Drafter.Draw.{BoxDrawing, Segment, Strip}
 
   @type coordinate :: {non_neg_integer(), non_neg_integer()}
   @type style :: Segment.style()
-  
+
   @type cell :: %{
     char: String.t(),
     style: style()
@@ -83,13 +83,16 @@ defmodule Drafter.Draw.Canvas do
   end
 
   @doc "Draw a rectangle outline"
-  @spec draw_rect(t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), BoxDrawing.line_type(), style()) :: t()
+  @spec draw_rect(
+          t(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
+          non_neg_integer(), BoxDrawing.line_type(), style()
+        ) :: t()
   def draw_rect(canvas, x, y, width, height, line_style \\ :light, style \\ %{}) do
     if width < 2 or height < 2 do
       canvas
     else
       chars = BoxDrawing.get_chars(line_style)
-      
+
       canvas
       |> set_char(x, y, chars.top_left, style)
       |> draw_hline(x + 1, y, width - 2, line_style, style)
@@ -103,7 +106,10 @@ defmodule Drafter.Draw.Canvas do
   end
 
   @doc "Fill a rectangle with character"
-  @spec fill_rect(t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t(), style()) :: t()
+  @spec fill_rect(
+          t(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
+          non_neg_integer(), String.t(), style()
+        ) :: t()
   def fill_rect(canvas, x, y, width, height, char \\ " ", style \\ %{}) do
     Enum.reduce(0..(height - 1), canvas, fn dy, acc_canvas ->
       Enum.reduce(0..(width - 1), acc_canvas, fn dx, acc ->
@@ -137,7 +143,7 @@ defmodule Drafter.Draw.Canvas do
         Map.delete(acc, {x + dx, y + dy})
       end)
     end)
-    
+
     %{canvas | cells: cells}
   end
 
@@ -156,7 +162,7 @@ defmodule Drafter.Draw.Canvas do
     Enum.reduce(overlay_canvas.cells, base_canvas, fn {{x, y}, cell}, acc ->
       new_x = x + offset_x
       new_y = y + offset_y
-      
+
       if new_x < acc.width and new_y < acc.height do
         cells = Map.put(acc.cells, {new_x, new_y}, cell)
         %{acc | cells: cells}
@@ -213,14 +219,14 @@ defmodule Drafter.Draw.Canvas do
   end
 
   defp combine_adjacent_segments([], acc), do: Enum.reverse(acc)
-  
+
   defp combine_adjacent_segments([segment | rest], []) do
     combine_adjacent_segments(rest, [segment])
   end
-  
+
   defp combine_adjacent_segments([segment | rest], [last | acc_rest] = acc) do
     if segment.style == last.style do
-      combined = %{last | 
+      combined = %{last |
         text: last.text <> segment.text,
         width: last.width + segment.width
       }

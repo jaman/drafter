@@ -1,6 +1,8 @@
 defmodule Drafter.WidgetHierarchy do
   @moduledoc false
 
+  alias Drafter.Event
+  alias Drafter.Style
   alias Drafter.WidgetServer
 
   defstruct [
@@ -96,12 +98,15 @@ defmodule Drafter.WidgetHierarchy do
     mark_widget_rendered(widget_id)
     Code.ensure_loaded(widget_module)
 
+    session_ctx = collect_session_pdict()
+
     {:ok, pid} =
       WidgetServer.start_link(
         id: widget_id,
         module: widget_module,
         props: mount_props,
-        rect: rect
+        rect: rect,
+        session_ctx: session_ctx
       )
 
     widget_state = WidgetServer.get_state(pid)
@@ -1054,7 +1059,7 @@ defmodule Drafter.WidgetHierarchy do
   @doc "Query widgets by selector string"
   @spec query_all(t(), String.t()) :: [widget_id()]
   def query_all(hierarchy, selector) do
-    parsed = Drafter.Style.Selector.parse(selector)
+    parsed = Style.Selector.parse(selector)
 
     hierarchy.widgets
     |> Enum.filter(fn {widget_id, widget_info} ->
@@ -1076,7 +1081,7 @@ defmodule Drafter.WidgetHierarchy do
     Enum.any?(selectors, &matches_single_selector?(widget_id, widget_info, &1))
   end
 
-  defp matches_single_selector?(widget_id, widget_info, %Drafter.Style.Selector{} = selector) do
+  defp matches_single_selector?(widget_id, widget_info, %Style.Selector{} = selector) do
     matches_type?(widget_info.module, selector.widget_type) and
       matches_id?(widget_id, selector.id) and
       matches_classes?(widget_info.state, selector.classes)
@@ -1247,11 +1252,11 @@ defmodule Drafter.WidgetHierarchy do
   end
 
   defp classify_capture_result({:stop, updated_event, new_state, actions}, _event, _fallback_state) do
-    {:stop, Drafter.Event.Object.stop_propagation(updated_event), new_state, actions}
+    {:stop, Event.Object.stop_propagation(updated_event), new_state, actions}
   end
 
   defp classify_capture_result({:prevent, updated_event, new_state}, _event, _fallback_state) do
-    stopped = updated_event |> Drafter.Event.Object.prevent_default() |> Drafter.Event.Object.stop_propagation()
+    stopped = updated_event |> Event.Object.prevent_default() |> Event.Object.stop_propagation()
     {:stop, stopped, new_state, []}
   end
 
@@ -1285,5 +1290,23 @@ defmodule Drafter.WidgetHierarchy do
             {:halt, {set_widget_state(h, widget_id, new_state), updated_event, actions ++ new_actions}}
         end
     end
+  end
+
+  @session_pdict_keys [
+    :drafter_event_manager,
+    :drafter_compositor,
+    :drafter_theme_manager,
+    :drafter_screen_manager,
+    :drafter_event_handler,
+    :drafter_skin_manager
+  ]
+
+  defp collect_session_pdict do
+    Enum.reduce(@session_pdict_keys, %{}, fn key, acc ->
+      case Process.get(key) do
+        nil -> acc
+        val -> Map.put(acc, key, val)
+      end
+    end)
   end
 end

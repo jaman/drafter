@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "..")}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}])
 
 defmodule SkinSandbox do
   use Drafter.App

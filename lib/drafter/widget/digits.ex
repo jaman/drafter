@@ -235,7 +235,6 @@ defmodule Drafter.Widget.Digits do
     end)
   end
 
-
   defp build_glyph_map(digits, patterns, left_offset, top_offset) do
     digits
     |> Enum.reduce({%{}, left_offset}, fn digit, {map, col_offset} ->
@@ -264,7 +263,6 @@ defmodule Drafter.Widget.Digits do
     end)
   end
 
-
   defp sample_data(data, width) do
     len = length(data)
 
@@ -278,8 +276,6 @@ defmodule Drafter.Widget.Digits do
         end)
     end
   end
-
-
 
   defp render_digits(digits, state, rect) do
     computed = Computed.for_widget(:digits, state, style: state.style)

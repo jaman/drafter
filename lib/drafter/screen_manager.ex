@@ -7,6 +7,7 @@ defmodule Drafter.ScreenManager do
 
   defstruct [
     :app_pid,
+    :event_handler,
     :screen_stack,
     :toasts,
     :screen_rect,
@@ -114,9 +115,10 @@ defmodule Drafter.ScreenManager do
   end
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     state = %__MODULE__{
       app_pid: nil,
+      event_handler: Keyword.get(opts, :event_handler),
       screen_stack: [],
       toasts: [],
       screen_rect: %{x: 0, y: 0, width: 80, height: 24},
@@ -133,7 +135,7 @@ defmodule Drafter.ScreenManager do
     mounted_screen = Screen.mount_screen(screen)
     new_state = %{state | screen_stack: [mounted_screen | state.screen_stack]}
 
-    register_screen_event_handler(mounted_screen.id, self())
+    register_screen_event_handler(mounted_screen.id, self(), state.event_handler)
     notify_render_needed(state.app_pid)
 
     {:reply, {:ok, mounted_screen.id}, new_state}
@@ -294,7 +296,10 @@ defmodule Drafter.ScreenManager do
     {:noreply, new_state}
   end
 
-  defp resolve, do: Process.get(:drafter_screen_manager, __MODULE__)
+  defp resolve do
+    Process.get(:drafter_screen_manager) ||
+      raise "No ScreenManager in process dictionary. Ensure a Drafter session is running."
+  end
 
   defp top_screen_id([top | _]), do: top.id
   defp top_screen_id([]), do: nil
@@ -305,13 +310,14 @@ defmodule Drafter.ScreenManager do
 
   defp resume_parent([], _result), do: []
 
-  defp register_screen_event_handler(screen_id, sm) do
+  defp register_screen_event_handler(screen_id, sm, eh) do
     {:ok, _} =
       EventHandler.register_handler(
         :any,
         fn event -> dispatch_screen_event(screen_id, sm, event) end,
         sm,
-        level: :top
+        level: :top,
+        target: eh
       )
   end
 

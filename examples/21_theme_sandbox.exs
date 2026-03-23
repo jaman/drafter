@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "..")}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}])
 
 defmodule InputModal do
   use Drafter.Screen
@@ -82,7 +82,7 @@ defmodule ThemeSandbox do
           label: "Downloads",
           icon: "📁",
           children: [
-            %{id: :img, label: "image.png", icon: "🖼️", children: []},
+            %{id: :img, label: "image.png", icon: "📷", children: []},
             %{id: :vid, label: "video.mp4", icon: "🎬", children: []}
           ]
         }

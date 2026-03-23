@@ -18,11 +18,11 @@ defmodule Drafter.Test.HeadlessDriver do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def setup() do
+  def setup do
     GenServer.call(__MODULE__, :setup)
   end
 
-  def cleanup() do
+  def cleanup do
     GenServer.call(__MODULE__, :cleanup)
   end
 
@@ -30,15 +30,15 @@ defmodule Drafter.Test.HeadlessDriver do
     GenServer.cast(__MODULE__, {:write, data})
   end
 
-  def get_size() do
+  def get_size do
     GenServer.call(__MODULE__, :get_size)
   end
 
-  def enable_mouse() do
+  def enable_mouse do
     GenServer.cast(__MODULE__, :enable_mouse)
   end
 
-  def disable_mouse() do
+  def disable_mouse do
     GenServer.cast(__MODULE__, :disable_mouse)
   end
 
@@ -46,11 +46,11 @@ defmodule Drafter.Test.HeadlessDriver do
     GenServer.cast(__MODULE__, {:inject_event, event})
   end
 
-  def get_buffer() do
+  def get_buffer do
     GenServer.call(__MODULE__, :get_buffer)
   end
 
-  def get_render_count() do
+  def get_render_count do
     GenServer.call(__MODULE__, :get_render_count)
   end
 
@@ -58,7 +58,7 @@ defmodule Drafter.Test.HeadlessDriver do
     GenServer.cast(__MODULE__, {:set_size, width, height})
   end
 
-  def clear_buffer() do
+  def clear_buffer do
     GenServer.cast(__MODULE__, :clear_buffer)
   end
 

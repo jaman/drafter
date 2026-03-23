@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: "."}])
+Mix.install([{:drafter, path: "."}, {:elixir_make, "~> 0.9"}])
 
 defmodule ExamplesLauncher do
   use Drafter.App

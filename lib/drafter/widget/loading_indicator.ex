@@ -27,9 +27,9 @@ defmodule Drafter.Widget.LoadingIndicator do
 
   use Drafter.Widget
 
+  alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.CharacterSet
 
   @spinner_speed 100
   @fallback_spinner_sets %{

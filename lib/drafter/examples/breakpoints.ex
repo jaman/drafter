@@ -1,7 +1,7 @@
 defmodule Drafter.Examples.Breakpoints do
   @moduledoc """
   A demonstration of responsive design with breakpoints.
-  
+
   Shows how the app adapts to different terminal sizes by changing
   the grid layout based on terminal width breakpoints.
   """
@@ -18,7 +18,7 @@ Try resizing the terminal, then have a look at the source to see how it works!
 
   @horizontal_breakpoints [
     {0, 1},    # narrow: 1 column
-    {40, 2},   # normal: 2 columns  
+    {40, 2},   # normal: 2 columns
     {80, 4},   # wide: 4 columns
     {120, 6}   # very-wide: 6 columns
   ]
@@ -32,7 +32,7 @@ Try resizing the terminal, then have a look at the source to see how it works!
 
   def render(_state, rect) do
     grid_size = calculate_grid_size(rect.width)
-    
+
     placeholders = for n <- 1..16 do
       {Drafter.Widget.Placeholder, %{
         text: "Placeholder #{n}",
@@ -45,20 +45,20 @@ Try resizing the terminal, then have a look at the source to see how it works!
       content: @help_text,
       padding: 1
     }}, %{rect | height: 6})
-    
+
     grid_rect = %{rect | y: 6, height: rect.height - 7}
     grid_strips = render_widget({Drafter.Widget.Grid, %{
       children: placeholders,
       grid_size: grid_size,
       padding: 1
     }}, grid_rect)
-    
+
     footer_rect = %{rect | y: rect.height - 1, height: 1}
     footer_strips = render_widget({Drafter.Widget.Footer, %{
       text: "^p palette | Terminal: #{rect.width}x#{rect.height} | Grid: #{grid_size} columns",
       align: :center
     }}, footer_rect)
-    
+
     markdown_strips ++ grid_strips ++ footer_strips
   end
 

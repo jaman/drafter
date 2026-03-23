@@ -17,18 +17,6 @@ defmodule Drafter.Session do
     DynamicSupervisor.start_child(__MODULE__, spec)
   end
 
-  @spec start_shared(module(), map(), keyword()) :: {:ok, pid()} | {:error, term()}
-  def start_shared(app_module, driver_config, opts \\ []) do
-    shared_state = Drafter.Session.SharedState.get_or_start(app_module, opts)
-
-    spec =
-      {Drafter.Session.Worker,
-       [app_module: app_module, driver_config: driver_config, mode: :shared, shared_state: shared_state] ++
-         opts}
-
-    DynamicSupervisor.start_child(__MODULE__, spec)
-  end
-
   @impl DynamicSupervisor
   def init(_opts), do: DynamicSupervisor.init(strategy: :one_for_one)
 end

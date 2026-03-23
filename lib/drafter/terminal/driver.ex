@@ -3,7 +3,8 @@ defmodule Drafter.Terminal.Driver do
 
   use GenServer
 
-  alias Drafter.Terminal.ANSI
+  alias Drafter.Event
+  alias Drafter.Terminal.{ANSI, TermiosNif}
 
   defstruct [
     :shell_pid,
@@ -37,13 +38,13 @@ defmodule Drafter.Terminal.Driver do
 
   @doc "Setup terminal for TUI mode"
   @spec setup() :: :ok | {:error, term()}
-  def setup() do
+  def setup do
     GenServer.call(__MODULE__, :setup)
   end
 
   @doc "Cleanup and restore terminal"
   @spec cleanup() :: :ok
-  def cleanup() do
+  def cleanup do
     GenServer.call(__MODULE__, :cleanup)
   end
 
@@ -55,37 +56,37 @@ defmodule Drafter.Terminal.Driver do
 
   @doc "Get current terminal size"
   @spec get_size() :: {pos_integer(), pos_integer()}
-  def get_size() do
+  def get_size do
     GenServer.call(__MODULE__, :get_size)
   end
 
   @doc "Discard any pending stdin input not yet processed"
   @spec drain_pending_input() :: :ok
-  def drain_pending_input() do
+  def drain_pending_input do
     GenServer.call(__MODULE__, :drain_pending_input)
   end
 
   @doc "Begin reading stdin — call once after startup drain sequence"
   @spec start_input() :: :ok
-  def start_input() do
+  def start_input do
     GenServer.call(__MODULE__, :start_input)
   end
 
   @doc "Enable mouse events"
   @spec enable_mouse() :: :ok
-  def enable_mouse() do
+  def enable_mouse do
     GenServer.cast(__MODULE__, :enable_mouse)
   end
 
   @doc "Disable mouse events"
   @spec disable_mouse() :: :ok
-  def disable_mouse() do
+  def disable_mouse do
     GenServer.cast(__MODULE__, :disable_mouse)
   end
 
   @impl GenServer
   def init(opts) do
-    event_manager = Keyword.get(opts, :event_manager, Drafter.Event.Manager)
+    event_manager = Keyword.get(opts, :event_manager, Event.Manager)
 
     state = %__MODULE__{
       shell_pid: nil,
@@ -197,44 +198,42 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp setup_terminal(state) do
-    try do
-      shell_pid = :shell.start_interactive({:noshell, :raw})
+    shell_pid = :shell.start_interactive({:noshell, :raw})
 
-      case enter_terminal_mode() do
-        {:ok, terminal_mode} ->
-          maybe_stop_stdin_reader(state.stdin_reader_pid)
-          setup_signal_handling()
-          setup_exit_handler()
+    case enter_terminal_mode() do
+      {:ok, terminal_mode} ->
+        maybe_stop_stdin_reader(state.stdin_reader_pid)
+        setup_signal_handling()
+        setup_exit_handler()
 
-          IO.write([
-            ANSI.enter_alt_screen(),
-            ANSI.hide_cursor(),
-            ANSI.clear_screen(),
-            ANSI.enable_mouse(),
-            "\e[?2004h"
-          ])
+        IO.write([
+          ANSI.enter_alt_screen(),
+          ANSI.hide_cursor(),
+          ANSI.clear_screen(),
+          ANSI.enable_mouse(),
+          "\e[?2004h"
+        ])
 
-          new_state = %{
-            state
-            | shell_pid: shell_pid,
-              stdin_reader_pid: nil,
-              terminal_mode: terminal_mode,
-              raw_mode: true,
-              alt_screen: true,
-              mouse_enabled: true,
-              size: detect_terminal_size()
-          }
+        new_state = %{
+          state
+          | shell_pid: shell_pid,
+            stdin_reader_pid: nil,
+            terminal_mode: terminal_mode,
+            raw_mode: true,
+            alt_screen: true,
+            mouse_enabled: true,
+            size: detect_terminal_size()
+        }
 
-          {:ok, new_state}
+        {:ok, new_state}
 
-        {:error, reason} ->
-          maybe_stop_shell(shell_pid)
-          {:error, reason}
-      end
-    rescue
-      error ->
-        {:error, error}
+      {:error, reason} ->
+        maybe_stop_shell(shell_pid)
+        {:error, reason}
     end
+  rescue
+    error ->
+      {:error, error}
   end
 
   defp enter_terminal_mode do
@@ -265,7 +264,7 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp cleanup_terminal(state) do
-    Drafter.Terminal.TermiosNif.set_tui_inactive()
+    TermiosNif.set_tui_inactive()
 
     if state.raw_mode do
       cleanup_sequences = []
@@ -326,21 +325,19 @@ defmodule Drafter.Terminal.Driver do
   defp maybe_stop_shell(nil), do: :ok
 
   defp maybe_stop_shell(shell_pid) do
-    try do
-      Process.exit(shell_pid, :normal)
-    rescue
-      _ -> :ok
-    end
+    Process.exit(shell_pid, :normal)
+  rescue
+    _ -> :ok
   end
 
   defp nif_enter_raw_mode do
-    {:ok, Drafter.Terminal.TermiosNif.enter_raw_mode()}
+    {:ok, TermiosNif.enter_raw_mode()}
   catch
     :error, :undef -> :nif_not_loaded
   end
 
   defp nif_exit_raw_mode do
-    Drafter.Terminal.TermiosNif.exit_raw_mode()
+    TermiosNif.exit_raw_mode()
   catch
     :error, :undef -> :ok
   end
@@ -369,7 +366,7 @@ defmodule Drafter.Terminal.Driver do
     case :os.type() do
       {:unix, _} ->
         try do
-          Drafter.Terminal.TermiosNif.flush_stdin()
+          TermiosNif.flush_stdin()
         catch
           :error, :undef -> :ok
           _, _ -> :ok
@@ -482,7 +479,7 @@ defmodule Drafter.Terminal.Driver do
     end
   end
 
-  defp setup_signal_handling() do
+  defp setup_signal_handling do
     case :os.type() do
       {:unix, _} ->
         spawn_link(fn -> poll_terminal_size() end)
@@ -492,7 +489,7 @@ defmodule Drafter.Terminal.Driver do
     end
   end
 
-  defp poll_terminal_size() do
+  defp poll_terminal_size do
     initial_size = detect_terminal_size()
     poll_size_loop(initial_size)
   end
@@ -509,7 +506,7 @@ defmodule Drafter.Terminal.Driver do
     end
   end
 
-  defp detect_terminal_size() do
+  defp detect_terminal_size do
     case :os.type() do
       {:win32, _} -> detect_terminal_size_windows()
       _ -> detect_terminal_size_unix()

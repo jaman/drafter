@@ -1,7 +1,7 @@
 defmodule Drafter.Examples.Counter do
   @moduledoc """
   A simple counter application demonstrating Drafter basics.
-  
+
   Shows a counter value with increment/decrement buttons.
   Press 'q' or Escape to quit.
   """
@@ -57,7 +57,7 @@ defmodule Drafter.Examples.Counter do
   end
 
   def handle_event(:increment, state) do
-    new_state = %{state | 
+    new_state = %{state |
       counter: state.counter + 1,
       message: "Incremented!"
     }
@@ -65,7 +65,7 @@ defmodule Drafter.Examples.Counter do
   end
 
   def handle_event(:decrement, state) do
-    new_state = %{state | 
+    new_state = %{state |
       counter: state.counter - 1,
       message: "Decremented!"
     }
@@ -77,7 +77,7 @@ defmodule Drafter.Examples.Counter do
   end
 
   def handle_event({:key, :enter}, state) do
-    new_state = %{state | 
+    new_state = %{state |
       counter: 0,
       message: "Counter reset!"
     }

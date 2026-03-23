@@ -9,13 +9,6 @@ defmodule Drafter.Application do
       {Phoenix.PubSub, name: Drafter.PubSub},
       Drafter.Style.StylesheetLoader,
       Drafter.Animation,
-      Drafter.Event.CustomRegistry,
-      Drafter.ActionRegistry,
-      Drafter.EventHandler,
-      Drafter.FocusRegistry,
-      Drafter.ScreenManager,
-      Drafter.ThemeManager,
-      Drafter.SkinManager,
       {Registry, keys: :unique, name: Drafter.Session.Registry},
       Drafter.Session
     ]

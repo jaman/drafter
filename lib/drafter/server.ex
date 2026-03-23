@@ -33,6 +33,8 @@ defmodule Drafter.Server do
   Then pass `system_dir: "/etc/drafter"`.
   """
 
+  alias Drafter.Transport
+
   @doc """
   Start an SSH server hosting the given app module.
 
@@ -47,7 +49,7 @@ defmodule Drafter.Server do
   """
   @spec start_ssh(module(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_ssh(app_module, opts \\ []) do
-    Drafter.Transport.SSH.start_link(app_module, opts)
+    Transport.SSH.start_link(app_module, opts)
   end
 
   @doc """
@@ -61,6 +63,6 @@ defmodule Drafter.Server do
   """
   @spec start_telnet(module(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_telnet(app_module, opts \\ []) do
-    Drafter.Transport.Telnet.start_link(app_module, opts)
+    Transport.Telnet.start_link(app_module, opts)
   end
 end

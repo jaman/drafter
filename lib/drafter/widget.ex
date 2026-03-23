@@ -6,7 +6,8 @@ defmodule Drafter.Widget do
   utilities for widget lifecycle management.
   """
 
-  alias Drafter.{Event, Draw.Strip}
+  alias Drafter.Draw.Strip
+  alias Drafter.Event
 
   @type props :: map()
   @type state :: term()
@@ -99,6 +100,8 @@ defmodule Drafter.Widget do
     quote do
       @behaviour Drafter.Widget
 
+      alias Drafter.Widget.EventRouter
+
       @__widget_handles__ unquote(handles)
       @__widget_capture_handles__ unquote(capture_handles)
       @__widget_focusable__ unquote(focusable)
@@ -119,7 +122,7 @@ defmodule Drafter.Widget do
       def unmount(state), do: Drafter.Widget.unmount(state)
 
       def handle_event(event, state) do
-        Drafter.Widget.EventRouter.route_event(
+        EventRouter.route_event(
           __MODULE__,
           event,
           state,
@@ -139,8 +142,8 @@ defmodule Drafter.Widget do
 
       def preferred_height(_args, _opts), do: 1
 
-      defoverridable mount: 1, render: 2, handle_event: 2, update: 2, unmount: 1, focused: 1,
-                     update_props_from_mount: 3, preferred_height: 2
+      defoverridable Drafter.Widget
+      defoverridable focused: 1, update_props_from_mount: 3, preferred_height: 2
     end
   end
 

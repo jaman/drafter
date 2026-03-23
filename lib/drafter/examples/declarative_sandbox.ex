@@ -69,7 +69,7 @@ defmodule Drafter.Examples.DeclarativeSandbox do
           )
         ]),
 
-        # Text input section  
+        # Text input section
         label("Text Input:"),
         text_input(
           value: state.text_input_value,

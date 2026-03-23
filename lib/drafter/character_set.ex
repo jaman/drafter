@@ -477,7 +477,7 @@ defmodule Drafter.CharacterSet do
 
   @doc "Returns the full style preferences map for the current skin."
   @spec style() :: map()
-  def style(), do: get_in(@skins, [current_skin(), :style]) || %{border: :rounded, padding: 1, preferred_theme: "textual-dark"}
+  def style, do: get_in(@skins, [current_skin(), :style]) || %{border: :rounded, padding: 1, preferred_theme: "textual-dark"}
 
   @doc "Returns a single style preference key for the current skin."
   @spec style(atom()) :: term()
@@ -485,7 +485,7 @@ defmodule Drafter.CharacterSet do
 
   @doc "Returns the preferred theme name for the current skin."
   @spec preferred_theme() :: String.t()
-  def preferred_theme(), do: style(:preferred_theme) || "textual-dark"
+  def preferred_theme, do: style(:preferred_theme) || "textual-dark"
 
   @doc "Returns the preferred theme name for the given skin atom."
   @spec preferred_theme(atom()) :: String.t()
@@ -533,7 +533,7 @@ defmodule Drafter.CharacterSet do
 
   @doc "Returns the vertical sparkline level list for the current skin."
   @spec sparkline_levels_v() :: [String.t()]
-  def sparkline_levels_v(), do: sparkline_levels_v(current_skin())
+  def sparkline_levels_v, do: sparkline_levels_v(current_skin())
 
   @doc "Returns the vertical sparkline level list for the given skin."
   @spec sparkline_levels_v(atom()) :: [String.t()]
@@ -541,7 +541,7 @@ defmodule Drafter.CharacterSet do
 
   @doc "Returns the horizontal sparkline level list for the current skin."
   @spec sparkline_levels_h() :: [String.t()]
-  def sparkline_levels_h(), do: sparkline_levels_h(current_skin())
+  def sparkline_levels_h, do: sparkline_levels_h(current_skin())
 
   @doc "Returns the horizontal sparkline level list for the given skin."
   @spec sparkline_levels_h(atom()) :: [String.t()]
@@ -569,11 +569,7 @@ defmodule Drafter.CharacterSet do
 
   defp current_skin do
     case Process.get(:drafter_skin) do
-      nil ->
-        case :persistent_term.get({Drafter.SkinManager, :current_skin}, nil) do
-          nil -> :graphical
-          skin -> skin
-        end
+      nil -> Drafter.SkinManager.get_current_skin()
       skin -> skin
     end
   end

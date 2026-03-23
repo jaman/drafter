@@ -105,9 +105,9 @@ defmodule Drafter.Widget.Chart do
 
   import Bitwise
 
+  alias Drafter.{CharacterSet, Visualization}
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.{CharacterSet, Visualization}
 
   @type chart_type ::
           :line
@@ -119,6 +119,7 @@ defmodule Drafter.Widget.Chart do
           | :area
           | :scatter
           | :braille
+          | :braille_area
 
   @default_series_colors [
     {255, 100, 100},
@@ -176,6 +177,7 @@ defmodule Drafter.Widget.Chart do
     :bar_labels,
     :show_values,
     bar_gap: 0,
+    show_baseline: false,
     focused: false,
     _internal: %{}
   ]
@@ -231,6 +233,7 @@ defmodule Drafter.Widget.Chart do
       orientation: Map.get(props, :orientation, :vertical),
       bar_labels: Map.get(props, :bar_labels, []),
       show_values: Map.get(props, :show_values, false),
+      show_baseline: Map.get(props, :show_baseline, false),
       _internal: %{
         render_timestamp: Map.get(props, :_render_timestamp, 0),
         animation_offset: 0,
@@ -324,6 +327,7 @@ defmodule Drafter.Widget.Chart do
       orientation: Keyword.get(opts, :orientation, :vertical),
       bar_labels: Keyword.get(opts, :bar_labels, []),
       show_values: Keyword.get(opts, :show_values, false),
+      show_baseline: Keyword.get(opts, :show_baseline, false),
       style: Keyword.get(opts, :style, %{}),
       classes: classes,
       app_module: Keyword.get(opts, :__app_module__),
@@ -433,6 +437,7 @@ defmodule Drafter.Widget.Chart do
   defp dispatch_chart_v(:area, state, w, h, bg, fg, anim), do: render_area_chart(state, w, h, bg, fg, anim)
   defp dispatch_chart_v(:scatter, state, w, h, bg, fg, _anim), do: render_scatter_chart(state, w, h, bg, fg)
   defp dispatch_chart_v(:braille, state, w, h, bg, fg, anim), do: render_braille_chart(state, w, h, bg, fg, anim)
+  defp dispatch_chart_v(:braille_area, state, w, h, bg, _fg, _anim), do: render_braille_area(state, w, h, bg)
   defp dispatch_chart_v(_, state, w, h, bg, fg, anim), do: render_line_chart(state, w, h, bg, fg, anim)
 
   @impl Drafter.Widget
@@ -774,7 +779,8 @@ defmodule Drafter.Widget.Chart do
     y_offset = state._internal.y_offset || 0
     label_width = 11
     viewport_width = max(1, width - label_width)
-    {start_index, display_candles} = Drafter.ScrollMath.end_anchored_slice(filtered_candles, scroll_offset, viewport_width)
+    {start_index, display_candles} =
+      Drafter.ScrollMath.end_anchored_slice(filtered_candles, scroll_offset, viewport_width)
 
     if display_candles == [] do
       empty_strips(height, bg)
@@ -795,7 +801,8 @@ defmodule Drafter.Widget.Chart do
     label_color = {140, 140, 150}
     time_label_color = {120, 120, 130}
 
-    chart_strips = render_candlestick_body(display_candles, height - 1, min_val, max_val, bull_color, bear_color, label_color, bg)
+    chart_strips =
+      render_candlestick_body(display_candles, height - 1, min_val, max_val, bull_color, bear_color, label_color, bg)
     time_strip = render_time_axis(display_candles, start_index, label_color, time_label_color, bg)
     chart_strips ++ [time_strip]
   end
@@ -979,7 +986,8 @@ defmodule Drafter.Widget.Chart do
 
       is_list(hd(data)) and hd(data) != [] and is_list(hd(hd(data))) ->
         colors = if state.colors != [], do: state.colors, else: @default_series_colors
-        render_multi_series_scatter(data, width, height, bg, colors, state.min_value, state.max_value, state._internal.scroll_offset || 0)
+        scroll = state._internal.scroll_offset || 0
+        render_multi_series_scatter(data, width, height, bg, colors, state.min_value, state.max_value, scroll)
 
       true ->
         render_scatter_single_series(state, data, width, height, bg, fg)
@@ -1089,6 +1097,183 @@ defmodule Drafter.Widget.Chart do
 
       Strip.new(segments)
     end
+  end
+
+  defp render_braille_area(state, width, height, bg) do
+    raw = state.data
+
+    series =
+      cond do
+        raw == [] -> []
+        is_number(hd(raw)) -> [raw]
+        true -> raw
+      end
+
+    case series do
+      [] -> empty_strips(height, bg)
+      _ -> render_braille_area_stacked(series, state, width, height, bg)
+    end
+  end
+
+  defp render_braille_area_stacked(series, state, width, height, bg) do
+    colors = if state.colors != [], do: state.colors, else: [{80, 200, 80}, {200, 180, 40}]
+    num_series = length(series)
+    pixel_h = height * 4
+    pixel_w = width * 2
+
+    stacked = slice_and_stack(series, pixel_w, state._internal.scroll_offset || 0)
+
+    {stack_min, range} = compute_stack_range(stacked)
+
+    grid = :atomics.new(width * height, signed: false)
+    color_grid = Enum.map(0..(width * height - 1), fn _ -> :atomics.new(3, signed: true) end)
+
+    ctx = %{
+      stacked: stacked, colors: colors, num_series: num_series,
+      pixel_h: pixel_h, pixel_w: pixel_w, range: range,
+      stack_min: stack_min, grid: grid, color_grid: color_grid, char_w: width
+    }
+
+    fill_braille_area_grid(ctx)
+
+    baseline_row = compute_baseline_row(state, pixel_h, stack_min, range)
+
+    for row <- 0..(height - 1) do
+      segments =
+        for col <- 0..(width - 1) do
+          braille_area_cell(row, col, width, grid, color_grid, baseline_row, bg)
+        end
+
+      Strip.new(segments)
+    end
+  end
+
+  defp slice_and_stack(series, pixel_w, scroll_offset) do
+    max_len = series |> Enum.map(&length/1) |> Enum.max()
+    end_idx = max(0, max_len - scroll_offset)
+    start_idx = max(0, end_idx - pixel_w)
+    visible_count = end_idx - start_idx
+
+    sliced = Enum.map(series, fn s -> Enum.slice(s, start_idx, visible_count) end)
+    build_stacked_columns(sliced, length(series))
+  end
+
+  defp compute_stack_range(stacked) do
+    all_tops = Enum.flat_map(stacked, fn col -> Enum.map(col, fn {_, top} -> top end) end)
+    computed_max = if all_tops == [], do: 1, else: Enum.max(all_tops)
+    stack_min = 0
+    stack_max = if computed_max == stack_min, do: computed_max + 1, else: computed_max
+    {stack_min, stack_max - stack_min}
+  end
+
+  defp compute_baseline_row(state, pixel_h, stack_min, range) do
+    if state.show_baseline do
+      baseline_py = pixel_h - 1 - round((0 - stack_min) / range * (pixel_h - 1))
+      div(max(0, min(baseline_py, pixel_h - 1)), 4)
+    else
+      nil
+    end
+  end
+
+  defp braille_area_cell(row, col, width, grid, color_grid, baseline_row, bg) do
+    idx = row * width + col
+    bits = :atomics.get(grid, idx + 1)
+
+    if bits == 0 do
+      braille_empty_cell(row, baseline_row, bg)
+    else
+      braille_colored_cell(bits, Enum.at(color_grid, idx), bg)
+    end
+  end
+
+  defp braille_empty_cell(row, row, bg), do: Segment.new("⠒", %{fg: {60, 60, 60}, bg: bg})
+  defp braille_empty_cell(_row, _baseline, bg), do: Segment.new(braille_char(0), %{bg: bg})
+
+  defp braille_colored_cell(bits, color_ref, bg) do
+    fg_color = {:atomics.get(color_ref, 1), :atomics.get(color_ref, 2), :atomics.get(color_ref, 3)}
+    Segment.new(braille_char(bits), %{fg: fg_color, bg: bg})
+  end
+
+  defp build_stacked_columns(sliced, num_series) do
+    max_len = sliced |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+
+    for col_idx <- 0..(max_len - 1) do
+      Enum.reduce(0..(num_series - 1), {0, []}, fn si, {running, acc} ->
+        val = sliced |> Enum.at(si) |> Enum.at(col_idx, 0)
+        new_top = running + val
+        {new_top, [{running, new_top} | acc]}
+      end)
+      |> elem(1)
+      |> Enum.reverse()
+    end
+  end
+
+  defp fill_braille_area_grid(ctx) do
+    ctx.stacked
+    |> Enum.with_index()
+    |> Enum.each(fn {col_layers, col_idx} ->
+      if col_idx < ctx.pixel_w do
+        fill_braille_column(col_layers, col_idx, ctx)
+      end
+    end)
+  end
+
+  defp fill_braille_column(col_layers, col_idx, ctx) do
+    char_col = div(col_idx, 2)
+    local_x = rem(col_idx, 2)
+
+    Enum.each(0..(ctx.num_series - 1), fn si ->
+      {bottom, top} = Enum.at(col_layers, si)
+      series_color = Enum.at(ctx.colors, rem(si, length(ctx.colors)))
+      dim_color = Drafter.Style.mix({0, 0, 0}, series_color, 0.6)
+
+      {lo_py, hi_py, top_py} = compute_pixel_range(bottom, top, ctx)
+
+      Enum.each(lo_py..hi_py, fn py ->
+        paint_braille_pixel(py, local_x, char_col, top_py, series_color, dim_color, ctx)
+      end)
+    end)
+  end
+
+  defp compute_pixel_range(bottom, top, ctx) do
+    bottom_py = ctx.pixel_h - 1 - round((bottom - ctx.stack_min) / ctx.range * (ctx.pixel_h - 1))
+    top_py = ctx.pixel_h - 1 - round((top - ctx.stack_min) / ctx.range * (ctx.pixel_h - 1))
+    lo_py = max(0, min(top_py, ctx.pixel_h - 1))
+    hi_py = max(0, min(bottom_py, ctx.pixel_h - 1))
+    {lo_py, hi_py, top_py}
+  end
+
+  defp paint_braille_pixel(py, local_x, char_col, top_py, series_color, dim_color, ctx) do
+    local_y = rem(py, 4)
+    char_row = div(py, 4)
+    bit = Map.get(@braille_dot_offsets, {local_x, local_y}, 0)
+    idx = char_row * ctx.char_w + char_col + 1
+    max_idx = ctx.char_w * div(ctx.pixel_h, 4)
+
+    if idx >= 1 and idx <= max_idx do
+      old_bits = :atomics.get(ctx.grid, idx)
+      :atomics.put(ctx.grid, idx, old_bits ||| bit)
+
+      pixel_color = if py == top_py, do: series_color, else: dim_color
+      blend_pixel_color(Enum.at(ctx.color_grid, idx - 1), pixel_color)
+    end
+  end
+
+  defp blend_pixel_color(color_ref, {pr, pg, pb} = pixel_color) do
+    old_r = :atomics.get(color_ref, 1)
+    old_g = :atomics.get(color_ref, 2)
+    old_b = :atomics.get(color_ref, 3)
+
+    {mr, mg, mb} =
+      if old_r == 0 and old_g == 0 and old_b == 0 do
+        {pr, pg, pb}
+      else
+        Drafter.Style.mix({old_r, old_g, old_b}, pixel_color, 0.5)
+      end
+
+    :atomics.put(color_ref, 1, mr)
+    :atomics.put(color_ref, 2, mg)
+    :atomics.put(color_ref, 3, mb)
   end
 
   defp render_braille_chart(state, width, height, bg, fg, animation_offset) do

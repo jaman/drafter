@@ -13,7 +13,7 @@ defmodule Drafter.LayerCompositor do
   4. Chrome - UI decorations (borders, scrollbars, focus indicators)
   """
 
-  alias Drafter.Draw.{Strip, Segment}
+  alias Drafter.Draw.{Segment, Strip}
 
   @type layer :: %{
           id: atom(),

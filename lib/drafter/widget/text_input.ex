@@ -50,6 +50,7 @@ defmodule Drafter.Widget.TextInput do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.Widget.Callback
 
   defstruct [
     :text,
@@ -636,7 +637,7 @@ defmodule Drafter.Widget.TextInput do
 
   defp build_submit_fn(on_submit, keep_focus, session_pid, widget_id) do
     fn {text, _vr} ->
-      Drafter.Widget.Callback.wrap_1(on_submit).(text)
+      Callback.wrap_1(on_submit).(text)
       if keep_focus, do: send(session_pid, {:focus_widget, widget_id})
     end
   end

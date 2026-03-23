@@ -30,9 +30,9 @@ defmodule Drafter.Widget.ScrollableContainer do
     handles: [:keyboard, :scroll],
     focusable: true
 
+  alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.ThemeManager
-  alias Drafter.CharacterSet
 
   defstruct [
     :id,
@@ -185,7 +185,6 @@ defmodule Drafter.Widget.ScrollableContainer do
   end
 
   def handle_event(_, state), do: {:bubble, state}
-
 
   defp get_thumb_position(state) do
     viewport_height = state.viewport_height

@@ -12,14 +12,12 @@ defmodule Drafter.Syntax.ElixirHighlighter do
   def highlight(_source, _language), do: []
 
   defp tokenize(source) do
-    try do
-      case :elixir.string_to_tokens(String.to_charlist(source), 1, 1, "nofile", []) do
-        {:ok, tokens} -> Enum.flat_map(tokens, &token_to_capture/1)
-        _ -> []
-      end
-    rescue
+    case :elixir.string_to_tokens(String.to_charlist(source), 1, 1, "nofile", []) do
+      {:ok, tokens} -> Enum.flat_map(tokens, &token_to_capture/1)
       _ -> []
     end
+  rescue
+    _ -> []
   end
 
   defp token_to_capture({:identifier, {line, col, raw}, value}) when value in @keyword_identifiers do

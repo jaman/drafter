@@ -16,7 +16,14 @@ defmodule Drafter.EventHandler do
   def register_handler(event_pattern, handler_fn, owner_pid, opts \\ []) do
     passthrough = Keyword.get(opts, :passthrough, false)
     level = Keyword.get(opts, :level, :top)
-    GenServer.call(resolve(), {:register, event_pattern, handler_fn, owner_pid, passthrough, level})
+
+    target =
+      case Keyword.fetch(opts, :target) do
+        {:ok, pid} -> pid
+        :error -> resolve()
+      end
+
+    GenServer.call(target, {:register, event_pattern, handler_fn, owner_pid, passthrough, level})
   end
 
   @spec unregister_handler(pid(), term()) :: :ok
@@ -185,7 +192,10 @@ defmodule Drafter.EventHandler do
     {:noreply, state}
   end
 
-  defp resolve(), do: Process.get(:drafter_event_handler, __MODULE__)
+  defp resolve do
+    Process.get(:drafter_event_handler) ||
+      raise "No EventHandler in process dictionary. Ensure a Drafter session is running."
+  end
 
   defp insert_after(handlers, target_pid, new_level) do
     Enum.flat_map(handlers, fn level ->

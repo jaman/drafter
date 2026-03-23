@@ -27,6 +27,7 @@ defmodule Drafter.Widget.Button do
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style
   alias Drafter.Style.Computed
+  alias Drafter.Widget.Callback
 
   @active_effect_duration 200
 
@@ -272,7 +273,7 @@ defmodule Drafter.Widget.Button do
       c when is_binary(c) -> String.to_atom(c)
       c when is_atom(c) -> c
     end)
-    on_click = if disabled, do: nil, else: Drafter.Widget.Callback.wrap_0(Keyword.get(opts, :on_click))
+    on_click = if disabled, do: nil, else: Callback.wrap_0(Keyword.get(opts, :on_click))
     %{
       text: text,
       button_type: Keyword.get(opts, :variant, Keyword.get(opts, :type, :default)),

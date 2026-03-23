@@ -167,19 +167,4 @@ defmodule Drafter.Event do
   defdelegate prevent_default(event_object), to: EventObject
   defdelegate stop_propagation(event_object), to: EventObject
   defdelegate stop_immediate_propagation(event_object), to: EventObject
-
-  @doc "Register a custom event type with schema validation"
-  @spec register_custom_event(atom(), map()) :: :ok
-  def register_custom_event(type, schema \\ %{}) do
-    Drafter.Event.CustomRegistry.register_event_type(type, schema)
-  end
-
-  @doc "Create a typed custom event"
-  @spec emit_custom(atom(), term()) :: {:ok, t()} | {:error, term()}
-  def emit_custom(type, data) do
-    case Drafter.Event.CustomRegistry.validate_event(type, data) do
-      {:ok, validated_data} -> {:ok, {:custom, %{type: type, data: validated_data}}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
 end

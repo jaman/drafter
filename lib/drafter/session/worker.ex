@@ -3,6 +3,8 @@ defmodule Drafter.Session.Worker do
 
   use GenServer
 
+  alias Drafter.{Compositor, Event, EventHandler, ScreenManager, ThemeManager, Transport}
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -16,18 +18,18 @@ defmodule Drafter.Session.Worker do
     shared_state = Keyword.get(opts, :shared_state)
     mount_props = Keyword.get(opts, :mount_props, %{})
 
-    {:ok, em} = Drafter.Event.Manager.start_link(name: nil)
+    {:ok, em} = Event.Manager.start_link(name: nil)
 
     {:ok, comp} =
-      Drafter.Compositor.start_link(
+      Compositor.start_link(
         name: nil,
-        terminal_driver: {Drafter.Transport.SessionDriver, driver_pid},
+        terminal_driver: {Transport.SessionDriver, driver_pid},
         event_manager: em
       )
 
-    {:ok, sm} = Drafter.ScreenManager.start_link(name: nil)
-    {:ok, tm} = Drafter.ThemeManager.start_link(name: nil)
-    {:ok, eh} = Drafter.EventHandler.start_link(name: nil)
+    {:ok, tm} = ThemeManager.start_link(name: nil)
+    {:ok, eh} = EventHandler.start_link(name: nil)
+    {:ok, sm} = ScreenManager.start_link(name: nil, event_handler: eh)
 
     Process.link(em)
     Process.link(comp)
@@ -51,8 +53,8 @@ defmodule Drafter.Session.Worker do
         Drafter.run_session(app_module, session_ctx, session_opts)
       end)
 
-    Drafter.Transport.SessionDriver.set_event_manager(driver_pid, em)
-    Drafter.Event.Manager.subscribe_to(em, app_pid, :all)
+    Transport.SessionDriver.set_event_manager(driver_pid, em)
+    Event.Manager.subscribe_to(em, app_pid, :all)
 
     Process.monitor(app_pid)
 

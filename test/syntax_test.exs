@@ -1,7 +1,7 @@
 defmodule Drafter.SyntaxTest do
   use ExUnit.Case, async: true
 
-  alias Drafter.Syntax.{TSFeatures, Highlighter, ElixirHighlighter, PlainHighlighter}
+  alias Drafter.Syntax.{ElixirHighlighter, Highlighter, PlainHighlighter, TSFeatures}
 
   @treesitter_available Code.ensure_loaded?(:tree_sitter) and
                           function_exported?(:tree_sitter, :parse, 2)

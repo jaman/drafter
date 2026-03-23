@@ -59,6 +59,9 @@ defmodule Drafter.WidgetServer do
     props = Keyword.get(opts, :props, %{})
     rect = Keyword.get(opts, :rect, %{x: 0, y: 0, width: 10, height: 3})
     id = Keyword.get(opts, :id)
+    session_ctx = Keyword.get(opts, :session_ctx, %{})
+
+    Enum.each(session_ctx, fn {key, val} -> Process.put(key, val) end)
 
     WidgetStripCache.create()
 

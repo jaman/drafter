@@ -26,9 +26,9 @@ defmodule Drafter.Widget.ProgressBar do
 
   use Drafter.Widget
 
+  alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.CharacterSet
 
   defstruct [
     :progress,

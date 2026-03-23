@@ -27,15 +27,15 @@ defmodule Drafter.Session.SharedState do
   @spec update_state(pid(), map()) :: :ok
   def update_state(server, new_state), do: GenServer.call(server, {:update_state, new_state})
 
-  @spec pubsub_topic(pid()) :: String.t()
-  def pubsub_topic(server), do: "drafter:shared:#{:erlang.pid_to_list(server)}"
+  @spec subscribe(pid()) :: :ok
+  def subscribe(server), do: GenServer.call(server, {:subscribe, self()})
 
   @impl GenServer
   def init(opts) do
     app_module = Keyword.fetch!(opts, :app_module)
     mount_props = Keyword.get(opts, :mount_props, %{})
     app_state = app_module.mount(mount_props)
-    {:ok, %{app_state: app_state}}
+    {:ok, %{app_state: app_state, subscribers: MapSet.new()}}
   end
 
   @impl GenServer
@@ -44,10 +44,22 @@ defmodule Drafter.Session.SharedState do
   end
 
   def handle_call({:update_state, new_state}, _from, state) do
-    Phoenix.PubSub.broadcast(Drafter.PubSub, pubsub_topic(self()), {:shared_state_updated, new_state})
+    Enum.each(state.subscribers, fn pid ->
+      send(pid, {:shared_state_updated, new_state})
+    end)
+
     {:reply, :ok, %{state | app_state: new_state}}
   end
 
+  def handle_call({:subscribe, pid}, _from, state) do
+    Process.monitor(pid)
+    {:reply, :ok, %{state | subscribers: MapSet.put(state.subscribers, pid)}}
+  end
+
   @impl GenServer
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    {:noreply, %{state | subscribers: MapSet.delete(state.subscribers, pid)}}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 end

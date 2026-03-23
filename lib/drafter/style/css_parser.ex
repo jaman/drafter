@@ -5,9 +5,6 @@ defmodule Drafter.Style.CSSParser do
 
   @type parse_result :: {:ok, Stylesheet.t()} | {:error, String.t()}
 
-  @doc """
-  Parse CSS content from a string.
-  """
   def parse_string(css_content) when is_binary(css_content) do
     css_content
     |> preprocess_css()
@@ -68,38 +65,65 @@ defmodule Drafter.Style.CSSParser do
         extract_rules(rest, [rule | acc], "")
 
       :error ->
-        {char, rest} = String.split_at(css_string, 1)
-        extract_rules(rest, acc, buffer <> char)
+        <<byte, rest::binary>> = css_string
+        extract_rules(rest, acc, buffer <> <<byte>>)
     end
   end
 
-  defp find_matching_brace(str) do
-    find_matching_brace(str, 0, 0, "")
+  defp find_matching_brace(str), do: find_matching_brace(str, 0, <<>>)
+
+  defp find_matching_brace(<<>>, _depth, _acc), do: :error
+
+  defp find_matching_brace(<<?\", rest::binary>>, depth, acc) do
+    case skip_string(rest, ?\" , <<?\">>) do
+      {:ok, string_content, remaining} ->
+        find_matching_brace(remaining, depth, acc <> string_content)
+
+      :error ->
+        :error
+    end
   end
 
-  defp find_matching_brace("", _brace_count, _pos, _acc), do: :error
+  defp find_matching_brace(<<?', rest::binary>>, depth, acc) do
+    case skip_string(rest, ?', <<?'>>) do
+      {:ok, string_content, remaining} ->
+        find_matching_brace(remaining, depth, acc <> string_content)
 
-  defp find_matching_brace("{" <> rest, brace_count, pos, acc) do
-    find_matching_brace(rest, brace_count + 1, pos + 1, acc <> "{")
+      :error ->
+        :error
+    end
   end
 
-  defp find_matching_brace("}" <> rest, 1, pos, acc) do
-    rule = String.slice(acc <> "}", 0, pos + 1)
-    rest = String.slice(rest, 1, String.length(rest))
-    {:ok, rule, rest}
+  defp find_matching_brace(<<?{, rest::binary>>, depth, acc) do
+    find_matching_brace(rest, depth + 1, acc <> "{")
   end
 
-  defp find_matching_brace("}" <> rest, brace_count, pos, acc) do
-    find_matching_brace(rest, brace_count - 1, pos + 1, acc <> "}")
+  defp find_matching_brace(<<?}, rest::binary>>, 1, acc) do
+    {:ok, acc <> "}", rest}
   end
 
-  defp find_matching_brace(<<char::utf8, rest::binary>>, brace_count, pos, acc) do
-    find_matching_brace(rest, brace_count, pos + 1, acc <> <<char::utf8>>)
+  defp find_matching_brace(<<?}, rest::binary>>, depth, acc) do
+    find_matching_brace(rest, depth - 1, acc <> "}")
   end
 
-  @doc """
-  Parse CSS from a file.
-  """
+  defp find_matching_brace(<<byte, rest::binary>>, depth, acc) do
+    find_matching_brace(rest, depth, acc <> <<byte>>)
+  end
+
+  defp skip_string(<<>>, _quote, _acc), do: :error
+
+  defp skip_string(<<?\\, escaped, rest::binary>>, quote, acc) do
+    skip_string(rest, quote, acc <> <<?\\, escaped>>)
+  end
+
+  defp skip_string(<<quote, rest::binary>>, quote, acc) do
+    {:ok, acc <> <<quote>>, rest}
+  end
+
+  defp skip_string(<<byte, rest::binary>>, quote, acc) do
+    skip_string(rest, quote, acc <> <<byte>>)
+  end
+
   def parse_file(file_path) do
     case File.read(file_path) do
       {:ok, content} -> parse_string(content)
@@ -108,9 +132,9 @@ defmodule Drafter.Style.CSSParser do
   end
 
   defp parse_rule(line) do
-    regex = ~r/^(.*?)\s*\{\s*(.*?)\s*\}$/
+    regex = ~r/^(.*?)\s*\{\s*(.*?)\s*\}$/s
 
-    case Regex.run(regex, line, [:dotall]) do
+    case Regex.run(regex, line) do
       [_, selector_str, properties_str] ->
         selector_strings = parse_selector_string(selector_str)
 
@@ -124,7 +148,8 @@ defmodule Drafter.Style.CSSParser do
   end
 
   defp parse_selector_string(selector_str) do
-    String.split(selector_str, ",")
+    selector_str
+    |> String.split(",")
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
   end
@@ -175,7 +200,13 @@ defmodule Drafter.Style.CSSParser do
   }
 
   defp normalize_property_key(key) do
-    Map.get(@property_key_map, key, String.to_atom(key))
+    Map.get(@property_key_map, key) || safe_to_atom(key)
+  end
+
+  defp safe_to_atom(str) do
+    String.to_existing_atom(str)
+  rescue
+    ArgumentError -> String.to_atom(str)
   end
 
   defp parse_value(value_str) do
@@ -203,37 +234,15 @@ defmodule Drafter.Style.CSSParser do
         String.to_float(value_str)
 
       true ->
-        String.to_atom(value_str)
+        safe_to_atom(value_str)
     end
   end
 
-  @doc """
-  Parse a hex color string (e.g., "#ff0000" or "#f00").
-  """
-  def parse_hex_color("#" <> hex_str) do
+  def parse_hex_color(<<"#", hex_str::binary>>) do
     hex_str = String.downcase(hex_str)
 
     if Regex.match?(~r/^[0-9a-f]+$/, hex_str) do
-      case String.length(hex_str) do
-        3 ->
-          {r, g, b} = {
-            String.to_integer(String.slice(hex_str, 0, 1), 16) * 17,
-            String.to_integer(String.slice(hex_str, 1, 1), 16) * 17,
-            String.to_integer(String.slice(hex_str, 2, 1), 16) * 17
-          }
-          {:ok, {r, g, b}}
-
-        6 ->
-          {r, g, b} = {
-            String.to_integer(String.slice(hex_str, 0, 2), 16),
-            String.to_integer(String.slice(hex_str, 2, 2), 16),
-            String.to_integer(String.slice(hex_str, 4, 2), 16)
-          }
-          {:ok, {r, g, b}}
-
-        _ ->
-          :error
-      end
+      parse_hex_digits(hex_str)
     else
       :error
     end
@@ -241,49 +250,52 @@ defmodule Drafter.Style.CSSParser do
 
   def parse_hex_color(_), do: :error
 
-  @doc """
-  Parse an RGB color string (e.g., "rgb(255, 0, 0)").
-  """
+  defp parse_hex_digits(<<r, g, b>> = _hex) when byte_size(<<r, g, b>>) == 3 do
+    {:ok,
+     {String.to_integer(<<r>>, 16) * 17,
+      String.to_integer(<<g>>, 16) * 17,
+      String.to_integer(<<b>>, 16) * 17}}
+  end
+
+  defp parse_hex_digits(<<r1, r2, g1, g2, b1, b2>> = _hex) when byte_size(<<r1, r2, g1, g2, b1, b2>>) == 6 do
+    {:ok,
+     {String.to_integer(<<r1, r2>>, 16),
+      String.to_integer(<<g1, g2>>, 16),
+      String.to_integer(<<b1, b2>>, 16)}}
+  end
+
+  defp parse_hex_digits(_), do: :error
+
   def parse_rgb_color(str) do
     case Regex.run(~r/^rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i, str) do
       [_, r, g, b] ->
-        r = String.to_integer(r)
-        g = String.to_integer(g)
-        b = String.to_integer(b)
-
-        if r > 255 or g > 255 or b > 255 do
-          :error
-        else
-          {:ok, {r, g, b}}
-        end
+        parse_rgb_values(String.to_integer(r), String.to_integer(g), String.to_integer(b))
 
       _ ->
         :error
     end
   end
 
-  @doc """
-  Parse an RGBA color string (e.g., "rgba(255, 0, 0, 0.5)").
-  """
   def parse_rgba_color(str) do
     case Regex.run(~r/^rgba\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i, str) do
       [_, r, g, b, a] ->
-        r = String.to_integer(r)
-        g = String.to_integer(g)
-        b = String.to_integer(b)
+        ri = String.to_integer(r)
+        gi = String.to_integer(g)
+        bi = String.to_integer(b)
 
-        if r > 255 or g > 255 or b > 255 do
+        if ri > 255 or gi > 255 or bi > 255 do
           :error
         else
-          alpha = parse_alpha_value(a)
-          rgb = {r, g, b}
-          {:ok, {:rgba, rgb, alpha}}
+          {:ok, {:rgba, {ri, gi, bi}, parse_alpha_value(a)}}
         end
 
       _ ->
         :error
     end
   end
+
+  defp parse_rgb_values(r, g, b) when r > 255 or g > 255 or b > 255, do: :error
+  defp parse_rgb_values(r, g, b), do: {:ok, {r, g, b}}
 
   defp parse_alpha_value(a) do
     a = String.trim(a)
@@ -296,8 +308,7 @@ defmodule Drafter.Style.CSSParser do
         String.to_float(a)
 
       true ->
-        a_int = String.to_integer(a)
-        a_int / 1.0
+        String.to_integer(a) / 1.0
     end
   end
 end

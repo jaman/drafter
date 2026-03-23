@@ -54,8 +54,7 @@ defmodule Drafter.Style.StylesheetLoader do
   @impl true
   def handle_call({:load_stylesheet, app_module}, _from, state) do
     result = do_load_stylesheet(app_module, state.cache)
-    new_state = put_in(state.cache[{:app, app_module}], result.stylesheet)
-    {:reply, {:ok, result.stylesheet}, new_state}
+    {:reply, {:ok, result.stylesheet}, state}
   end
 
   @impl true

@@ -2,7 +2,7 @@ defmodule Drafter.Style.Computed do
   @moduledoc false
 
   alias Drafter.Style
-  alias Drafter.Style.{Stylesheet, WidgetStyles, StylesheetLoader}
+  alias Drafter.Style.{Stylesheet, StylesheetLoader, WidgetStyles}
   alias Drafter.ThemeManager
 
   @type context :: map()

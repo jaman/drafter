@@ -48,9 +48,9 @@ defmodule Drafter.Widget.Collapsible do
     handles: [:keyboard, :click],
     focusable: true
 
+  alias Drafter.{CharacterSet, Text, ThemeManager}
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.{Text, ThemeManager, CharacterSet}
 
   defstruct [
     :title,

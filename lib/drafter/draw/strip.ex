@@ -35,7 +35,7 @@ defmodule Drafter.Draw.Strip do
 
   @doc "Create an empty strip"
   @spec empty() :: t()
-  def empty(), do: %__MODULE__{}
+  def empty, do: %__MODULE__{}
 
   @doc "Create strip from plain text"
   @spec from_text(String.t()) :: t()
@@ -58,6 +58,12 @@ defmodule Drafter.Draw.Strip do
         {cropped_segments, _remaining_width} = crop_segments(segments, crop_width)
         new(cropped_segments)
     end
+  end
+
+  @doc "Fit strip to exact width by cropping or padding"
+  @spec fit_to_width(t(), non_neg_integer()) :: t()
+  def fit_to_width(strip, target_width) do
+    strip |> crop(target_width) |> pad(target_width)
   end
 
   @doc "Pad strip to specified width with spaces"

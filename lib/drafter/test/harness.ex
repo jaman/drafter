@@ -10,6 +10,8 @@ defmodule Drafter.Test.Harness do
 
   use GenServer
 
+  alias Drafter.{Compositor, Event, EventHandler, ScreenManager, Test, ThemeManager}
+
   defstruct [
     :app_module,
     :app_pid,
@@ -26,18 +28,29 @@ defmodule Drafter.Test.Harness do
     test_pid = Keyword.get(opts, :test_pid, self())
     size = Keyword.get(opts, :size, {80, 24})
 
-    with {:ok, _} <- Drafter.Event.Manager.start_link(),
-         {:ok, _} <- Drafter.Test.HeadlessDriver.start_link(test_pid: test_pid, size: size),
-         {:ok, _} <-
-           Drafter.Compositor.start_link(terminal_driver: Drafter.Test.HeadlessDriver),
-         {:ok, _} <- Drafter.ThemeManager.start_link(),
-         :ok <- Drafter.Test.HeadlessDriver.setup() do
+    with {:ok, em} <- Event.Manager.start_link(name: nil),
+         {:ok, _} <- Test.HeadlessDriver.start_link(test_pid: test_pid, size: size),
+         {:ok, comp} <-
+           Compositor.start_link(name: nil, terminal_driver: Test.HeadlessDriver),
+         {:ok, tm} <- ThemeManager.start_link(name: nil),
+         {:ok, eh} <- EventHandler.start_link(name: nil),
+         {:ok, sm} <- ScreenManager.start_link(name: nil, event_handler: eh),
+         :ok <- Test.HeadlessDriver.setup() do
+      session_pdict = %{
+        drafter_event_manager: em,
+        drafter_compositor: comp,
+        drafter_theme_manager: tm,
+        drafter_screen_manager: sm,
+        drafter_event_handler: eh
+      }
+
       app_pid =
         spawn_link(fn ->
+          propagate_pdict(session_pdict)
           run_headless_app(app_module, props)
         end)
 
-      Drafter.Event.Manager.subscribe(app_pid)
+      Event.Manager.subscribe_to(em, app_pid)
 
       ref = Process.monitor(app_pid)
 
@@ -46,7 +59,8 @@ defmodule Drafter.Test.Harness do
         app_pid: app_pid,
         app_monitor: ref,
         props: props,
-        test_pid: test_pid
+        test_pid: test_pid,
+        session_pids: session_pdict
       }
 
       {:ok, ctx}
@@ -75,23 +89,29 @@ defmodule Drafter.Test.Harness do
       Process.demonitor(ctx.app_monitor, [:flush])
     end
 
+    stop_session_pids(ctx)
     stop_services()
     :ok
   end
 
-  defp stop_services do
-    services = [
-      Drafter.Test.HeadlessDriver,
-      Drafter.Compositor,
-      Drafter.ThemeManager,
-      Drafter.Event.Manager
-    ]
-
-    Enum.each(services, fn service ->
-      if Process.whereis(service) do
-        GenServer.stop(service, :normal, 1000)
+  defp stop_session_pids(%{session_pids: pids}) when is_map(pids) do
+    Enum.each(pids, fn {_key, pid} ->
+      if is_pid(pid) and Process.alive?(pid) do
+        GenServer.stop(pid, :normal, 1000)
       end
     end)
+  end
+
+  defp stop_session_pids(_ctx), do: :ok
+
+  defp stop_services do
+    if Process.whereis(Drafter.Test.HeadlessDriver) do
+      GenServer.stop(Drafter.Test.HeadlessDriver, :normal, 1000)
+    end
+  end
+
+  defp propagate_pdict(pdict) do
+    Enum.each(pdict, fn {key, val} -> Process.put(key, val) end)
   end
 
   defp run_headless_app(app_module, props) do

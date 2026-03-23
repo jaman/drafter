@@ -1,6 +1,9 @@
 defmodule Drafter.Transport.Telnet do
   @moduledoc false
 
+  alias Drafter.{Compositor, Event, EventHandler, ScreenManager, Session, ThemeManager}
+  alias Drafter.Transport.TelnetDriver
+
   @spec start_link(module(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(app_module, opts \\ []) do
     port = Keyword.get(opts, :port, 2323)
@@ -38,24 +41,24 @@ defmodule Drafter.Transport.Telnet do
     mode = Keyword.get(server_opts, :mode, :isolated)
     mount_props = Keyword.get(server_opts, :mount_props, %{})
 
-    {:ok, driver_pid} = Drafter.Transport.TelnetDriver.start_link(socket: socket)
+    {:ok, driver_pid} = TelnetDriver.start_link(socket: socket)
 
     session_ctx = start_session_services(driver_pid)
-    Drafter.Transport.TelnetDriver.setup(driver_pid, session_ctx.event_manager)
-    Drafter.Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
+    TelnetDriver.setup(driver_pid, session_ctx.event_manager)
+    Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
 
     session_opts = build_session_opts(app_module, mode, mount_props)
 
     try do
       Drafter.run_session(app_module, session_ctx, session_opts)
     after
-      Drafter.Transport.TelnetDriver.cleanup(driver_pid)
+      TelnetDriver.cleanup(driver_pid)
       stop_session_services(session_ctx)
     end
   end
 
   defp build_session_opts(app_module, :shared, mount_props) do
-    shared_state = Drafter.Session.SharedState.get_or_start(app_module)
+    shared_state = Session.SharedState.get_or_start(app_module)
     [mode: :shared, shared_state: shared_state] ++ Map.to_list(mount_props)
   end
 
@@ -64,18 +67,18 @@ defmodule Drafter.Transport.Telnet do
   end
 
   defp start_session_services(driver_pid) do
-    {:ok, em} = Drafter.Event.Manager.start_link(name: nil)
+    {:ok, em} = Event.Manager.start_link(name: nil)
 
     {:ok, comp} =
-      Drafter.Compositor.start_link(
+      Compositor.start_link(
         name: nil,
-        terminal_driver: {Drafter.Transport.TelnetDriver, driver_pid},
+        terminal_driver: {TelnetDriver, driver_pid},
         event_manager: em
       )
 
-    {:ok, sm} = Drafter.ScreenManager.start_link(name: nil)
-    {:ok, tm} = Drafter.ThemeManager.start_link(name: nil)
-    {:ok, eh} = Drafter.EventHandler.start_link(name: nil)
+    {:ok, tm} = ThemeManager.start_link(name: nil)
+    {:ok, eh} = EventHandler.start_link(name: nil)
+    {:ok, sm} = ScreenManager.start_link(name: nil, event_handler: eh)
 
     %{event_manager: em, compositor: comp, screen_manager: sm, theme_manager: tm, event_handler: eh}
   end

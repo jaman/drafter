@@ -25,9 +25,9 @@ defmodule Drafter.Widget.Switch do
     handles: [:keyboard, :click, :hover],
     focusable: true
 
+  alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.CharacterSet
 
   @animation_step_ms 30
   @animation_step_size 0.25

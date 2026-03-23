@@ -1,10 +1,10 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "..")}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}])
 
-alias Drafter.Syntax.TreeSitterDaemon
+alias Drafter.Syntax.TreeSitter
 
-{:ok, _} = TreeSitterDaemon.start_link()
+{:ok, _} = TreeSitter.start_link()
 
-IO.puts("tree-sitter available: #{TreeSitterDaemon.available?()}")
+IO.puts("tree-sitter available: #{TreeSitter.available?()}")
 IO.puts("")
 
 args = System.argv()
@@ -29,7 +29,7 @@ ext = path |> Path.extname() |> String.trim_leading(".")
 language = Map.get(extension_to_language, ext, String.to_atom(ext))
 
 IO.puts("--- #{language} captures (#{path}) ---")
-captures = TreeSitterDaemon.highlight_file(path)
+captures = TreeSitter.highlight_file(path)
 Enum.each(captures, fn {sl, sc, el, ec, name} ->
   IO.puts("  #{name} [#{sl}:#{sc} - #{el}:#{ec}]")
 end)

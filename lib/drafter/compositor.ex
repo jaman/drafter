@@ -3,8 +3,8 @@ defmodule Drafter.Compositor do
 
   use GenServer
 
-  alias Drafter.{Terminal, Event}
   alias Drafter.Draw.Strip
+  alias Drafter.{Event, Terminal}
 
   defstruct [
     :terminal_driver,
@@ -37,17 +37,17 @@ defmodule Drafter.Compositor do
   end
 
   @spec clear_screen() :: :ok
-  def clear_screen() do
+  def clear_screen do
     GenServer.cast(resolve(), :clear_screen)
   end
 
   @spec refresh() :: :ok
-  def refresh() do
+  def refresh do
     GenServer.cast(resolve(), :refresh)
   end
 
   @spec get_screen_size() :: {pos_integer(), pos_integer()}
-  def get_screen_size() do
+  def get_screen_size do
     GenServer.call(resolve(), :get_screen_size)
   end
 
@@ -130,7 +130,10 @@ defmodule Drafter.Compositor do
   defp resize_event?({:resize, _}), do: true
   defp resize_event?(_), do: false
 
-  defp resolve(), do: Process.get(:drafter_compositor, __MODULE__)
+  defp resolve do
+    Process.get(:drafter_compositor) ||
+      raise "No Compositor in process dictionary. Ensure a Drafter session is running."
+  end
 
   defp driver_write(driver, data) when is_atom(driver), do: driver.write(data)
   defp driver_write({mod, pid}, data), do: mod.write(pid, data)

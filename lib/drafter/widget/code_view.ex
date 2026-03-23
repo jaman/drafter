@@ -33,8 +33,8 @@ defmodule Drafter.Widget.CodeView do
     focusable: true
 
   alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.Syntax.{ElixirHighlighter, Highlighter, TreeSitter, TSFeatures}
   alias Drafter.ThemeManager
-  alias Drafter.Syntax.{TSFeatures, Highlighter, ElixirHighlighter}
 
   @page_size 10
 
@@ -84,7 +84,10 @@ defmodule Drafter.Widget.CodeView do
     |> Enum.drop(state.scroll_offset)
     |> Enum.take(rect.height)
     |> Enum.map(fn {line, line_number} ->
-      render_line(line, line_number, line_num_width, content_width, state.highlights, syntax_colors, theme, state.h_scroll_offset)
+      render_line(
+        line, line_number, line_num_width, content_width,
+        state.highlights, syntax_colors, theme, state.h_scroll_offset
+      )
     end)
   end
 
@@ -250,11 +253,11 @@ defmodule Drafter.Widget.CodeView do
   defp compute_highlights(source, language, path) do
     captures =
       cond do
-        path && Drafter.Syntax.TreeSitterDaemon.available?() ->
-          Drafter.Syntax.TreeSitterDaemon.highlight_file(path)
+        path && TreeSitter.available?() ->
+          TreeSitter.highlight_file(path)
 
-        Drafter.Syntax.TreeSitterDaemon.available?() ->
-          Drafter.Syntax.TreeSitterDaemon.highlight(source, language)
+        TreeSitter.available?() ->
+          TreeSitter.highlight(source, language)
 
         language in [:elixir, :exs] ->
           ElixirHighlighter.highlight(source, language)

@@ -29,9 +29,9 @@ defmodule Drafter.Widget.RadioSet do
     handles: [:keyboard],
     focusable: true
 
+  alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.CharacterSet
 
   defstruct [
     :options,

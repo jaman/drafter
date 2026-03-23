@@ -67,7 +67,10 @@ defmodule Drafter.Widget.Grid do
       rows_needed = div(children_count + cols - 1, cols)
       row_height = if rows_needed > 0, do: div(rect.height, rows_needed), else: rect.height
 
-      grid_ctx = %{children: state.children, children_count: children_count, cols: cols, col_width: col_width, row_height: row_height}
+      grid_ctx = %{
+        children: state.children, children_count: children_count,
+        cols: cols, col_width: col_width, row_height: row_height
+      }
 
       Enum.map(0..(rect.height - 1), fn y ->
         row = div(y, row_height)

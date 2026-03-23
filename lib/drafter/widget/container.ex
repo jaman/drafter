@@ -30,8 +30,8 @@ defmodule Drafter.Widget.Container do
 
   use Drafter.Widget
 
+  alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Widget
-  alias Drafter.Draw.Strip
 
   defstruct children: [],
             layout: :vertical,
@@ -275,7 +275,7 @@ defmodule Drafter.Widget.Container do
     if line_index < length(strips) do
       Enum.at(strips, line_index).segments
     else
-      [Drafter.Draw.Segment.new(String.duplicate(" ", child_rect.width))]
+      [Segment.new(String.duplicate(" ", child_rect.width))]
     end
   end
 

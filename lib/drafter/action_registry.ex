@@ -1,40 +1,47 @@
 defmodule Drafter.ActionRegistry do
   @moduledoc """
-  Global registry for `Drafter.ActionHandler` modules.
+  Per-session registry for `Drafter.ActionHandler` modules.
 
-  Handlers are checked in reverse-registration order (last registered = highest priority).
+  Handlers are stored in the calling process dictionary and checked in
+  reverse-registration order (last registered = highest priority).
   The built-in handler is always present and handles the standard return values
   (`{:ok, state}`, `{:noreply, state}`, `{:show_modal, ...}`, `{:show_toast, ...}`,
   `{:push, ...}`, `{:pop, ...}`, `{:replace, ...}`).
 
-  Registering your own handler lets you intercept custom action tuples returned from
-  `handle_event/3` without modifying any framework code.
-
   ## Usage
 
       Drafter.ActionRegistry.register(MyApp.DrawerHandler)
+      Drafter.run(MyApp)
 
-  ## Priority
-
-  Registered handlers take priority over the built-in handler. A handler that returns
-  `{:ok, new_state}` stops dispatch; one that returns `:unhandled` passes control to
-  the next handler in the chain.
+  The `register/1` call stores the handler in the calling process's dictionary.
+  `Drafter.run/2` collects them and passes them to the app loop process.
   """
 
-  use Agent
+  @pdict_key :drafter_action_handlers
 
-  def start_link(_opts) do
-    Agent.start_link(fn -> [Drafter.BuiltinActionHandler] end, name: __MODULE__)
+  @spec init() :: :ok
+  @spec init([module()]) :: :ok
+  def init(extra_handlers \\ []) do
+    base = [Drafter.BuiltinActionHandler]
+    Process.put(@pdict_key, extra_handlers ++ base)
+    :ok
   end
 
   @spec register(module()) :: :ok
   def register(module) do
-    Agent.update(__MODULE__, fn handlers -> [module | handlers] end)
+    handlers = Process.get(@pdict_key, [])
+    Process.put(@pdict_key, [module | handlers])
+    :ok
+  end
+
+  @spec collect() :: [module()]
+  def collect do
+    Process.get(@pdict_key, [])
   end
 
   @spec dispatch(term(), map()) :: map()
   def dispatch(action, acc_state) do
-    handlers = Agent.get(__MODULE__, & &1)
+    handlers = Process.get(@pdict_key, [Drafter.BuiltinActionHandler])
 
     Enum.reduce_while(handlers, :unhandled, fn module, _ ->
       case module.handle_action(action, acc_state) do

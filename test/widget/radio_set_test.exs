@@ -1,16 +1,10 @@
 defmodule Drafter.Widget.RadioSetTest do
   use ExUnit.Case
-  alias Drafter.ThemeManager
   alias Drafter.Widget.RadioSet
 
-  setup do
-    case start_supervised(ThemeManager) do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> :ok
-    end
+  setup :setup_session_pdict
 
-    :ok
-  end
+  defdelegate setup_session_pdict(ctx), to: Drafter.Test.SessionSetup
 
   describe "mount/1" do
     test "normalizes tuple options to maps" do

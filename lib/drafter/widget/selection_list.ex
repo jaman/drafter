@@ -39,6 +39,7 @@ defmodule Drafter.Widget.SelectionList do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.Widget.Callback
 
   defstruct [
     :options,
@@ -184,8 +185,8 @@ defmodule Drafter.Widget.SelectionList do
       options: all_options,
       selected: Keyword.get(opts, :selected, []),
       selection_mode: Keyword.get(opts, :selection_mode, :multiple),
-      on_change: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_change)),
-      on_item_toggle: Drafter.Widget.Callback.wrap_2(Keyword.get(opts, :on_item_toggle)),
+      on_change: Callback.wrap_1(Keyword.get(opts, :on_change)),
+      on_item_toggle: Callback.wrap_2(Keyword.get(opts, :on_item_toggle)),
       visible_height: Keyword.get(opts, :visible_height, rect.height),
       classes: classes
     }
@@ -298,11 +299,9 @@ defmodule Drafter.Widget.SelectionList do
 
   defp trigger_item_toggle(%{on_item_toggle: callback}, index, new_selected_state)
        when is_function(callback, 2) do
-    try do
-      callback.(index, new_selected_state)
-    rescue
-      _error -> :ok
-    end
+    callback.(index, new_selected_state)
+  rescue
+    _error -> :ok
   end
 
   defp trigger_item_toggle(_state, _index, _new_selected_state), do: :ok

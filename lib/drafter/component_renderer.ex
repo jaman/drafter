@@ -1,7 +1,7 @@
 defmodule Drafter.ComponentRenderer do
   @moduledoc false
 
-  alias Drafter.{WidgetHierarchy, Theme, Layout, CharacterSet}
+  alias Drafter.{CharacterSet, Layout, Theme, WidgetHierarchy}
   alias Drafter.Widget.{Box, Card, Collapsible, Label, OptionList, ScrollableContainer, SplitPaneDivider, Switch}
 
   def send_app_callback(callback_fn, data) when is_function(callback_fn), do: callback_fn.(data)
@@ -324,7 +324,8 @@ defmodule Drafter.ComponentRenderer do
       %{title: title, content: content, expanded: expanded, on_toggle: on_toggle_fn}
       |> then(fn p -> if content_height, do: Map.put(p, :content_height, content_height), else: p end)
 
-    new_hierarchy = upsert_collapsible_widget(hierarchy, widget_id, mount_props, content_height, on_toggle_fn, rect, parent_id)
+    new_hierarchy =
+      upsert_collapsible_widget(hierarchy, widget_id, mount_props, content_height, on_toggle_fn, rect, parent_id)
 
     current_expanded =
       case WidgetHierarchy.get_widget_state(new_hierarchy, widget_id) do

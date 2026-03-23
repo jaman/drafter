@@ -3,6 +3,34 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.2.2] - 2026-03-24
+
+### Added
+
+- **CJK / multi-byte character input** — Japanese, Chinese, Korean, and emoji characters can now be typed into text inputs and text areas.
+- **Braille area chart** — new `chart_type: :braille_area` renders smooth stacked area charts using braille characters with per-series color blending. Ideal for live metrics dashboards.
+- **Collapsible focus behaviour** — children of collapsed sections are automatically excluded from keyboard navigation. Expanding a section makes its children navigable again.
+
+### Fixed
+
+- **Arrow key navigation** — arrow keys now correctly move focus between widgets. A regression had silently disabled all arrow-based navigation.
+- **Text input race condition** — rapidly typed characters no longer get dropped due to async binding updates overwriting widget state.
+- **Split pane resize crash** — dragging a pane to a very narrow width no longer crashes the box widget.
+- **Action handlers in sub-apps** — custom action handlers registered before `Drafter.run` now work correctly when launched from the example gallery or any push-session context.
+
+### Changed
+
+- **NIF compilation** — switched from a custom build script to `elixir_make` with a standard Makefile. Run `mix deps.get` after upgrading.
+- **Session isolation** — ScreenManager, ThemeManager, EventHandler, and Event.Manager are no longer started as global named processes. Each session creates its own instances, preventing state leakage between concurrent SSH/telnet sessions.
+- **Event.Manager simplified** — removed the internal queue; events are dispatched directly in `handle_cast`, matching standard GenServer semantics.
+- **SkinManager** — character set selection is now per-session instead of global, avoiding cross-session interference and `persistent_term` global GC.
+
+### Removed
+
+- **FocusRegistry** — unused global keybinding store that would have caused bugs with multiple SSH sessions.
+- **Event.CustomRegistry** — unused runtime schema validation registry. Use `defstruct` and pattern matching instead.
+- **Event.Processor** — stub module with unimplemented functions; all functionality lives in WidgetHierarchy.
+
 ## [0.2.0] - 2026-03-21
 
 ### ⚠ Breaking Changes

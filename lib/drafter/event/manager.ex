@@ -82,7 +82,10 @@ defmodule Drafter.Event.Manager do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp resolve, do: Process.get(:drafter_event_manager, __MODULE__)
+  defp resolve do
+    Process.get(:drafter_event_manager) ||
+      raise "No Event.Manager in process dictionary. Ensure a Drafter session is running."
+  end
 
   defp dispatch_to_subscribers(event, state) do
     Enum.each(state.subscribers, fn {pid, filter} ->

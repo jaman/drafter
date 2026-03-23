@@ -1,18 +1,12 @@
 defmodule Drafter.Widget.CheckboxTest do
   use ExUnit.Case
-  alias Drafter.ThemeManager
-  alias Drafter.Widget.Checkbox
   alias Drafter.ComponentRenderer
   alias Drafter.Theme
+  alias Drafter.Widget.Checkbox
 
-  setup do
-    case start_supervised(ThemeManager) do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> :ok
-    end
+  setup :setup_session_pdict
 
-    :ok
-  end
+  defdelegate setup_session_pdict(ctx), to: Drafter.Test.SessionSetup
 
   describe "mount/1" do
     test "defaults checked to false" do

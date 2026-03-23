@@ -82,8 +82,9 @@ defmodule Drafter do
       loop_pid ->
         maybe_start_tree_sitter(opts)
         register_widget_libraries(opts)
+        action_handlers = Drafter.ActionRegistry.collect()
         ref = make_ref()
-        send(loop_pid, {:push_session, app_module, opts, self(), ref})
+        send(loop_pid, {:push_session, app_module, opts, action_handlers, self(), ref})
 
         receive do
           {:session_result, ^ref, result} -> result
@@ -94,21 +95,21 @@ defmodule Drafter do
   @doc "Create a label widget"
   @spec label(String.t(), keyword()) :: {Label, map()}
   def label(text, opts \\ []) do
-    props = %{text: text} |> Map.merge(Map.new(opts))
+    props = opts |> Map.new() |> Map.put_new(:text, text)
     {Label, props}
   end
 
   @doc "Create a button widget"
   @spec button(String.t(), keyword()) :: {Button, map()}
   def button(text, opts \\ []) do
-    props = %{text: text} |> Map.merge(Map.new(opts))
+    props = opts |> Map.new() |> Map.put_new(:text, text)
     {Button, props}
   end
 
   @doc "Create a container widget"
   @spec container([{module(), map()}], keyword()) :: {Container, map()}
   def container(children, opts \\ []) do
-    props = %{children: children} |> Map.merge(Map.new(opts))
+    props = opts |> Map.new() |> Map.put_new(:children, children)
     {Container, props}
   end
 
@@ -129,21 +130,21 @@ defmodule Drafter do
   @doc "Create a digits widget for displaying large numbers"
   @spec digits(String.t(), keyword()) :: {Digits, map()}
   def digits(text, opts \\ []) do
-    props = %{text: text} |> Map.merge(Map.new(opts))
+    props = opts |> Map.new() |> Map.put_new(:text, text)
     {Digits, props}
   end
 
   @doc "Create a grid widget for layouts"
   @spec grid([{module(), map()}], keyword()) :: {Grid, map()}
   def grid(children, opts \\ []) do
-    props = %{children: children} |> Map.merge(Map.new(opts))
+    props = opts |> Map.new() |> Map.put_new(:children, children)
     {Grid, props}
   end
 
   @doc "Create a placeholder widget"
   @spec placeholder(String.t(), keyword()) :: {Placeholder, map()}
   def placeholder(text, opts \\ []) do
-    props = %{text: text} |> Map.merge(Map.new(opts))
+    props = opts |> Map.new() |> Map.put_new(:text, text)
     {Placeholder, props}
   end
 
@@ -156,14 +157,14 @@ defmodule Drafter do
   @doc "Create a markdown widget"
   @spec markdown(String.t(), keyword()) :: {Markdown, map()}
   def markdown(content, opts \\ []) do
-    props = %{content: content} |> Map.merge(Map.new(opts))
+    props = opts |> Map.new() |> Map.put_new(:content, content)
     {Markdown, props}
   end
 
   @doc "Create a footer widget"
   @spec footer(String.t(), keyword()) :: {Footer, map()}
   def footer(text \\ "Press 'q' to quit", opts \\ []) do
-    props = %{text: text} |> Map.merge(Map.new(opts))
+    props = opts |> Map.new() |> Map.put_new(:text, text)
     {Footer, props}
   end
 
@@ -452,8 +453,7 @@ defmodule Drafter do
   defp run_shared_session(app_module, mount_props, shared_state_pid) do
     _ = Drafter.Logging.setup()
 
-    topic = SharedState.pubsub_topic(shared_state_pid)
-    Phoenix.PubSub.subscribe(Drafter.PubSub, topic)
+    SharedState.subscribe(shared_state_pid)
 
     app_state = SharedState.get_state(shared_state_pid)
     app_state = Map.merge(app_state, mount_props)
@@ -879,11 +879,11 @@ defmodule Drafter do
     :ok
   end
 
-  alias Drafter.Syntax.TreeSitterDaemon
+  alias Drafter.Syntax.TreeSitter
 
   defp maybe_start_tree_sitter(opts) do
     if Keyword.get(opts, :syntax_highlighting, false) do
-      case TreeSitterDaemon.start_link() do
+      case TreeSitter.start_link() do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> :ok
         _ -> :ok
@@ -897,11 +897,19 @@ defmodule Drafter do
     Drafter.WidgetStripCache.create()
     Drafter.Widget.Registry.scan_and_register()
 
-    with {:ok, _} <- ensure_started(Event.Manager.start_link()),
+    with {:ok, em_pid} <- ensure_started(Event.Manager.start_link()),
          {:ok, _} <- ensure_started(Terminal.Driver.start_link()),
-         {:ok, _} <- ensure_started(Compositor.start_link()),
-         {:ok, _} <- ensure_started(ThemeManager.start_link()),
-         {:ok, _} <- ensure_started(SkinManager.start_link()) do
+         {:ok, comp_pid} <- ensure_started(Compositor.start_link()),
+         {:ok, tm_pid} <- ensure_started(ThemeManager.start_link()),
+         {:ok, eh_pid} <- ensure_started(Drafter.EventHandler.start_link()),
+         {:ok, sm_pid} <- ensure_started(Drafter.ScreenManager.start_link(event_handler: eh_pid)),
+         {:ok, skin_pid} <- ensure_started(SkinManager.start_link()) do
+      Process.put(:drafter_event_manager, em_pid)
+      Process.put(:drafter_compositor, comp_pid)
+      Process.put(:drafter_theme_manager, tm_pid)
+      Process.put(:drafter_screen_manager, sm_pid)
+      Process.put(:drafter_event_handler, eh_pid)
+      Process.put(:drafter_skin_manager, skin_pid)
       Terminal.Driver.setup()
     end
   end
@@ -910,12 +918,31 @@ defmodule Drafter do
   defp ensure_started({:error, {:already_started, pid}}), do: {:ok, pid}
   defp ensure_started(error), do: error
 
+  defp propagate_session_pdict(session_pdict) do
+    Enum.each(session_pdict, fn
+      {key, val} when val != nil -> Process.put(key, val)
+      _ -> :ok
+    end)
+  end
+
   defp run_app(app_module, opts) do
     scroll_opt = Keyword.get(opts, :scroll_optimization, true)
+    action_handlers = Drafter.ActionRegistry.collect()
+
+    session_pdict = %{
+      drafter_event_manager: Process.get(:drafter_event_manager),
+      drafter_compositor: Process.get(:drafter_compositor),
+      drafter_theme_manager: Process.get(:drafter_theme_manager),
+      drafter_screen_manager: Process.get(:drafter_screen_manager),
+      drafter_event_handler: Process.get(:drafter_event_handler),
+      drafter_skin_manager: Process.get(:drafter_skin_manager)
+    }
 
     app_pid =
       spawn_link(fn ->
         Process.put(:scroll_optimization, scroll_opt)
+        propagate_session_pdict(session_pdict)
+        Drafter.ActionRegistry.init(action_handlers)
         AppLoop.run(app_module, opts)
       end)
 

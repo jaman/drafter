@@ -2,6 +2,10 @@ defmodule Drafter.WidgetHierarchyTest do
   use ExUnit.Case
   alias Drafter.WidgetHierarchy
 
+  setup :setup_session_pdict
+
+  defdelegate setup_session_pdict(ctx), to: Drafter.Test.SessionSetup
+
   describe "widget hierarchy creation" do
     test "creates empty hierarchy" do
       hierarchy = WidgetHierarchy.new()

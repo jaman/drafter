@@ -33,9 +33,9 @@ defmodule Drafter.Widget.Sparkline do
 
   use Drafter.Widget
 
+  alias Drafter.{CharacterSet, Visualization}
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.{CharacterSet, Visualization}
 
   defstruct [
     :data,

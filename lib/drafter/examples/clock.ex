@@ -1,7 +1,7 @@
 defmodule Drafter.Examples.Clock do
   @moduledoc """
   A clock application showing the current time in large digits.
-  
+
   Updates every second to display the current time.
   Press 'q' or Escape to quit.
   """
@@ -32,13 +32,13 @@ defmodule Drafter.Examples.Clock do
     %{state | time: format_current_time()}
   end
 
-  defp format_current_time() do
+  defp format_current_time do
     {_, {hour, minute, second}} = :calendar.local_time()
-    
+
     hour_str = hour |> Integer.to_string() |> String.pad_leading(2, "0")
-    minute_str = minute |> Integer.to_string() |> String.pad_leading(2, "0") 
+    minute_str = minute |> Integer.to_string() |> String.pad_leading(2, "0")
     second_str = second |> Integer.to_string() |> String.pad_leading(2, "0")
-    
+
     "#{hour_str}:#{minute_str}:#{second_str}"
   end
 

@@ -18,8 +18,8 @@ defmodule Drafter.Widget.SplitPaneDivider do
     handles: [:keyboard, :press, :mouse_up, :drag],
     focusable: true
 
+  alias Drafter.{CharacterSet, ThemeManager}
   alias Drafter.Draw.{Segment, Strip}
-  alias Drafter.{ThemeManager, CharacterSet}
 
   @nudge_px 1
 

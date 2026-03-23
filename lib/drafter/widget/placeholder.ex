@@ -27,7 +27,7 @@ defmodule Drafter.Widget.Placeholder do
   @pastel_colors [
     # Purple
     {77, 17, 68},
-    # Pink  
+    # Pink
     {94, 34, 51},
     # Red
     {111, 60, 60},
@@ -204,7 +204,6 @@ defmodule Drafter.Widget.Placeholder do
       |> Enum.map(&Enum.join/1)
     end
   end
-
 
   defp extract_number_from_text(text) do
     case Regex.run(~r/(\d+)/, text) do

@@ -8,9 +8,9 @@ defmodule Drafter.Widget.Box do
 
   @behaviour Drafter.Widget
 
+  alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.CharacterSet
 
   @border_chars %{
     none: %{tl: " ", tr: " ", bl: " ", br: " ", h: " ", v: " "},
@@ -86,12 +86,12 @@ defmodule Drafter.Widget.Box do
   end
 
   defp render_top_border(chars, width, title, border_style, title_style) do
-    inner_width = width - 2
+    inner_width = max(0, width - 2)
 
     if title && String.length(title) > 0 do
       title_text = " #{title} "
       title_len = String.length(title_text)
-      left_len = 2
+      left_len = min(2, inner_width)
       right_len = max(0, inner_width - left_len - title_len)
 
       segments = [
@@ -115,7 +115,7 @@ defmodule Drafter.Widget.Box do
   end
 
   defp render_bottom_border(chars, width, border_style) do
-    inner_width = width - 2
+    inner_width = max(0, width - 2)
 
     segments = [
       Segment.new(chars.bl, border_style),
@@ -127,7 +127,7 @@ defmodule Drafter.Widget.Box do
   end
 
   defp render_padding_rows(chars, width, padding, has_border, base_style, border_style) do
-    inner_width = if has_border, do: width - 2, else: width
+    inner_width = max(0, if(has_border, do: width - 2, else: width))
 
     Enum.map(1..padding, fn _ ->
       if has_border do
@@ -145,7 +145,7 @@ defmodule Drafter.Widget.Box do
   end
 
   defp render_content_rows(chars, width, height, _padding, has_border, base_style, border_style) do
-    inner_width = if has_border, do: width - 2, else: width
+    inner_width = max(0, if(has_border, do: width - 2, else: width))
 
     Enum.map(1..max(1, height), fn _ ->
       if has_border do

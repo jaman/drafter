@@ -95,7 +95,7 @@ defmodule Drafter.Transport.SSHDriver do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp detect_size() do
+  defp detect_size do
     case {:io.columns(), :io.rows()} do
       {{:ok, cols}, {:ok, rows}} -> {cols, rows - 1}
       _ -> {80, 23}

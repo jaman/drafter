@@ -1,6 +1,7 @@
 defmodule Drafter.Transport.SSH do
   @moduledoc false
 
+  alias Drafter.{Compositor, Event, EventHandler, Logging, ScreenManager, Session, ThemeManager}
   alias Drafter.Transport.SSHDriver
 
   @spec start_link(module(), keyword()) :: {:ok, pid()} | {:error, term()}
@@ -17,7 +18,7 @@ defmodule Drafter.Transport.SSH do
       |> Enum.map(fn {u, p} -> {to_charlist(u), to_charlist(p)} end)
 
     if mode == :shared do
-      Drafter.Session.SharedState.get_or_start(app_module)
+      Session.SharedState.get_or_start(app_module)
     end
 
     shell_fun = fn username, _peer_addr ->
@@ -41,7 +42,7 @@ defmodule Drafter.Transport.SSH do
 
   defp do_start_shell(app_module, mode, mount_props, username) do
     Process.flag(:trap_exit, true)
-    _ = Drafter.Logging.setup()
+    _ = Logging.setup()
     gl = Process.group_leader()
     username_str = to_string(username)
     full_props = Map.put(mount_props, :username, username_str)
@@ -50,7 +51,7 @@ defmodule Drafter.Transport.SSH do
 
     session_ctx = start_session_services(driver_pid)
     SSHDriver.setup(driver_pid, session_ctx.event_manager)
-    Drafter.Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
+    Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
 
     session_opts = build_session_opts(app_module, mode, full_props)
 
@@ -63,7 +64,7 @@ defmodule Drafter.Transport.SSH do
   end
 
   defp build_session_opts(app_module, :shared, mount_props) do
-    shared_state = Drafter.Session.SharedState.get_or_start(app_module)
+    shared_state = Session.SharedState.get_or_start(app_module)
     [mode: :shared, shared_state: shared_state] ++ Map.to_list(mount_props)
   end
 
@@ -72,18 +73,18 @@ defmodule Drafter.Transport.SSH do
   end
 
   defp start_session_services(driver_pid) do
-    {:ok, em} = Drafter.Event.Manager.start_link(name: nil)
+    {:ok, em} = Event.Manager.start_link(name: nil)
 
     {:ok, comp} =
-      Drafter.Compositor.start_link(
+      Compositor.start_link(
         name: nil,
-        terminal_driver: {Drafter.Transport.SSHDriver, driver_pid},
+        terminal_driver: {SSHDriver, driver_pid},
         event_manager: em
       )
 
-    {:ok, sm} = Drafter.ScreenManager.start_link(name: nil)
-    {:ok, tm} = Drafter.ThemeManager.start_link(name: nil)
-    {:ok, eh} = Drafter.EventHandler.start_link(name: nil)
+    {:ok, tm} = ThemeManager.start_link(name: nil)
+    {:ok, eh} = EventHandler.start_link(name: nil)
+    {:ok, sm} = ScreenManager.start_link(name: nil, event_handler: eh)
 
     %{event_manager: em, compositor: comp, screen_manager: sm, theme_manager: tm, event_handler: eh}
   end

@@ -54,15 +54,20 @@ defmodule Drafter.Draw.Segment do
     end
   end
 
-  defp char_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
-
   defp display_width(str) do
-    str |> strip_ansi() |> Drafter.CharacterWidth.string()
+    str
+    |> strip_ansi()
+    |> String.graphemes()
+    |> Enum.reduce(0, fn grapheme, acc ->
+      acc + char_width(grapheme)
+    end)
   end
 
   defp strip_ansi(text) do
     String.replace(text, ~r/\e\[[0-9;]*m/, "")
   end
+
+  defp char_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
 
   @doc "Create a segment with plain text (no styling)"
   @spec plain(String.t()) :: t()
@@ -109,20 +114,24 @@ defmodule Drafter.Draw.Segment do
     if Regex.match?(ansi_pattern, part) do
       {:cont, {acc <> part, width}}
     else
-      {chunk, new_width} = truncate_graphemes_to_width(part, width, target_width)
-
-      if new_width >= target_width and new_width > width do
-        {:halt, {acc <> chunk, new_width}}
-      else
-        {:cont, {acc <> chunk, new_width}}
-      end
+      append_truncated_text(part, acc, width, target_width)
     end
   end
 
-  defp truncate_graphemes_to_width(text, starting_width, target_width) do
+  defp append_truncated_text(text, acc, width, target_width) do
+    {chunk, new_width} = truncate_text_part(text, width, target_width)
+
+    if new_width >= target_width and new_width > width do
+      {:halt, {acc <> chunk, new_width}}
+    else
+      {:cont, {acc <> chunk, new_width}}
+    end
+  end
+
+  defp truncate_text_part(text, current_width, target_width) do
     text
     |> String.graphemes()
-    |> Enum.reduce_while({"", starting_width}, fn grapheme, {chunk_acc, w} ->
+    |> Enum.reduce_while({"", current_width}, fn grapheme, {chunk_acc, w} ->
       new_w = w + char_width(grapheme)
 
       if new_w <= target_width do
@@ -161,32 +170,25 @@ defmodule Drafter.Draw.Segment do
   @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{text: text}), do: text == ""
 
-  @style_flag_codes [
-    {:bold, "1"},
-    {:dim, "2"},
-    {:italic, "3"},
-    {:underline, "4"},
-    {:reverse, "7"}
-  ]
-
   defp build_style_codes(style) when style == %{}, do: ""
+
+  @style_flags [bold: "1", dim: "2", italic: "3", underline: "4", reverse: "7"]
 
   defp build_style_codes(style) do
     codes =
-      Enum.reduce(@style_flag_codes, [], fn {key, code}, acc ->
+      Enum.reduce(@style_flags, [], fn {key, code}, acc ->
         if style[key], do: [code | acc], else: acc
       end)
 
-    codes = add_color_code(codes, "38", style[:fg])
-    codes = add_color_code(codes, "48", style[:bg])
+    codes = prepend_color_code(codes, style[:fg], "38;2")
+    codes = prepend_color_code(codes, style[:bg], "48;2")
 
-    if codes == [] do
-      ""
-    else
-      "\e[" <> Enum.join(Enum.reverse(codes), ";") <> "m"
+    case codes do
+      [] -> ""
+      _ -> "\e[" <> Enum.join(Enum.reverse(codes), ";") <> "m"
     end
   end
 
-  defp add_color_code(codes, _prefix, nil), do: codes
-  defp add_color_code(codes, prefix, {r, g, b}), do: ["#{prefix};2;#{r};#{g};#{b}" | codes]
+  defp prepend_color_code(codes, {r, g, b}, prefix), do: ["#{prefix};#{r};#{g};#{b}" | codes]
+  defp prepend_color_code(codes, _nil, _prefix), do: codes
 end

@@ -1,6 +1,10 @@
 defmodule Drafter.EventCaptureIntegrationTest do
   use ExUnit.Case
-  alias Drafter.{WidgetHierarchy, Event}
+  alias Drafter.{Event, WidgetHierarchy}
+
+  setup :setup_session_pdict
+
+  defdelegate setup_session_pdict(ctx), to: Drafter.Test.SessionSetup
 
   defmodule ParentWidget do
     use Drafter.Widget

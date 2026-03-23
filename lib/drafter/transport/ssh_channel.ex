@@ -3,6 +3,7 @@ defmodule Drafter.Transport.SSHChannel do
 
   @behaviour :ssh_server_channel
 
+  alias Drafter.{Compositor, Event, EventHandler, ScreenManager, Session, ThemeManager}
   alias Drafter.Terminal.ANSI
 
   defstruct [
@@ -120,7 +121,7 @@ defmodule Drafter.Transport.SSHChannel do
     spawn_link(fn ->
       session_ctx = start_session_services(channel_pid)
       setup(channel_pid, session_ctx.event_manager)
-      Drafter.Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
+      Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
       session_opts = build_session_opts(state.app_module, state.mode, full_props)
 
       try do
@@ -205,18 +206,18 @@ defmodule Drafter.Transport.SSHChannel do
   end
 
   defp start_session_services(channel_pid) do
-    {:ok, em} = Drafter.Event.Manager.start_link(name: nil)
+    {:ok, em} = Event.Manager.start_link(name: nil)
 
     {:ok, comp} =
-      Drafter.Compositor.start_link(
+      Compositor.start_link(
         name: nil,
         terminal_driver: {__MODULE__, channel_pid},
         event_manager: em
       )
 
-    {:ok, sm} = Drafter.ScreenManager.start_link(name: nil)
-    {:ok, tm} = Drafter.ThemeManager.start_link(name: nil)
-    {:ok, eh} = Drafter.EventHandler.start_link(name: nil)
+    {:ok, tm} = ThemeManager.start_link(name: nil)
+    {:ok, eh} = EventHandler.start_link(name: nil)
+    {:ok, sm} = ScreenManager.start_link(name: nil, event_handler: eh)
 
     %{event_manager: em, compositor: comp, screen_manager: sm, theme_manager: tm, event_handler: eh}
   end
@@ -228,7 +229,7 @@ defmodule Drafter.Transport.SSHChannel do
   end
 
   defp build_session_opts(app_module, :shared, mount_props) do
-    shared_state = Drafter.Session.SharedState.get_or_start(app_module)
+    shared_state = Session.SharedState.get_or_start(app_module)
     [mode: :shared, shared_state: shared_state] ++ Map.to_list(mount_props)
   end
 
