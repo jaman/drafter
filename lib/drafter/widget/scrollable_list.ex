@@ -42,61 +42,30 @@ defmodule Drafter.Widget.ScrollableList do
   end
 
   @doc "Handle navigation and selection events"
-  def handle_scroll_event(widget_state, event, callbacks \\ %{}) do
-    case event do
-      {:key, :up} ->
-        action_cursor_up(widget_state, callbacks)
+  def handle_scroll_event(state, event, callbacks \\ %{})
+  def handle_scroll_event(state, {:key, :up}, callbacks), do: action_cursor_up(state, callbacks)
+  def handle_scroll_event(state, {:key, :down}, callbacks), do: action_cursor_down(state, callbacks)
+  def handle_scroll_event(state, {:key, :home}, callbacks), do: action_cursor_first(state, callbacks)
+  def handle_scroll_event(state, {:key, :end}, callbacks), do: action_cursor_last(state, callbacks)
+  def handle_scroll_event(state, {:key, :page_up}, callbacks), do: action_page_up(state, callbacks)
+  def handle_scroll_event(state, {:key, :page_down}, callbacks), do: action_page_down(state, callbacks)
+  def handle_scroll_event(state, {:key, :enter}, callbacks), do: action_select_highlighted(state, callbacks)
+  def handle_scroll_event(state, {:key, :space}, callbacks), do: action_toggle_selection(state, callbacks)
 
-      {:key, :down} ->
-        action_cursor_down(widget_state, callbacks)
-
-      {:key, :home} ->
-        action_cursor_first(widget_state, callbacks)
-
-      {:key, :end} ->
-        action_cursor_last(widget_state, callbacks)
-
-      {:key, :page_up} ->
-        action_page_up(widget_state, callbacks)
-
-      {:key, :page_down} ->
-        action_page_down(widget_state, callbacks)
-
-      {:key, :enter} ->
-        action_select_highlighted(widget_state, callbacks)
-
-      {:key, :space} ->
-        action_toggle_selection(widget_state, callbacks)
-
-      {:mouse, %{type: :mouse_up, y: y}} ->
-        clicked_index = widget_state.scroll_offset + y
-        action_click_item(widget_state, clicked_index, callbacks)
-
-      {:mouse, %{type: :scroll, direction: direction}} ->
-        handle_mouse_scroll(widget_state, direction, callbacks)
-
-      {:focus} ->
-        # When receiving focus, ensure we have a highlighted item
-        new_state =
-          if widget_state.highlighted_index == nil do
-            case find_first_enabled(widget_state, callbacks) do
-              nil -> widget_state
-              index -> %{widget_state | highlighted_index: index}
-            end
-          else
-            widget_state
-          end
-
-        {:noreply, new_state}
-
-      {:blur} ->
-        # Keep highlighted_index when losing focus
-        {:noreply, widget_state}
-
-      _ ->
-        {:noreply, widget_state}
-    end
+  def handle_scroll_event(state, {:mouse, %{type: :mouse_up, y: y}}, callbacks) do
+    action_click_item(state, state.scroll_offset + y, callbacks)
   end
+
+  def handle_scroll_event(state, {:mouse, %{type: :scroll, direction: direction}}, callbacks) do
+    handle_mouse_scroll(state, direction, callbacks)
+  end
+
+  def handle_scroll_event(state, {:focus}, callbacks) do
+    {:noreply, ensure_highlighted_on_focus(state, callbacks)}
+  end
+
+  def handle_scroll_event(state, {:blur}, _callbacks), do: {:noreply, state}
+  def handle_scroll_event(state, _event, _callbacks), do: {:noreply, state}
 
   # Navigation actions
 
@@ -127,6 +96,15 @@ defmodule Drafter.Widget.ScrollableList do
       new_index -> change_selection(state, new_index, false, callbacks)
     end
   end
+
+  defp ensure_highlighted_on_focus(%{highlighted_index: nil} = state, callbacks) do
+    case find_first_enabled(state, callbacks) do
+      nil -> state
+      index -> %{state | highlighted_index: index}
+    end
+  end
+
+  defp ensure_highlighted_on_focus(state, _callbacks), do: state
 
   defp action_page_up(state, callbacks) do
     current = state.highlighted_index || 0
@@ -242,17 +220,8 @@ defmodule Drafter.Widget.ScrollableList do
   end
 
   def ensure_visible(state, target_index) do
-    cond do
-      target_index < state.scroll_offset ->
-        %{state | scroll_offset: target_index}
-
-      target_index >= state.scroll_offset + state.visible_height ->
-        new_offset = target_index - state.visible_height + 1
-        %{state | scroll_offset: max(0, new_offset)}
-
-      true ->
-        state
-    end
+    new_offset = Drafter.ScrollMath.ensure_visible(state.scroll_offset, target_index, state.visible_height)
+    %{state | scroll_offset: new_offset}
   end
 
   # Selection management
@@ -260,61 +229,51 @@ defmodule Drafter.Widget.ScrollableList do
   defp change_selection(state, target_index, trigger_select, callbacks) do
     item_count = callbacks.get_item_count.(state)
 
-    if target_index >= 0 and target_index < item_count do
-      if callbacks.is_item_enabled.(state, target_index) do
-        new_state =
-          %{state | highlighted_index: target_index}
-          |> ensure_visible(target_index)
-
-        new_state =
-          if trigger_select do
-            case state.selection_mode do
-              :none ->
-                new_state
-
-              :single ->
-                %{new_state | selected_indices: MapSet.new([target_index])}
-
-              :multiple ->
-                # In multiple mode, clicking adds to selection
-                new_selected = MapSet.put(state.selected_indices, target_index)
-                %{new_state | selected_indices: new_selected}
-            end
-          else
-            new_state
-          end
-
-        # Trigger callbacks if highlight changed
-        actions = []
-
-        actions =
-          if callbacks[:on_highlight] && target_index != state.highlighted_index do
-            item = callbacks.get_item_at.(new_state, target_index)
-            [callbacks.on_highlight.(item) | actions]
-          else
-            actions
-          end
-
-        actions =
-          if trigger_select && callbacks[:on_select] do
-            selected_items = get_selected_items(new_state, callbacks)
-            [callbacks.on_select.(selected_items) | actions]
-          else
-            actions
-          end
-
-        if length(actions) > 0 do
-          {:ok, new_state, actions}
-        else
-          {:ok, new_state}
-        end
-      else
-        {:noreply, state}
-      end
-    else
-      {:noreply, state}
+    cond do
+      target_index < 0 or target_index >= item_count -> {:noreply, state}
+      not callbacks.is_item_enabled.(state, target_index) -> {:noreply, state}
+      true -> apply_selection_change(state, target_index, trigger_select, callbacks)
     end
   end
+
+  defp apply_selection_change(state, target_index, trigger_select, callbacks) do
+    new_state =
+      state
+      |> Map.put(:highlighted_index, target_index)
+      |> ensure_visible(target_index)
+      |> apply_selection_mode(state.selection_mode, target_index, trigger_select)
+
+    actions = build_selection_actions(state, new_state, target_index, trigger_select, callbacks)
+
+    if actions != [], do: {:ok, new_state, actions}, else: {:ok, new_state}
+  end
+
+  defp apply_selection_mode(new_state, _mode, _index, false), do: new_state
+  defp apply_selection_mode(new_state, :none, _index, true), do: new_state
+  defp apply_selection_mode(new_state, :single, index, true), do: %{new_state | selected_indices: MapSet.new([index])}
+  defp apply_selection_mode(new_state, :multiple, index, true), do: %{new_state | selected_indices: MapSet.put(new_state.selected_indices, index)}
+
+  defp build_selection_actions(old_state, new_state, target_index, trigger_select, callbacks) do
+    []
+    |> maybe_add_highlight_action(old_state, new_state, target_index, callbacks)
+    |> maybe_add_select_action(new_state, trigger_select, callbacks)
+  end
+
+  defp maybe_add_highlight_action(actions, old_state, new_state, target_index, callbacks) do
+    if callbacks[:on_highlight] && target_index != old_state.highlighted_index do
+      item = callbacks.get_item_at.(new_state, target_index)
+      [callbacks.on_highlight.(item) | actions]
+    else
+      actions
+    end
+  end
+
+  defp maybe_add_select_action(actions, new_state, true, callbacks) when is_map_key(callbacks, :on_select) do
+    selected_items = get_selected_items(new_state, callbacks)
+    [callbacks.on_select.(selected_items) | actions]
+  end
+
+  defp maybe_add_select_action(actions, _state, _trigger, _callbacks), do: actions
 
   defp trigger_selection_callback(state, callbacks) do
     if callbacks[:on_select] do
@@ -392,8 +351,8 @@ defmodule Drafter.Widget.ScrollableList do
   end
 
   @doc "Check if an index is highlighted"
-  def is_highlighted?(state, index), do: state.highlighted_index == index
+  def highlighted?(state, index), do: state.highlighted_index == index
 
   @doc "Check if an index is selected"
-  def is_selected?(state, index), do: MapSet.member?(state.selected_indices, index)
+  def selected?(state, index), do: MapSet.member?(state.selected_indices, index)
 end

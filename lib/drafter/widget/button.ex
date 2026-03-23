@@ -39,7 +39,8 @@ defmodule Drafter.Widget.Button do
             classes: [],
             app_module: nil,
             disabled: false,
-            focused: false
+            focused: false,
+            compact: false
 
   @impl Drafter.Widget
   def mount(props) do
@@ -59,32 +60,25 @@ defmodule Drafter.Widget.Button do
       button_type: button_type,
       classes: classes,
       app_module: Map.get(props, :app_module),
-      disabled: disabled
+      disabled: disabled,
+      compact: Map.get(props, :compact, false)
     }
   end
 
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    render_button(state, rect)
+  end
 
-    classes = state.classes
-    computed_opts = [classes: classes, style: state.style]
-
-    computed_opts =
-      if state.app_module,
-        do: Keyword.put(computed_opts, :app_module, state.app_module),
-        else: computed_opts
-
+  defp render_button(state, rect) do
+    computed_opts = [classes: state.classes, style: state.style]
+    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
     computed = Computed.for_widget(:button, state, computed_opts)
 
     base_bg = computed[:background] || {60, 60, 60}
     fg_color = computed[:color] || {255, 255, 255}
-
-    bg_color =
-      cond do
-        state.hovered -> Style.darken(base_bg, 15)
-        true -> base_bg
-      end
+    bg_color = if state.hovered, do: Style.darken(base_bg, 15), else: base_bg
 
     {top_border_color, bottom_border_color} =
       if state.active do
@@ -139,7 +133,12 @@ defmodule Drafter.Widget.Button do
         Segment.new(String.duplicate(bottom_border_char, content_width), bottom_border_style)
       ])
 
-    content_strips = [top_strip, mid_strip, bot_strip]
+    content_strips =
+      if state.compact do
+        [mid_strip]
+      else
+        [top_strip, mid_strip, bot_strip]
+      end
 
     pad_to_height(content_strips, rect.height, rect.width, button_bg_style)
   end
@@ -252,30 +251,35 @@ defmodule Drafter.Widget.Button do
         button_type: button_type,
         classes: classes,
         app_module: Map.get(props, :app_module, state.app_module),
-        disabled: disabled
+        disabled: disabled,
+        compact: Map.get(props, :compact, state.compact)
     }
   end
 
-  def preferred_height(_args, _opts), do: 3
+  def preferred_height(_args, opts) do
+    if Keyword.get(opts, :compact, false), do: 1, else: 3
+  end
 
   def component_tag, do: :button
 
   def from_component_opts(text, opts) do
     app_module = Keyword.get(opts, :__app_module__)
     disabled = Keyword.get(opts, :disabled, false)
+    compact = Keyword.get(opts, :compact, false)
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
     classes = Enum.map(raw_classes, fn
       c when is_binary(c) -> String.to_atom(c)
       c when is_atom(c) -> c
     end)
-    on_click = if not disabled, do: Drafter.Widget.Callback.wrap_0(Keyword.get(opts, :on_click)), else: nil
+    on_click = if disabled, do: nil, else: Drafter.Widget.Callback.wrap_0(Keyword.get(opts, :on_click))
     %{
       text: text,
       button_type: Keyword.get(opts, :variant, Keyword.get(opts, :type, :default)),
       style: Keyword.get(opts, :style, %{}),
       classes: classes,
       disabled: disabled,
+      compact: compact,
       on_click: on_click,
       app_module: app_module
     }

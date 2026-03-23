@@ -103,109 +103,88 @@ defmodule Drafter.Widget.ScrollableContainer do
   end
 
   defp render_with_scrollbar(state, rect, theme) do
-    track_style =
-      if state.click_to_scroll and state.scroll_locked,
-        do: %{fg: theme.primary, bg: theme.surface},
-        else: %{fg: theme.text_muted, bg: theme.surface}
-
-    thumb_style = %{fg: theme.primary, bg: theme.primary}
-    thumb_hover_style = %{fg: {255, 255, 255}, bg: {0, 150, 255}}
-    thumb_drag_style = %{fg: {255, 255, 255}, bg: {0, 120, 200}}
-
+    styles = scrollbar_styles(state, theme)
     viewport_height = min(rect.height, state.viewport_height)
     {thumb_start, thumb_height} = get_thumb_position(state)
 
     Enum.map(0..(viewport_height - 1), fn row ->
       is_thumb = row >= thumb_start and row < thumb_start + thumb_height
-
-      {char, style} =
-        cond do
-          is_thumb and state.dragging_scrollbar -> {CharacterSet.scroll(:thumb_drag), thumb_drag_style}
-          is_thumb and state.hovering_scrollbar -> {CharacterSet.scroll(:thumb_hover), thumb_hover_style}
-          is_thumb -> {CharacterSet.scroll(:thumb), thumb_style}
-          true -> {CharacterSet.scroll(:track), track_style}
-        end
-
+      {char, style} = scrollbar_cell(is_thumb, state, styles)
       Strip.new([Segment.new(char, style)])
     end)
   end
 
-  def handle_event(event, state) do
-    case event do
-      {:key, :up} ->
-        scroll_by(state, 0, -1)
+  defp scrollbar_styles(state, theme) do
+    track_style =
+      if state.click_to_scroll and state.scroll_locked,
+        do: %{fg: theme.primary, bg: theme.surface},
+        else: %{fg: theme.text_muted, bg: theme.surface}
 
-      {:key, :down} ->
-        scroll_by(state, 0, 1)
+    %{
+      track: track_style,
+      thumb: %{fg: theme.primary, bg: theme.primary},
+      thumb_hover: %{fg: {255, 255, 255}, bg: {0, 150, 255}},
+      thumb_drag: %{fg: {255, 255, 255}, bg: {0, 120, 200}}
+    }
+  end
 
-      {:key, :page_up} ->
-        scroll_by(state, 0, -state.viewport_height)
+  defp scrollbar_cell(false, _state, styles), do: {CharacterSet.scroll(:track), styles.track}
+  defp scrollbar_cell(true, %{dragging_scrollbar: true}, styles), do: {CharacterSet.scroll(:thumb_drag), styles.thumb_drag}
+  defp scrollbar_cell(true, %{hovering_scrollbar: true}, styles), do: {CharacterSet.scroll(:thumb_hover), styles.thumb_hover}
+  defp scrollbar_cell(true, _state, styles), do: {CharacterSet.scroll(:thumb), styles.thumb}
 
-      {:key, :page_down} ->
-        scroll_by(state, 0, state.viewport_height)
+  def handle_event({:key, :up}, state), do: scroll_by(state, 0, -1)
+  def handle_event({:key, :down}, state), do: scroll_by(state, 0, 1)
+  def handle_event({:key, :page_up}, state), do: scroll_by(state, 0, -state.viewport_height)
+  def handle_event({:key, :page_down}, state), do: scroll_by(state, 0, state.viewport_height)
+  def handle_event({:key, :home}, state), do: {:ok, %{state | scroll_offset_y: 0}}
 
-      {:key, :home} ->
-        {:ok, %{state | scroll_offset_y: 0}}
+  def handle_event({:key, :end}, state) do
+    max_scroll = max(0, state.content_height - state.viewport_height)
+    {:ok, %{state | scroll_offset_y: max_scroll}}
+  end
 
-      {:key, :end} ->
-        max_scroll = max(0, state.content_height - state.viewport_height)
-        {:ok, %{state | scroll_offset_y: max_scroll}}
+  def handle_event({:mouse, %{type: :scroll, direction: :up}}, state), do: scroll_by(state, 0, -3)
+  def handle_event({:mouse, %{type: :scroll, direction: :down}}, state), do: scroll_by(state, 0, 3)
 
-      {:mouse, %{type: :scroll, direction: :up}} ->
-        scroll_by(state, 0, -3)
+  def handle_event({:mouse, %{type: :mouse_down, x: 0, y: y}}, state) do
+    {thumb_start, thumb_height} = get_thumb_position(state)
 
-      {:mouse, %{type: :scroll, direction: :down}} ->
-        scroll_by(state, 0, 3)
-
-      {:mouse, %{type: :mouse_down, x: x, y: y}} ->
-        if x == 0 do
-          {thumb_start, thumb_height} = get_thumb_position(state)
-
-          if y >= thumb_start and y < thumb_start + thumb_height do
-            {:ok, %{state | dragging_scrollbar: true, drag_thumb_offset: y - thumb_start}}
-          else
-            {:noreply, state}
-          end
-        else
-          {:bubble, state}
-        end
-
-      {:mouse, %{type: :drag, y: y}} when state.dragging_scrollbar ->
-        {_thumb_start, thumb_height} = get_thumb_position(state)
-        desired_thumb_start = y - state.drag_thumb_offset
-        max_thumb_start = max(1, state.viewport_height - thumb_height)
-        scroll_ratio = desired_thumb_start / max_thumb_start
-        max_scroll = max(0, state.content_height - state.viewport_height)
-        new_offset = round(scroll_ratio * max_scroll)
-        new_state = %{state | scroll_offset_y: max(0, min(max_scroll, new_offset))}
-        {:ok, new_state, [:scroll_fast_render]}
-
-      {:mouse, %{type: :mouse_up, x: x, y: y}} ->
-        if state.dragging_scrollbar do
-          {:ok, %{state | dragging_scrollbar: false, drag_thumb_offset: 0}}
-        else
-          if x == 0 do
-            {thumb_start, thumb_height} = get_thumb_position(state)
-
-            cond do
-              y < thumb_start ->
-                scroll_by(state, 0, -state.viewport_height)
-
-              y >= thumb_start + thumb_height ->
-                scroll_by(state, 0, state.viewport_height)
-
-              true ->
-                {:bubble, state}
-            end
-          else
-            {:bubble, state}
-          end
-        end
-
-      _ ->
-        {:bubble, state}
+    if y >= thumb_start and y < thumb_start + thumb_height do
+      {:ok, %{state | dragging_scrollbar: true, drag_thumb_offset: y - thumb_start}}
+    else
+      {:noreply, state}
     end
   end
+
+  def handle_event({:mouse, %{type: :mouse_down}}, state), do: {:bubble, state}
+
+  def handle_event({:mouse, %{type: :drag, y: y}}, %{dragging_scrollbar: true} = state) do
+    {_thumb_start, thumb_height} = get_thumb_position(state)
+    desired_thumb_start = y - state.drag_thumb_offset
+    max_thumb_start = max(1, state.viewport_height - thumb_height)
+    scroll_ratio = desired_thumb_start / max_thumb_start
+    max_scroll = max(0, state.content_height - state.viewport_height)
+    new_offset = round(scroll_ratio * max_scroll)
+    new_state = %{state | scroll_offset_y: max(0, min(max_scroll, new_offset))}
+    {:ok, new_state, [:scroll_fast_render]}
+  end
+
+  def handle_event({:mouse, %{type: :mouse_up}}, %{dragging_scrollbar: true} = state) do
+    {:ok, %{state | dragging_scrollbar: false, drag_thumb_offset: 0}}
+  end
+
+  def handle_event({:mouse, %{type: :mouse_up, x: 0, y: y}}, state) do
+    {thumb_start, thumb_height} = get_thumb_position(state)
+
+    cond do
+      y < thumb_start -> scroll_by(state, 0, -state.viewport_height)
+      y >= thumb_start + thumb_height -> scroll_by(state, 0, state.viewport_height)
+      true -> {:bubble, state}
+    end
+  end
+
+  def handle_event(_, state), do: {:bubble, state}
 
 
   defp get_thumb_position(state) do

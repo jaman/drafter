@@ -192,27 +192,13 @@ defmodule Drafter.Widget.Container do
     else
       child_height = div(content_rect.height, child_count)
 
-      Enum.with_index(children, fn child, index ->
-        rect = %{
+      Enum.with_index(children, fn _child, index ->
+        %{
           x: content_rect.x,
           y: content_rect.y + index * child_height,
           width: content_rect.width,
           height: child_height
         }
-
-        if content_rect.y == 2 and index < 2 do
-          _child_name =
-            case child do
-              {module, _props, _state} ->
-                module |> Module.split() |> List.last() |> to_string()
-
-              {module, _} ->
-                module |> Module.split() |> List.last() |> to_string()
-            end
-
-        end
-
-        rect
       end)
     end
   end
@@ -272,19 +258,8 @@ defmodule Drafter.Widget.Container do
         max(acc, length(strips))
       end)
 
-    0..(max_height - 1)
-    |> Enum.map(fn line_index ->
-      line_segments =
-        Enum.flat_map(child_strips, fn {child_rect, strips} ->
-          if line_index < length(strips) do
-            strip = Enum.at(strips, line_index)
-            strip.segments
-          else
-            empty_segment = Drafter.Draw.Segment.new(String.duplicate(" ", child_rect.width))
-            [empty_segment]
-          end
-        end)
-
+    Enum.map(0..(max_height - 1), fn line_index ->
+      line_segments = Enum.flat_map(child_strips, &horizontal_line_segments(&1, line_index))
       Strip.new(line_segments)
     end)
   end
@@ -293,6 +268,14 @@ defmodule Drafter.Widget.Container do
     case List.last(child_strips) do
       {_rect, strips} -> strips
       nil -> []
+    end
+  end
+
+  defp horizontal_line_segments({child_rect, strips}, line_index) do
+    if line_index < length(strips) do
+      Enum.at(strips, line_index).segments
+    else
+      [Drafter.Draw.Segment.new(String.duplicate(" ", child_rect.width))]
     end
   end
 

@@ -33,7 +33,13 @@ defmodule Drafter.MixProject do
             Drafter.Event.CustomRegistry,
             Drafter.Event.Delegation
           ],
-          Theming: [Drafter.Theme, Drafter.ThemeManager, Drafter.Color, Drafter.SkinManager, Drafter.CharacterSet],
+          Theming: [
+            Drafter.Theme,
+            Drafter.ThemeManager,
+            Drafter.Color,
+            Drafter.SkinManager,
+            Drafter.CharacterSet
+          ],
           Drawing: [Drafter.Draw.Segment, Drafter.Draw.Strip, Drafter.Draw.Canvas],
           "Display Widgets": [
             Drafter.Widget.Label,
@@ -97,6 +103,7 @@ defmodule Drafter.MixProject do
 
   defp deps do
     [
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:phoenix_pubsub, "~> 2.1"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]

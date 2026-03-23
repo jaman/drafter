@@ -1,4 +1,5 @@
 defmodule Drafter.Examples.AnimationDemo do
+  @moduledoc false
   use Drafter.App
 
   def mount(_props) do

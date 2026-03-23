@@ -98,46 +98,33 @@ defmodule Drafter.Widget.Switch do
   end
 
   @impl Drafter.Widget
-  def handle_event(event, widget_state) do
-    case event do
-      :activate ->
-        handle_toggle(widget_state)
-
-      {:key, :enter} ->
-        handle_toggle(widget_state)
-
-      {:key, :" "} ->
-        handle_toggle(widget_state)
-
-      {:key, :left} -> handle_turn_off(widget_state)
-      {:key, :right} -> handle_turn_on(widget_state)
-
-      {:mouse, %{type: :mouse_up}} ->
-        handle_toggle(%{widget_state | focused: true})
-
-      {:mouse, %{type: :hover}} -> {:ok, %{widget_state | hovered: true}}
-      {:mouse, %{type: :leave}} -> {:ok, %{widget_state | hovered: false}}
-      {:focus} -> {:ok, %{widget_state | focused: true}}
-      {:blur} -> {:ok, %{widget_state | focused: false}}
-      :tick -> handle_tick(widget_state)
-      _ -> {:noreply, widget_state}
-    end
-  end
+  def handle_event(:activate, ws), do: handle_toggle(ws)
+  def handle_event({:key, :enter}, ws), do: handle_toggle(ws)
+  def handle_event({:key, :" "}, ws), do: handle_toggle(ws)
+  def handle_event({:key, :left}, ws), do: handle_turn_off(ws)
+  def handle_event({:key, :right}, ws), do: handle_turn_on(ws)
+  def handle_event({:mouse, %{type: :mouse_up}}, ws), do: handle_toggle(%{ws | focused: true})
+  def handle_event({:mouse, %{type: :hover}}, ws), do: {:ok, %{ws | hovered: true}}
+  def handle_event({:mouse, %{type: :leave}}, ws), do: {:ok, %{ws | hovered: false}}
+  def handle_event({:focus}, ws), do: {:ok, %{ws | focused: true}}
+  def handle_event({:blur}, ws), do: {:ok, %{ws | focused: false}}
+  def handle_event(:tick, ws), do: handle_tick(ws)
+  def handle_event(_, ws), do: {:noreply, ws}
 
   @impl Drafter.Widget
   def update(props, widget_state) do
     case widget_state.state do
       :animating_on ->
         new_enabled = Map.get(props, :enabled, true)
-        if not new_enabled do
-          %{widget_state | state: :off, slider_position: 0.0,
-            label: Map.get(props, :label, widget_state.label),
+        if new_enabled do
+          %{widget_state | label: Map.get(props, :label, widget_state.label),
             on_change: Map.get(props, :on_change, widget_state.on_change),
             width: Map.get(props, :width, widget_state.width),
             height: Map.get(props, :height, widget_state.height),
             size: Map.get(props, :size, widget_state.size)}
         else
-          %{widget_state | label: Map.get(props, :label, widget_state.label),
+          %{widget_state | state: :off, slider_position: 0.0,
+            label: Map.get(props, :label, widget_state.label),
             on_change: Map.get(props, :on_change, widget_state.on_change),
             width: Map.get(props, :width, widget_state.width),
             height: Map.get(props, :height, widget_state.height),
@@ -286,69 +273,38 @@ defmodule Drafter.Widget.Switch do
   end
 
   defp render_switch(widget_state) do
-    {track_width, slider_width} =
-      case widget_state.size do
-        :small -> {6, 2}
-        :compact -> {4, 2}
-        _ -> {8, 4}
-      end
-
+    {track_width, slider_width} = track_dimensions(widget_state.size)
     max_offset = track_width - slider_width
+    slider_offset = round((widget_state.slider_position || 0.0) * max_offset)
+    is_on = widget_state.state in [:on, :animating_on]
 
-    pos = widget_state.slider_position || 0.0
-    slider_offset = round(pos * max_offset)
-
-    is_on = widget_state.state == :on or widget_state.state == :animating_on
-
-    track_bg = {50, 55, 65}
+    track_style = %{fg: {80, 85, 95}, bg: {50, 55, 65}}
     thumb_color = if is_on, do: {100, 200, 100}, else: {150, 150, 150}
-    label_color = {200, 200, 200}
-
-    track_style = %{fg: {80, 85, 95}, bg: track_bg}
     thumb_style = %{fg: thumb_color, bg: thumb_color}
-    label_style = %{fg: label_color}
-
-    left_width = slider_offset
-    right_width = max_offset - slider_offset
-
-    segments = []
 
     segments =
-      if left_width > 0 do
-        left_part = String.duplicate(" ", left_width)
-        [Segment.new(left_part, track_style) | segments]
-      else
-        segments
-      end
-
-    slider_part = String.duplicate(CharacterSet.fill(:full), slider_width)
-    segments = [Segment.new(slider_part, thumb_style) | segments]
-
-    segments =
-      if right_width > 0 do
-        right_part = String.duplicate(" ", right_width)
-        [Segment.new(right_part, track_style) | segments]
-      else
-        segments
-      end
-
-    segments =
-      if widget_state.label do
-        label_text = " " <> widget_state.label
-        [Segment.new(label_text, label_style) | segments]
-      else
-        segments
-      end
+      []
+      |> prepend_if(slider_offset > 0, fn -> Segment.new(String.duplicate(" ", slider_offset), track_style) end)
+      |> then(&[Segment.new(String.duplicate(CharacterSet.fill(:full), slider_width), thumb_style) | &1])
+      |> prepend_if(max_offset - slider_offset > 0, fn -> Segment.new(String.duplicate(" ", max_offset - slider_offset), track_style) end)
+      |> prepend_if(widget_state.label != nil, fn -> Segment.new(" " <> widget_state.label, %{fg: {200, 200, 200}}) end)
 
     Strip.new(Enum.reverse(segments))
   end
+
+  defp track_dimensions(:small), do: {6, 2}
+  defp track_dimensions(:compact), do: {4, 2}
+  defp track_dimensions(_), do: {8, 4}
+
+  defp prepend_if(list, true, segment_fn), do: [segment_fn.() | list]
+  defp prepend_if(list, false, _segment_fn), do: list
 
   defp trigger_change(widget_state, enabled) do
     if widget_state.on_change do
 
       case Drafter.ScreenManager.get_active_screen() do
         nil ->
-          Drafter.AppRegistry.send_to_loop( {:app_event, widget_state.on_change, enabled})
+          Drafter.AppRegistry.send_to_loop({:app_event, widget_state.on_change, enabled})
 
         _screen ->
           send(self(), {:tui_event, {:app_callback, widget_state.on_change, enabled}})

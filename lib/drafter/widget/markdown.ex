@@ -53,29 +53,8 @@ defmodule Drafter.Widget.Markdown do
     else
       lines = parse_markdown(state.content, content_width)
 
-      lines
-      |> Enum.map(fn {segments_spec, base_part} ->
-        base_computed = Computed.for_part(:markdown, state, base_part)
-        base_style = Map.merge(state.style, Computed.to_segment_style(base_computed))
-
-        segments =
-          case segments_spec do
-            text when is_binary(text) ->
-              [Segment.new(text, base_style)]
-
-            specs when is_list(specs) ->
-              Enum.map(specs, fn {text, inline_style} ->
-                final_style = apply_inline_style(base_style, inline_style)
-                Segment.new(text, final_style)
-              end)
-          end
-
-        if padding > 0 do
-          padding_segment = Segment.new(String.duplicate(" ", padding), base_style)
-          Strip.new([padding_segment] ++ segments ++ [padding_segment])
-        else
-          Strip.new(segments)
-        end
+      Enum.map(lines, fn {segments_spec, base_part} ->
+        render_markdown_line(segments_spec, base_part, state, padding)
       end)
     end
   end
@@ -97,6 +76,32 @@ defmodule Drafter.Widget.Markdown do
 
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{content: mount_props.content}
+  end
+
+  defp render_markdown_line(text, base_part, state, padding) when is_binary(text) do
+    base_computed = Computed.for_part(:markdown, state, base_part)
+    base_style = Map.merge(state.style, Computed.to_segment_style(base_computed))
+    segments = [Segment.new(text, base_style)]
+    wrap_with_padding(segments, padding, base_style)
+  end
+
+  defp render_markdown_line(specs, base_part, state, padding) when is_list(specs) do
+    base_computed = Computed.for_part(:markdown, state, base_part)
+    base_style = Map.merge(state.style, Computed.to_segment_style(base_computed))
+
+    segments =
+      Enum.map(specs, fn {text, inline_style} ->
+        Segment.new(text, apply_inline_style(base_style, inline_style))
+      end)
+
+    wrap_with_padding(segments, padding, base_style)
+  end
+
+  defp wrap_with_padding(segments, 0, _style), do: Strip.new(segments)
+
+  defp wrap_with_padding(segments, padding, style) do
+    padding_segment = Segment.new(String.duplicate(" ", padding), style)
+    Strip.new([padding_segment] ++ segments ++ [padding_segment])
   end
 
   defp apply_inline_style(base_style, :bold), do: Map.put(base_style, :bold, true)

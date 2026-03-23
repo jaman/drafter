@@ -142,32 +142,38 @@ defmodule Drafter.Widget.CodeView do
     source_changed = source && source != "" && source != Enum.join(state.lines, "\n")
 
     if path_changed || source_changed || hex_changed do
-      language = Map.get(props, :language, state.language)
-      raw_source =
-        cond do
-          path && (path_changed || hex_changed) ->
-            case File.read(path) do
-              {:ok, content} -> content
-              _ -> ""
-            end
-          source -> source
-          true -> Enum.join(state.lines, "\n")
-        end
-      {lines, highlights} = content_to_lines(raw_source, language, path, hex_view)
-
-      %{state |
-        lines: lines,
-        highlights: highlights,
-        language: language,
-        path: path,
-        hex_view: hex_view,
-        scroll_offset: 0,
-        h_scroll_offset: 0
-      }
+      reload_content(state, props, path, hex_view, source, path_changed, hex_changed)
     else
       state
     end
   end
+
+  defp reload_content(state, props, path, hex_view, source, path_changed, hex_changed) do
+    language = Map.get(props, :language, state.language)
+    raw_source = resolve_source(path, source, state.lines, path_changed, hex_changed)
+    {lines, highlights} = content_to_lines(raw_source, language, path, hex_view)
+
+    %{state |
+      lines: lines,
+      highlights: highlights,
+      language: language,
+      path: path,
+      hex_view: hex_view,
+      scroll_offset: 0,
+      h_scroll_offset: 0
+    }
+  end
+
+  defp resolve_source(path, _source, _lines, path_changed, hex_changed)
+       when path != nil and (path_changed or hex_changed) do
+    case File.read(path) do
+      {:ok, content} -> content
+      _ -> ""
+    end
+  end
+
+  defp resolve_source(_path, source, _lines, _pc, _hc) when source != nil, do: source
+  defp resolve_source(_path, _source, lines, _pc, _hc), do: Enum.join(lines, "\n")
 
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 20)
 
@@ -221,27 +227,25 @@ defmodule Drafter.Widget.CodeView do
     |> :binary.bin_to_list()
     |> Enum.chunk_every(16)
     |> Enum.with_index()
-    |> Enum.map(fn {row_bytes, row_index} ->
-      offset = Integer.to_string(row_index * 16, 16) |> String.pad_leading(8, "0")
-      hex_left =
-        row_bytes
-        |> Enum.take(8)
-        |> Enum.map(&(Integer.to_string(&1, 16) |> String.pad_leading(2, "0")))
-        |> Enum.join(" ")
-      hex_right =
-        row_bytes
-        |> Enum.drop(8)
-        |> Enum.map(&(Integer.to_string(&1, 16) |> String.pad_leading(2, "0")))
-        |> Enum.join(" ")
-      hex_left_padded = String.pad_trailing(hex_left, 23)
-      hex_right_padded = String.pad_trailing(hex_right, 23)
-      ascii =
-        row_bytes
-        |> Enum.map(fn b -> if b >= 32 and b <= 126, do: <<b>>, else: "." end)
-        |> Enum.join()
-      "#{offset}  #{hex_left_padded}  #{hex_right_padded}  |#{ascii}|"
-    end)
+    |> Enum.map(&format_hex_row/1)
   end
+
+  defp format_hex_row({row_bytes, row_index}) do
+    offset = Integer.to_string(row_index * 16, 16) |> String.pad_leading(8, "0")
+    hex_left = format_hex_half(Enum.take(row_bytes, 8))
+    hex_right = format_hex_half(Enum.drop(row_bytes, 8))
+    ascii = Enum.map_join(row_bytes, &byte_to_ascii/1)
+    "#{offset}  #{hex_left}  #{hex_right}  |#{ascii}|"
+  end
+
+  defp format_hex_half(bytes) do
+    bytes
+    |> Enum.map_join(" ", &(Integer.to_string(&1, 16) |> String.pad_leading(2, "0")))
+    |> String.pad_trailing(23)
+  end
+
+  defp byte_to_ascii(b) when b >= 32 and b <= 126, do: <<b>>
+  defp byte_to_ascii(_b), do: "."
 
   defp compute_highlights(source, language, path) do
     captures =
@@ -300,30 +304,11 @@ defmodule Drafter.Widget.CodeView do
       end)
       |> Enum.sort_by(fn {sc, _ec, _type} -> sc end)
 
+    span_ctx = %{line: line, default_color: default_color, syntax_colors: syntax_colors, bg: bg}
+
     {segments, last_pos} =
       Enum.reduce(sorted_spans, {[], 0}, fn {sc, ec, capture_type}, {segs, pos} ->
-        sc = max(sc, pos)
-        ec = min(ec, line_length)
-
-        segs =
-          if sc > pos do
-            gap_text = String.slice(line, pos, sc - pos)
-            segs ++ [Segment.new(gap_text, %{fg: default_color, bg: bg})]
-          else
-            segs
-          end
-
-        segs =
-          if ec > sc do
-            span_text = String.slice(line, sc, ec - sc)
-            color = Highlighter.resolve_color(Atom.to_string(capture_type), syntax_colors)
-            style = if color, do: %{fg: color, bg: bg}, else: %{fg: default_color, bg: bg}
-            segs ++ [Segment.new(span_text, style)]
-          else
-            segs
-          end
-
-        {segs, max(pos, ec)}
+        apply_span(span_ctx, segs, pos, max(sc, pos), min(ec, line_length), capture_type)
       end)
 
     segments =
@@ -335,6 +320,21 @@ defmodule Drafter.Widget.CodeView do
       end
 
     if segments == [], do: [Segment.new(line, %{fg: default_color, bg: bg})], else: segments
+  end
+
+  defp apply_span(ctx, segs, pos, sc, ec, capture_type) do
+    segs = if sc > pos, do: segs ++ [Segment.new(String.slice(ctx.line, pos, sc - pos), %{fg: ctx.default_color, bg: ctx.bg})], else: segs
+
+    segs =
+      if ec > sc do
+        color = Highlighter.resolve_color(Atom.to_string(capture_type), ctx.syntax_colors)
+        style = if color, do: %{fg: color, bg: ctx.bg}, else: %{fg: ctx.default_color, bg: ctx.bg}
+        segs ++ [Segment.new(String.slice(ctx.line, sc, ec - sc), style)]
+      else
+        segs
+      end
+
+    {segs, max(pos, ec)}
   end
 
   defp apply_h_scroll(segments, 0, _content_width, _bg), do: segments

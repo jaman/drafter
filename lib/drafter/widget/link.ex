@@ -55,37 +55,28 @@ defmodule Drafter.Widget.Link do
   @impl Drafter.Widget
   def render(state, _rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    computed = compute_link_style(state)
 
-    classes = state.classes ++ if state.hovered, do: [:hover], else: []
-    classes = classes ++ if state.focused, do: [:focus], else: []
-    computed_opts = [classes: classes, style: state.style]
-    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
-    computed = Computed.for_widget(:link, state, computed_opts)
-
-    fg = computed[:color] || {100, 150, 255}
-    bg = computed[:background] || {30, 30, 30}
-    underline = computed[:underline] != false
-    bold = computed[:bold] || false
-
-    base_style = %{fg: fg, bg: bg}
-
-    link_style = base_style
-    |> Map.put(:underline, underline)
-    |> Map.put(:bold, bold)
+    link_style = %{
+      fg: computed[:color] || {100, 150, 255},
+      bg: computed[:background] || {30, 30, 30},
+      underline: computed[:underline] != false,
+      bold: computed[:bold] || false
+    }
 
     display_text = state.text || state.url
+    link_text = if state.focused or state.hovered, do: "[#{display_text}]", else: display_text
 
-    link_text = if state.focused or state.hovered do
-      "[#{display_text}]"
-    else
-      display_text
-    end
+    [Strip.new([Segment.new(link_text, link_style)])]
+  end
 
-    link_strip = Strip.new([
-      Segment.new(link_text, link_style)
-    ])
-
-    [link_strip]
+  defp compute_link_style(state) do
+    classes = state.classes
+    classes = if state.hovered, do: classes ++ [:hover], else: classes
+    classes = if state.focused, do: classes ++ [:focus], else: classes
+    computed_opts = [classes: classes, style: state.style]
+    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
+    Computed.for_widget(:link, state, computed_opts)
   end
 
   @impl Drafter.Widget

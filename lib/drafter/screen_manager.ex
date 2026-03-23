@@ -3,7 +3,7 @@ defmodule Drafter.ScreenManager do
 
   use GenServer
 
-  alias Drafter.{Screen, EventHandler}
+  alias Drafter.{EventHandler, Screen}
 
   defstruct [
     :app_pid,
@@ -128,145 +128,12 @@ defmodule Drafter.ScreenManager do
 
   @impl true
   def handle_call({:push, screen_module, props, opts}, _from, state) do
-    screen = Screen.new(screen_module, props, opts)
-
-    parent_id =
-      case state.screen_stack do
-        [top | _] -> top.id
-        [] -> nil
-      end
-
-    screen = %{screen | parent_id: parent_id}
+    parent_id = top_screen_id(state.screen_stack)
+    screen = screen_module |> Screen.new(props, opts) |> Map.put(:parent_id, parent_id)
     mounted_screen = Screen.mount_screen(screen)
+    new_state = %{state | screen_stack: [mounted_screen | state.screen_stack]}
 
-    new_stack = [mounted_screen | state.screen_stack]
-    new_state = %{state | screen_stack: new_stack}
-
-    screen_id = mounted_screen.id
-    sm = self()
-
-    {:ok, _} =
-      EventHandler.register_handler(
-        :any,
-        fn event ->
-          screen =
-            case GenServer.call(sm, :get_all_screens) do
-              screens when is_list(screens) ->
-                Enum.find(screens, fn s -> s.id == screen_id end)
-
-              _ ->
-                nil
-            end
-
-          if screen == nil do
-            :passthrough
-          else
-            manager_state = GenServer.call(sm, :get_state)
-            screen_rect =
-              if screen.rect,
-                do: screen.rect,
-                else: calculate_screen_rect(screen, manager_state.screen_rect)
-
-            cond do
-              should_dismiss_on_outside_click?(screen, screen_rect, event) ->
-                GenServer.call(sm, {:pop, :dismissed})
-                :handled
-
-              screen.widget_hierarchy != nil and
-                  should_forward_to_widget_hierarchy?(screen, screen_rect, event) ->
-                case handle_widget_hierarchy_event_direct(screen, screen_rect, event) do
-                  {:ok, updated_screen} ->
-                    GenServer.cast(sm, {:update_screen, screen.id, updated_screen})
-                    send(manager_state.app_pid, :screen_render_needed)
-                    :handled
-
-                  {:pop, result} ->
-                    GenServer.call(sm, {:pop, result})
-                    :handled
-
-                  {:show_modal, screen_module, props, opts} ->
-                    GenServer.call(sm, {:push, screen_module, props, Keyword.put(opts, :type, :modal)})
-                    :handled
-
-                  {:push, screen_module, props, opts} ->
-                    GenServer.call(sm, {:push, screen_module, props, opts})
-                    :handled
-
-                  {:replace, screen_module, props, opts} ->
-                    GenServer.call(sm, {:replace, screen_module, props, opts})
-                    :handled
-
-                  {:passthrough, updated_screen} ->
-                    GenServer.cast(sm, {:update_screen, screen.id, updated_screen})
-                    case Screen.handle_screen_event(updated_screen, event) do
-                      {:ok, updated_screen} ->
-                        GenServer.cast(sm, {:update_screen, screen.id, updated_screen})
-                        send(manager_state.app_pid, :screen_render_needed)
-                        :handled
-
-                      {:noreply, _updated_screen} ->
-                        :passthrough
-
-                      {:pop, result} ->
-                        GenServer.call(sm, {:pop, result})
-                        :handled
-
-                      {:show_modal, screen_module, props, opts} ->
-                        GenServer.call(sm, {:push, screen_module, props, Keyword.put(opts, :type, :modal)})
-                        :handled
-
-                      {:push, screen_module, props, opts} ->
-                        GenServer.call(sm, {:push, screen_module, props, opts})
-                        :handled
-
-                      {:replace, screen_module, props, opts} ->
-                        GenServer.call(sm, {:replace, screen_module, props, opts})
-                        :handled
-
-                      _ ->
-                        :passthrough
-                    end
-                end
-
-              should_capture_event?(screen, event) ->
-                case Screen.handle_screen_event(screen, event) do
-                  {:ok, updated_screen} ->
-                    GenServer.cast(sm, {:update_screen, screen.id, updated_screen})
-                    send(manager_state.app_pid, :screen_render_needed)
-                    :handled
-
-                  {:noreply, _updated_screen} ->
-                    :handled
-
-                  {:pop, result} ->
-                    GenServer.call(sm, {:pop, result})
-                    :handled
-
-                  {:show_modal, screen_module, props, opts} ->
-                    GenServer.call(sm, {:push, screen_module, props, Keyword.put(opts, :type, :modal)})
-                    :handled
-
-                  {:push, screen_module, props, opts} ->
-                    GenServer.call(sm, {:push, screen_module, props, opts})
-                    :handled
-
-                  {:replace, screen_module, props, opts} ->
-                    GenServer.call(sm, {:replace, screen_module, props, opts})
-                    :handled
-
-                  _ ->
-                    :passthrough
-                end
-
-              true ->
-                :passthrough
-            end
-          end
-        end,
-        self(),
-        level: :top
-      )
-
+    register_screen_event_handler(mounted_screen.id, self())
     notify_render_needed(state.app_pid)
 
     {:reply, {:ok, mounted_screen.id}, new_state}
@@ -280,20 +147,9 @@ defmodule Drafter.ScreenManager do
 
       [top | rest] ->
         Screen.unmount_screen(top)
-
-        new_stack =
-          case rest do
-            [parent | others] ->
-              resumed_parent = Screen.resume_screen(parent, result)
-              [resumed_parent | others]
-
-            [] ->
-              []
-          end
-
+        new_stack = resume_parent(rest, result)
         new_state = %{state | screen_stack: new_stack}
         notify_render_needed(state.app_pid)
-
         {:reply, {:ok, result}, new_state}
     end
   end
@@ -302,17 +158,14 @@ defmodule Drafter.ScreenManager do
   def handle_call({:replace, screen_module, props, opts}, _from, state) do
     case state.screen_stack do
       [] ->
-        screen = Screen.new(screen_module, props, opts)
-        mounted = Screen.mount_screen(screen)
+        mounted = screen_module |> Screen.new(props, opts) |> Screen.mount_screen()
         new_state = %{state | screen_stack: [mounted]}
         notify_render_needed(state.app_pid)
         {:reply, {:ok, mounted.id}, new_state}
 
       [top | rest] ->
         Screen.unmount_screen(top)
-        screen = Screen.new(screen_module, props, opts)
-        screen = %{screen | parent_id: top.parent_id}
-        mounted = Screen.mount_screen(screen)
+        mounted = screen_module |> Screen.new(props, opts) |> Map.put(:parent_id, top.parent_id) |> Screen.mount_screen()
         new_state = %{state | screen_stack: [mounted | rest]}
         notify_render_needed(state.app_pid)
         {:reply, {:ok, mounted.id}, new_state}
@@ -321,11 +174,10 @@ defmodule Drafter.ScreenManager do
 
   @impl true
   def handle_call(:get_active_screen, _from, state) do
-    active =
-      case state.screen_stack do
-        [top | _] -> top
-        [] -> nil
-      end
+    active = case state.screen_stack do
+      [top | _] -> top
+      [] -> nil
+    end
 
     {:reply, active, state}
   end
@@ -375,7 +227,6 @@ defmodule Drafter.ScreenManager do
     new_state = %{state | toasts: new_toasts}
 
     Process.send_after(self(), {:expire_toast, toast.id}, duration)
-
     notify_render_needed(state.app_pid)
 
     {:noreply, new_state}
@@ -383,33 +234,14 @@ defmodule Drafter.ScreenManager do
 
   @impl true
   def handle_cast({:dismiss_toast, toast_id}, state) do
-    dismissed_toast = Enum.find(state.toasts, &(&1.id == toast_id))
-
-    new_toasts =
-      if dismissed_toast do
-        state.toasts
-        |> Enum.reject(&(&1.id == toast_id))
-        |> Enum.map(fn toast ->
-          if toast.position == dismissed_toast.position and
-               toast.stack_index > dismissed_toast.stack_index do
-            %{toast | stack_index: toast.stack_index - 1}
-          else
-            toast
-          end
-        end)
-      else
-        state.toasts
-      end
-
-    new_state = %{state | toasts: new_toasts}
+    new_state = %{state | toasts: remove_toast(state.toasts, toast_id)}
     notify_render_needed(state.app_pid)
     {:noreply, new_state}
   end
 
   @impl true
   def handle_cast({:set_toast_stack_limit, limit}, state) do
-    new_state = %{state | toast_stack_limit: limit}
-    {:noreply, new_state}
+    {:noreply, %{state | toast_stack_limit: limit}}
   end
 
   @impl true
@@ -457,30 +289,150 @@ defmodule Drafter.ScreenManager do
 
   @impl true
   def handle_info({:expire_toast, toast_id}, state) do
-    expired_toast = Enum.find(state.toasts, &(&1.id == toast_id))
-
-    new_toasts =
-      if expired_toast do
-        state.toasts
-        |> Enum.reject(&(&1.id == toast_id))
-        |> Enum.map(fn toast ->
-          if toast.position == expired_toast.position and
-               toast.stack_index > expired_toast.stack_index do
-            %{toast | stack_index: toast.stack_index - 1}
-          else
-            toast
-          end
-        end)
-      else
-        state.toasts
-      end
-
-    new_state = %{state | toasts: new_toasts}
+    new_state = %{state | toasts: remove_toast(state.toasts, toast_id)}
     notify_render_needed(state.app_pid)
     {:noreply, new_state}
   end
 
-  defp resolve(), do: Process.get(:drafter_screen_manager, __MODULE__)
+  defp resolve, do: Process.get(:drafter_screen_manager, __MODULE__)
+
+  defp top_screen_id([top | _]), do: top.id
+  defp top_screen_id([]), do: nil
+
+  defp resume_parent([parent | others], result) do
+    [Screen.resume_screen(parent, result) | others]
+  end
+
+  defp resume_parent([], _result), do: []
+
+  defp register_screen_event_handler(screen_id, sm) do
+    {:ok, _} =
+      EventHandler.register_handler(
+        :any,
+        fn event -> dispatch_screen_event(screen_id, sm, event) end,
+        sm,
+        level: :top
+      )
+  end
+
+  defp dispatch_screen_event(screen_id, sm, event) do
+    screen = find_screen(sm, screen_id)
+    do_dispatch_screen_event(screen, sm, event)
+  end
+
+  defp find_screen(sm, screen_id) do
+    case GenServer.call(sm, :get_all_screens) do
+      screens when is_list(screens) -> Enum.find(screens, &(&1.id == screen_id))
+      _ -> nil
+    end
+  end
+
+  defp do_dispatch_screen_event(nil, _sm, _event), do: :passthrough
+
+  defp do_dispatch_screen_event(screen, sm, event) do
+    manager_state = GenServer.call(sm, :get_state)
+    screen_rect = screen.rect || calculate_screen_rect(screen, manager_state.screen_rect)
+    route_event(screen, screen_rect, event, sm, manager_state)
+  end
+
+  defp route_event(screen, screen_rect, event, sm, manager_state) do
+    cond do
+      should_dismiss_on_outside_click?(screen, screen_rect, event) ->
+        GenServer.call(sm, {:pop, :dismissed})
+        :handled
+
+      screen.widget_hierarchy != nil and should_forward_to_widget_hierarchy?(screen, screen_rect, event) ->
+        handle_widget_hierarchy_result(
+          handle_widget_hierarchy_event_direct(screen, screen_rect, event),
+          screen,
+          sm,
+          manager_state
+        )
+
+      should_capture_event?(screen, event) ->
+        handle_screen_event_result(
+          Screen.handle_screen_event(screen, event),
+          screen,
+          sm,
+          manager_state,
+          :handled_on_noreply
+        )
+
+      true ->
+        :passthrough
+    end
+  end
+
+  defp handle_widget_hierarchy_result({:ok, updated_screen}, _screen, sm, manager_state) do
+    GenServer.cast(sm, {:update_screen, updated_screen.id, updated_screen})
+    send(manager_state.app_pid, :screen_render_needed)
+    :handled
+  end
+
+  defp handle_widget_hierarchy_result({:pop, result}, _screen, sm, _manager_state) do
+    GenServer.call(sm, {:pop, result})
+    :handled
+  end
+
+  defp handle_widget_hierarchy_result({:show_modal, mod, props, opts}, _screen, sm, _manager_state) do
+    GenServer.call(sm, {:push, mod, props, Keyword.put(opts, :type, :modal)})
+    :handled
+  end
+
+  defp handle_widget_hierarchy_result({:push, mod, props, opts}, _screen, sm, _manager_state) do
+    GenServer.call(sm, {:push, mod, props, opts})
+    :handled
+  end
+
+  defp handle_widget_hierarchy_result({:replace, mod, props, opts}, _screen, sm, _manager_state) do
+    GenServer.call(sm, {:replace, mod, props, opts})
+    :handled
+  end
+
+  defp handle_widget_hierarchy_result({:passthrough, updated_screen}, screen, sm, manager_state) do
+    GenServer.cast(sm, {:update_screen, screen.id, updated_screen})
+    handle_screen_event_result(
+      Screen.handle_screen_event(updated_screen, :passthrough_event),
+      updated_screen,
+      sm,
+      manager_state,
+      :passthrough
+    )
+  end
+
+  defp handle_widget_hierarchy_result(:passthrough, _screen, _sm, _manager_state), do: :passthrough
+
+  defp handle_screen_event_result({:ok, updated_screen}, _screen, sm, manager_state, _noreply_val) do
+    GenServer.cast(sm, {:update_screen, updated_screen.id, updated_screen})
+    send(manager_state.app_pid, :screen_render_needed)
+    :handled
+  end
+
+  defp handle_screen_event_result({:noreply, _updated_screen}, _screen, _sm, _manager_state, noreply_val) do
+    noreply_val
+  end
+
+  defp handle_screen_event_result({:pop, result}, _screen, sm, _manager_state, _noreply_val) do
+    GenServer.call(sm, {:pop, result})
+    :handled
+  end
+
+  defp handle_screen_event_result({:show_modal, mod, props, opts}, _screen, sm, _manager_state, _noreply_val) do
+    GenServer.call(sm, {:push, mod, props, Keyword.put(opts, :type, :modal)})
+    :handled
+  end
+
+  defp handle_screen_event_result({:push, mod, props, opts}, _screen, sm, _manager_state, _noreply_val) do
+    GenServer.call(sm, {:push, mod, props, opts})
+    :handled
+  end
+
+  defp handle_screen_event_result({:replace, mod, props, opts}, _screen, sm, _manager_state, _noreply_val) do
+    GenServer.call(sm, {:replace, mod, props, opts})
+    :handled
+  end
+
+  defp handle_screen_event_result(_other, _screen, _sm, _manager_state, _noreply_val), do: :passthrough
 
   defp should_capture_event?(%Screen{type: :modal, options: opts}, {:key, :escape}) do
     opts.dismissable
@@ -545,75 +497,9 @@ defmodule Drafter.ScreenManager do
   defp handle_widget_hierarchy_event_direct(screen, screen_rect, {:mouse, mouse_data}) do
     if point_in_rect?(mouse_data.x, mouse_data.y, screen_rect) or
          screen.widget_hierarchy.drag_capture_widget != nil do
-      case Drafter.WidgetHierarchy.handle_event(screen.widget_hierarchy, {:mouse, mouse_data}) do
-        {updated_hierarchy, []} ->
-          if meaningful_hierarchy_change?(screen.widget_hierarchy, updated_hierarchy) do
-            updated_screen = %{screen | widget_hierarchy: updated_hierarchy}
-            {:passthrough, updated_screen}
-          else
-            :passthrough
-          end
-
-        {updated_hierarchy, actions} ->
-          updated_screen = %{screen | widget_hierarchy: updated_hierarchy}
-
-          pop_action =
-            Enum.find(actions, fn
-              {:pop, _r} -> true
-              _ -> false
-            end)
-
-          app_callback_action =
-            Enum.find(actions, fn
-              {:app_callback, _, _} -> true
-              _ -> false
-            end)
-
-          cond do
-            pop_action ->
-              {:pop, r} = pop_action
-              {:pop, r}
-
-            app_callback_action ->
-              {:app_callback, callback, data} = app_callback_action
-
-              screen_result =
-                if function_exported?(updated_screen.module, :handle_event, 3) do
-                  updated_screen.module.handle_event(callback, data, updated_screen.state)
-                else
-                  updated_screen.module.handle_event(callback, updated_screen.state)
-                end
-
-              case screen_result do
-                {:ok, new_state} ->
-                  {:ok, %{updated_screen | state: new_state}}
-
-                {:noreply, new_state} ->
-                  {:ok, %{updated_screen | state: new_state}}
-
-                {:pop, result} ->
-                  {:pop, result}
-
-                {:push, screen_module, props, opts} ->
-                  {:push, screen_module, props, opts}
-
-                {:show_modal, screen_module, props, opts} ->
-                  {:show_modal, screen_module, props, opts}
-
-                {:show_toast, message, opts} ->
-                  {:show_toast, message, opts}
-
-                {:replace, screen_module, props, opts} ->
-                  {:replace, screen_module, props, opts}
-
-                _other ->
-                  {:ok, updated_screen}
-              end
-
-            true ->
-              {:ok, updated_screen}
-          end
-      end
+      mouse_data
+      |> then(&Drafter.WidgetHierarchy.handle_event(screen.widget_hierarchy, {:mouse, &1}))
+      |> process_hierarchy_result(screen, :passthrough)
     else
       :passthrough
     end
@@ -625,79 +511,84 @@ defmodule Drafter.ScreenManager do
     if screen.widget_hierarchy == nil do
       :passthrough
     else
-      case Drafter.WidgetHierarchy.handle_event(screen.widget_hierarchy, event) do
-        {updated_hierarchy, []} ->
-          if meaningful_hierarchy_change?(screen.widget_hierarchy, updated_hierarchy) do
-            updated_screen = %{screen | widget_hierarchy: updated_hierarchy}
-            {:ok, updated_screen}
-          else
-            :passthrough
-          end
-
-        {updated_hierarchy, actions} ->
-          updated_screen = %{screen | widget_hierarchy: updated_hierarchy}
-
-          pop_action =
-            Enum.find(actions, fn
-              {:pop, _r} -> true
-              _ -> false
-            end)
-
-          app_callback_action =
-            Enum.find(actions, fn
-              {:app_callback, _, _} -> true
-              _ -> false
-            end)
-
-          cond do
-            pop_action ->
-              {:pop, r} = pop_action
-              {:pop, r}
-
-            app_callback_action ->
-              {:app_callback, callback, data} = app_callback_action
-
-              screen_result =
-                if function_exported?(updated_screen.module, :handle_event, 3) do
-                  updated_screen.module.handle_event(callback, data, updated_screen.state)
-                else
-                  updated_screen.module.handle_event(callback, updated_screen.state)
-                end
-
-              case screen_result do
-                {:ok, new_state} ->
-                  {:ok, %{updated_screen | state: new_state}}
-
-                {:noreply, new_state} ->
-                  {:ok, %{updated_screen | state: new_state}}
-
-                {:pop, result} ->
-                  {:pop, result}
-
-                {:push, screen_module, props, opts} ->
-                  {:push, screen_module, props, opts}
-
-                {:show_modal, screen_module, props, opts} ->
-                  {:show_modal, screen_module, props, opts}
-
-                {:show_toast, message, opts} ->
-                  {:show_toast, message, opts}
-
-                {:replace, screen_module, props, opts} ->
-                  {:replace, screen_module, props, opts}
-
-                _other ->
-                  {:ok, updated_screen}
-              end
-
-            true ->
-              {:ok, updated_screen}
-          end
-      end
+      screen.widget_hierarchy
+      |> Drafter.WidgetHierarchy.handle_event(event)
+      |> process_hierarchy_result(screen, :ok)
     end
   rescue
     _ -> :passthrough
   end
+
+  defp process_hierarchy_result({updated_hierarchy, []}, screen, empty_tag) do
+    if meaningful_hierarchy_change?(screen.widget_hierarchy, updated_hierarchy) do
+      updated_screen = %{screen | widget_hierarchy: updated_hierarchy}
+      {empty_tag, updated_screen}
+    else
+      :passthrough
+    end
+  end
+
+  defp process_hierarchy_result({updated_hierarchy, actions}, screen, _empty_tag) do
+    updated_screen = %{screen | widget_hierarchy: updated_hierarchy}
+    dispatch_hierarchy_actions(actions, updated_screen)
+  end
+
+  defp dispatch_hierarchy_actions(actions, updated_screen) do
+    pop_action = Enum.find(actions, &match?({:pop, _}, &1))
+    app_callback_action = Enum.find(actions, &match?({:app_callback, _, _}, &1))
+
+    cond do
+      pop_action ->
+        {:pop, r} = pop_action
+        {:pop, r}
+
+      app_callback_action ->
+        {:app_callback, callback, data} = app_callback_action
+        invoke_screen_callback(updated_screen, callback, data)
+
+      true ->
+        {:ok, updated_screen}
+    end
+  end
+
+  defp invoke_screen_callback(screen, callback, data) do
+    result =
+      if function_exported?(screen.module, :handle_event, 3) do
+        screen.module.handle_event(callback, data, screen.state)
+      else
+        screen.module.handle_event(callback, screen.state)
+      end
+
+    map_screen_callback_result(result, screen)
+  end
+
+  defp map_screen_callback_result({:ok, new_state}, screen) do
+    {:ok, %{screen | state: new_state}}
+  end
+
+  defp map_screen_callback_result({:noreply, new_state}, screen) do
+    {:ok, %{screen | state: new_state}}
+  end
+
+  defp map_screen_callback_result({:pop, result}, _screen), do: {:pop, result}
+
+  defp map_screen_callback_result({:push, mod, props, opts}, _screen) do
+    {:push, mod, props, opts}
+  end
+
+  defp map_screen_callback_result({:show_modal, mod, props, opts}, _screen) do
+    {:show_modal, mod, props, opts}
+  end
+
+  defp map_screen_callback_result({:show_toast, message, opts}, _screen) do
+    {:show_toast, message, opts}
+  end
+
+  defp map_screen_callback_result({:replace, mod, props, opts}, _screen) do
+    {:replace, mod, props, opts}
+  end
+
+  defp map_screen_callback_result(_other, screen), do: {:ok, screen}
 
   defp should_forward_to_widget_hierarchy?(screen, screen_rect, event) do
     screen.widget_hierarchy != nil and
@@ -713,6 +604,25 @@ defmodule Drafter.ScreenManager do
       :erlang.phash2(old_hierarchy.widgets) != :erlang.phash2(new_hierarchy.widgets)
   end
 
+  defp remove_toast(toasts, toast_id) do
+    case Enum.find(toasts, &(&1.id == toast_id)) do
+      nil ->
+        toasts
+
+      removed ->
+        toasts
+        |> Enum.reject(&(&1.id == toast_id))
+        |> Enum.map(&shift_stack_index(&1, removed))
+    end
+  end
+
+  defp shift_stack_index(%{position: pos, stack_index: idx} = toast, %{position: pos, stack_index: removed_idx})
+       when idx > removed_idx do
+    %{toast | stack_index: idx - 1}
+  end
+
+  defp shift_stack_index(toast, _removed), do: toast
+
   defp add_toast_with_stack_limit(toasts, new_toast, limit) do
     position = new_toast.position
 
@@ -723,22 +633,23 @@ defmodule Drafter.ScreenManager do
 
     if length(toasts_at_position) >= limit do
       oldest_toast = hd(toasts_at_position)
-
-      updated_toasts =
-        toasts
-        |> Enum.reject(&(&1.id == oldest_toast.id))
-        |> Enum.map(fn toast ->
-          if toast.position == position and toast.created_at > oldest_toast.created_at do
-            %{toast | stack_index: toast.stack_index - 1}
-          else
-            toast
-          end
-        end)
-
+      updated_toasts = remove_and_shift(toasts, oldest_toast, position)
       updated_toasts ++ [%{new_toast | stack_index: limit - 1}]
     else
-      stack_index = length(toasts_at_position)
-      toasts ++ [%{new_toast | stack_index: stack_index}]
+      toasts ++ [%{new_toast | stack_index: length(toasts_at_position)}]
     end
   end
+
+  defp remove_and_shift(toasts, oldest_toast, position) do
+    toasts
+    |> Enum.reject(&(&1.id == oldest_toast.id))
+    |> Enum.map(&shift_after_removal(&1, oldest_toast, position))
+  end
+
+  defp shift_after_removal(%{position: pos, created_at: created_at} = toast, oldest, pos)
+       when created_at > oldest.created_at do
+    %{toast | stack_index: toast.stack_index - 1}
+  end
+
+  defp shift_after_removal(toast, _oldest, _position), do: toast
 end

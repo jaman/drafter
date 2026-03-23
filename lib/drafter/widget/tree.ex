@@ -67,6 +67,7 @@ defmodule Drafter.Widget.Tree do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.ThemeManager
+  alias Drafter.Widget.Callback
 
   defstruct [
     :data,
@@ -174,14 +175,10 @@ defmodule Drafter.Widget.Tree do
     content_width = rect.width
     content_height = rect.height
 
-    display_items = flatten_for_display(normalized_state)
-
-    visible_items =
-      display_items
-      |> Enum.slice(normalized_state.scroll_offset, content_height)
-
     strips =
-      visible_items
+      normalized_state
+      |> flatten_for_display()
+      |> Enum.slice(normalized_state.scroll_offset, content_height)
       |> Enum.with_index(normalized_state.scroll_offset)
       |> Enum.map(fn {item, index} ->
         render_tree_item(normalized_state, item, index, content_width)
@@ -202,57 +199,22 @@ defmodule Drafter.Widget.Tree do
   end
 
   @impl Drafter.Widget
-  def handle_event(event, state) do
-    case event do
-      {:key, :up} when state.focused ->
-        move_cursor_up(state)
-
-      {:key, :down} when state.focused ->
-        move_cursor_down(state)
-
-      {:key, {:shift, :left}} when state.focused ->
-        move_to_prev_sibling(state)
-
-      {:key, {:shift, :right}} when state.focused ->
-        move_to_next_sibling(state)
-
-      {:key, :left} when state.focused ->
-        collapse_current_node(state)
-
-      {:key, :right} when state.focused ->
-        expand_current_node(state)
-
-      {:key, :enter} when state.focused ->
-        toggle_current_node(state)
-
-      {:key, :space} when state.focused ->
-        toggle_selection(state)
-
-      {:key, "+"} when state.focused ->
-        expand_current_node(state)
-
-      {:key, "-"} when state.focused ->
-        collapse_current_node(state)
-
-      {:key, "*"} when state.focused ->
-        expand_all_nodes(state)
-
-      {:key, "/"} when state.focused ->
-        collapse_all_nodes(state)
-
-      {:mouse, %{type: :mouse_up, x: _x, y: y}} ->
-        handle_mouse_click(state, y)
-
-      {:focus} ->
-        {:ok, %{state | focused: true}}
-
-      {:blur} ->
-        {:ok, %{state | focused: false}}
-
-      _ ->
-        {:noreply, state}
-    end
-  end
+  def handle_event({:key, :up}, %{focused: true} = state), do: move_cursor_up(state)
+  def handle_event({:key, :down}, %{focused: true} = state), do: move_cursor_down(state)
+  def handle_event({:key, {:shift, :left}}, %{focused: true} = state), do: move_to_prev_sibling(state)
+  def handle_event({:key, {:shift, :right}}, %{focused: true} = state), do: move_to_next_sibling(state)
+  def handle_event({:key, :left}, %{focused: true} = state), do: collapse_current_node(state)
+  def handle_event({:key, :right}, %{focused: true} = state), do: expand_current_node(state)
+  def handle_event({:key, :enter}, %{focused: true} = state), do: toggle_current_node(state)
+  def handle_event({:key, :space}, %{focused: true} = state), do: toggle_selection(state)
+  def handle_event({:key, "+"}, %{focused: true} = state), do: expand_current_node(state)
+  def handle_event({:key, "-"}, %{focused: true} = state), do: collapse_current_node(state)
+  def handle_event({:key, "*"}, %{focused: true} = state), do: expand_all_nodes(state)
+  def handle_event({:key, "/"}, %{focused: true} = state), do: collapse_all_nodes(state)
+  def handle_event({:mouse, %{type: :mouse_up, x: _x, y: y}}, state), do: handle_mouse_click(state, y)
+  def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
+  def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
+  def handle_event(_event, state), do: {:noreply, state}
 
   @impl Drafter.Widget
   def update(props, state) do
@@ -330,7 +292,7 @@ defmodule Drafter.Widget.Tree do
     if state.cursor_index < length(display_items) do
       current_item = Enum.at(display_items, state.cursor_index)
 
-      if current_item.children && length(current_item.children) > 0 do
+      if current_item.children && current_item.children != [] do
         expanded_nodes = MapSet.put(state.expanded_nodes, current_item.id)
         new_state = %{state | expanded_nodes: expanded_nodes}
         trigger_expand(new_state, current_item, true)
@@ -367,25 +329,28 @@ defmodule Drafter.Widget.Tree do
 
     if state.cursor_index < length(display_items) do
       current_item = Enum.at(display_items, state.cursor_index)
-
-      if current_item.children && length(current_item.children) > 0 do
-        if MapSet.member?(state.expanded_nodes, current_item.id) do
-          collapse_current_node(state)
-        else
-          expand_current_node(state)
-        end
-      else
-        {:noreply, state}
-      end
+      toggle_node_if_parent(state, current_item)
     else
       {:noreply, state}
+    end
+  end
+
+  defp toggle_node_if_parent(state, %{children: children}) when children in [nil, []] do
+    {:noreply, state}
+  end
+
+  defp toggle_node_if_parent(state, current_item) do
+    if MapSet.member?(state.expanded_nodes, current_item.id) do
+      collapse_current_node(state)
+    else
+      expand_current_node(state)
     end
   end
 
   defp expand_all_nodes(state) do
     all_nodes =
       flatten_tree(state.data)
-      |> Enum.filter(fn node -> node.children && length(node.children) > 0 end)
+      |> Enum.filter(fn node -> node.children && node.children != [] end)
       |> Enum.map(fn node -> node.id end)
       |> MapSet.new()
 
@@ -455,26 +420,57 @@ defmodule Drafter.Widget.Tree do
       new_state = %{state | cursor_index: clicked_index, focused: true}
       current_item = Enum.at(display_items, clicked_index)
       trigger_node_highlight(new_state, current_item)
-
-      if current_item.children && length(current_item.children) > 0 do
-        if MapSet.member?(new_state.expanded_nodes, current_item.id) do
-          expanded_nodes = MapSet.delete(new_state.expanded_nodes, current_item.id)
-          trigger_expand(new_state, current_item, false)
-          {:ok, %{new_state | expanded_nodes: expanded_nodes}}
-        else
-          expanded_nodes = MapSet.put(new_state.expanded_nodes, current_item.id)
-          trigger_expand(new_state, current_item, true)
-          {:ok, %{new_state | expanded_nodes: expanded_nodes}}
-        end
-      else
-        {:ok, new_state}
-      end
+      click_toggle_node(new_state, current_item)
     else
       {:noreply, state}
     end
   end
 
+  defp click_toggle_node(state, %{children: children} = item) when is_list(children) and children != [] do
+    if MapSet.member?(state.expanded_nodes, item.id) do
+      trigger_expand(state, item, false)
+      {:ok, %{state | expanded_nodes: MapSet.delete(state.expanded_nodes, item.id)}}
+    else
+      trigger_expand(state, item, true)
+      {:ok, %{state | expanded_nodes: MapSet.put(state.expanded_nodes, item.id)}}
+    end
+  end
+
+  defp click_toggle_node(state, _item), do: {:ok, state}
+
   # Rendering functions
+
+  defp expansion_char(item, expanded_nodes) do
+    if item.children && item.children != [] do
+      if MapSet.member?(expanded_nodes, item.id), do: "▼ ", else: "▶ "
+    else
+      "  "
+    end
+  end
+
+  defp item_icon(item, show_icons) do
+    if show_icons && item.icon, do: item.icon <> "  ", else: ""
+  end
+
+  defp item_style(state, item, is_cursor, is_selected, is_expanded) do
+    has_children = item.children && item.children != []
+
+    cond do
+      is_cursor -> state.cursor_style
+      is_selected -> state.selected_style
+      is_expanded && has_children -> state.expanded_style
+      has_children -> state.collapsed_style
+      true -> state.style
+    end
+  end
+
+  defp format_content(content, width) do
+    if display_width(content) >= width do
+      truncate_to_width(content, max(0, width - 2)) <> "…"
+    else
+      pad_to_width(content, width)
+    end
+  end
 
   defp render_tree_item(state, item, index, width) do
     is_cursor = state.focused && index == state.cursor_index
@@ -482,43 +478,12 @@ defmodule Drafter.Widget.Tree do
     is_expanded = MapSet.member?(state.expanded_nodes, item.id)
 
     indent = String.duplicate(" ", item.depth * state.indent_size)
+    exp_char = expansion_char(item, state.expanded_nodes)
+    icon = item_icon(item, state.show_icons)
 
-    expansion_char =
-      cond do
-        item.children && length(item.children) > 0 ->
-          if is_expanded, do: "▼ ", else: "▶ "
-
-        true ->
-          "  "
-      end
-
-    icon =
-      if state.show_icons && item.icon do
-        item.icon <> "  "
-      else
-        ""
-      end
-
-    content = indent <> expansion_char <> icon <> item.label
-    content_display_width = display_width(content)
-
-    formatted_content =
-      if content_display_width >= width do
-        truncate_to_width(content, max(0, width - 2)) <> "…"
-      else
-        pad_to_width(content, width)
-      end
-
-    _formatted_width = display_width(formatted_content)
-
-    style =
-      cond do
-        is_cursor -> state.cursor_style
-        is_selected -> state.selected_style
-        is_expanded && item.children && length(item.children) > 0 -> state.expanded_style
-        item.children && length(item.children) > 0 -> state.collapsed_style
-        true -> state.style
-      end
+    content = indent <> exp_char <> icon <> item.label
+    formatted_content = format_content(content, width)
+    style = item_style(state, item, is_cursor, is_selected, is_expanded)
 
     Strip.new([Segment.new(formatted_content, style)])
   end
@@ -619,24 +584,21 @@ defmodule Drafter.Widget.Tree do
     end
   end
 
+  defp trigger_selection(%{on_select: nil}), do: :ok
+
   defp trigger_selection(state) do
-    if state.on_select do
-      all_nodes = flatten_tree(state.data)
+    all_nodes = flatten_tree(state.data)
 
-      selected_data =
-        state.selected_nodes
-        |> MapSet.to_list()
-        |> Enum.map(fn id ->
-          Enum.find(all_nodes, fn node -> node.id == id end)
-        end)
-        |> Enum.filter(& &1)
+    selected_data =
+      state.selected_nodes
+      |> MapSet.to_list()
+      |> Enum.map(fn id -> Enum.find(all_nodes, fn node -> node.id == id end) end)
+      |> Enum.filter(& &1)
 
-      try do
-        result = state.on_select.(selected_data)
-        result
-      rescue
-        _error -> :ok
-      end
+    try do
+      state.on_select.(selected_data)
+    rescue
+      _error -> :ok
     end
   end
 
@@ -739,12 +701,13 @@ defmodule Drafter.Widget.Tree do
 
   def from_component_opts(_args, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
+
     %{
       data: Keyword.get(opts, :data, []),
       selection_mode: Keyword.get(opts, :selection_mode, :single),
-      on_select: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_select)),
-      on_expand: Drafter.Widget.Callback.wrap_2(Keyword.get(opts, :on_expand)),
-      on_node_highlight: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_node_highlight)),
+      on_select: Callback.wrap_1(Keyword.get(opts, :on_select)),
+      on_expand: Callback.wrap_2(Keyword.get(opts, :on_expand)),
+      on_node_highlight: Callback.wrap_1(Keyword.get(opts, :on_node_highlight)),
       show_icons: Keyword.get(opts, :show_icons, true),
       indent_size: Keyword.get(opts, :indent_size, 2),
       width: Keyword.get(opts, :width, rect.width),
@@ -762,11 +725,14 @@ defmodule Drafter.Widget.Tree do
       indent_size: mount_props.indent_size,
       data: mount_props.data
     }
-    base = if existing_state.width != mount_props.width do
-      Map.put(base, :width, mount_props.width)
-    else
-      base
-    end
+
+    base =
+      if existing_state.width != mount_props.width do
+        Map.put(base, :width, mount_props.width)
+      else
+        base
+      end
+
     if existing_state.height != mount_props.height do
       Map.put(base, :height, mount_props.height)
     else
@@ -785,37 +751,8 @@ defmodule Drafter.Widget.Tree do
     }
   end
 
-  defp display_width(str) do
-    str
-    |> String.graphemes()
-    |> Enum.reduce(0, fn grapheme, acc ->
-      acc + char_width(grapheme)
-    end)
-  end
-
-  defp char_width(grapheme) do
-    case String.to_charlist(grapheme) do
-      [codepoint | _] ->
-        cond do
-          codepoint >= 0x1F300 and codepoint <= 0x1F9FF -> 2
-          codepoint >= 0x2600 and codepoint <= 0x26FF -> 2
-          codepoint >= 0x2700 and codepoint <= 0x27BF -> 2
-          codepoint >= 0x1F600 and codepoint <= 0x1F64F -> 2
-          codepoint >= 0x1F680 and codepoint <= 0x1F6FF -> 2
-          codepoint >= 0x1100 and codepoint <= 0x11FF -> 2
-          codepoint >= 0x2E80 and codepoint <= 0x9FFF -> 2
-          codepoint >= 0xAC00 and codepoint <= 0xD7AF -> 2
-          codepoint >= 0xFE10 and codepoint <= 0xFE1F -> 2
-          codepoint >= 0xFE30 and codepoint <= 0xFE6F -> 2
-          codepoint >= 0xFF00 and codepoint <= 0xFF60 -> 2
-          codepoint >= 0xFFE0 and codepoint <= 0xFFE6 -> 2
-          true -> 1
-        end
-
-      [] ->
-        0
-    end
-  end
+  defp char_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
+  defp display_width(str), do: Drafter.CharacterWidth.string(str)
 
   defp truncate_to_width(str, target_width) do
     str

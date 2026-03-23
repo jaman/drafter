@@ -184,20 +184,20 @@ defmodule Drafter.Widget.Gauge do
   end
 
   defp row_strip(braille_map, row, width) do
-    segments =
-      for col <- 0..(width - 1) do
-        case Map.get(braille_map, {col, row}) do
-          nil ->
-            Segment.new(" ", %{})
-
-          dots ->
-            {bits, color} = merge_dots(dots)
-            char = if bits == 0, do: " ", else: <<@braille_base + bits::utf8>>
-            Segment.new(char, %{fg: color})
-        end
-      end
-
+    segments = Enum.map(0..(width - 1), &render_braille_cell(braille_map, &1, row))
     Strip.new(segments)
+  end
+
+  defp render_braille_cell(braille_map, col, row) do
+    case Map.get(braille_map, {col, row}) do
+      nil ->
+        Segment.new(" ", %{})
+
+      dots ->
+        {bits, color} = merge_dots(dots)
+        char = if bits == 0, do: " ", else: <<@braille_base + bits::utf8>>
+        Segment.new(char, %{fg: color})
+    end
   end
 
   defp merge_dots(dots) do
@@ -214,25 +214,21 @@ defmodule Drafter.Widget.Gauge do
     text_chars = String.graphemes(text)
 
     segments =
-      for col <- 0..(width - 1) do
+      Enum.map(0..(width - 1), fn col ->
         text_offset = col - text_start
-
-        if text_offset >= 0 and text_offset < text_len do
-          Segment.new(Enum.at(text_chars, text_offset), %{fg: color})
-        else
-          case Map.get(braille_map, {col, row}) do
-            nil ->
-              Segment.new(" ", %{})
-
-            dots ->
-              {bits, dot_color} = merge_dots(dots)
-              char = if bits == 0, do: " ", else: <<@braille_base + bits::utf8>>
-              Segment.new(char, %{fg: dot_color})
-          end
-        end
-      end
+        render_overlay_cell(text_offset, text_len, text_chars, color, braille_map, col, row)
+      end)
 
     Strip.new(segments)
+  end
+
+  defp render_overlay_cell(text_offset, text_len, text_chars, color, _braille_map, _col, _row)
+       when text_offset >= 0 and text_offset < text_len do
+    Segment.new(Enum.at(text_chars, text_offset), %{fg: color})
+  end
+
+  defp render_overlay_cell(_text_offset, _text_len, _text_chars, _color, braille_map, col, row) do
+    render_braille_cell(braille_map, col, row)
   end
 
   defp center_strip(text, width, color) do

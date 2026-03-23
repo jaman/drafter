@@ -40,6 +40,7 @@ defmodule Drafter.Widget.DirectoryTree do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.Widget.Callback
 
   @type tree_item :: %{
           path: String.t(),
@@ -116,18 +117,8 @@ defmodule Drafter.Widget.DirectoryTree do
 
   @impl Drafter.Widget
   def render(state, rect) do
-    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
-
-    classes = state.classes ++ if state.focused, do: [:focus], else: []
-    classes = classes ++ if state.hovered, do: [:hover], else: []
-    computed_opts = [classes: classes, style: state.style]
-
-    computed_opts =
-      if state.app_module,
-        do: Keyword.put(computed_opts, :app_module, state.app_module),
-        else: computed_opts
-
-    computed = Computed.for_widget(:directory_tree, state, computed_opts)
+    state = ensure_mounted(state)
+    computed = compute_style(state)
 
     default_fg = computed[:color] || {200, 200, 200}
     bg = computed[:background] || {30, 30, 30}
@@ -140,57 +131,9 @@ defmodule Drafter.Widget.DirectoryTree do
       |> Enum.drop(state.scroll_offset)
       |> Enum.take(rect.height)
 
-    strips =
-      Enum.with_index(visible_items, fn item, idx ->
-        absolute_idx = state.scroll_offset + idx
-        is_selected = item.path == state.selected_file
-        is_cursor = absolute_idx == state.cursor_pos
+    strips = render_items(visible_items, state, rect, default_fg, bg, selected_bg)
 
-        item_bg =
-          cond do
-            is_cursor and is_selected -> {80, 100, 80}
-            is_cursor -> {50, 50, 60}
-            is_selected -> selected_bg
-            true -> bg
-          end
-
-        item_fg =
-          cond do
-            item.type == :dir -> {150, 200, 255}
-            true -> default_fg
-          end
-
-        indent = String.duplicate("  ", item.depth)
-
-        prefix =
-          if item.type == :dir do
-            if MapSet.member?(state.expanded_dirs, item.path) do
-              "▼ "
-            else
-              "▶ "
-            end
-          else
-            "  "
-          end
-
-        name = Path.basename(item.path)
-        full_text = indent <> prefix <> name
-        scrolled = String.slice(full_text, state.h_scroll_offset, String.length(full_text))
-
-        truncated =
-          if String.length(scrolled) > rect.width do
-            String.slice(scrolled, 0, max(0, rect.width - 1)) <> "…"
-          else
-            scrolled
-          end
-
-        padded = String.pad_trailing(truncated, rect.width, " ")
-
-        segment = Segment.new(padded, %{fg: item_fg, bg: item_bg})
-        Strip.new([segment])
-      end)
-
-    if length(strips) > 0 do
+    if strips != [] do
       strips
     else
       empty_line = String.duplicate(" ", rect.width)
@@ -199,164 +142,104 @@ defmodule Drafter.Widget.DirectoryTree do
   end
 
   @impl Drafter.Widget
-  def handle_key(key, state) do
-    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
-
+  def handle_key(:up, state) do
+    state = ensure_mounted(state)
     tree_items = build_tree(state)
+    new_pos = max(0, state.cursor_pos - 1)
+    new_scroll = if new_pos < state.scroll_offset, do: state.scroll_offset - 1, else: state.scroll_offset
+    new_state = %{state | cursor_pos: new_pos, scroll_offset: max(0, new_scroll)}
+    actions = cursor_actions_for_pos(new_state, tree_items, new_pos)
+    {:ok, new_state, actions}
+  end
 
-    case key do
-      :up ->
-        new_pos = max(0, state.cursor_pos - 1)
+  def handle_key(:down, state) do
+    state = ensure_mounted(state)
+    tree_items = build_tree(state)
+    new_pos = min(length(tree_items) - 1, state.cursor_pos + 1)
+    last_visible_idx = state.scroll_offset + state.viewport_height - 1
+    new_scroll = if new_pos > last_visible_idx, do: state.scroll_offset + 1, else: state.scroll_offset
+    new_state = %{state | cursor_pos: new_pos, scroll_offset: new_scroll}
+    actions = cursor_actions_for_pos(new_state, tree_items, new_pos)
+    {:ok, new_state, actions}
+  end
 
-        new_scroll =
-          if new_pos < state.scroll_offset do
-            state.scroll_offset - 1
-          else
-            state.scroll_offset
-          end
+  def handle_key(:enter, state) do
+    state = ensure_mounted(state)
+    tree_items = build_tree(state)
+    activate_cursor_item(state, tree_items)
+  end
 
-        new_state = %{state | cursor_pos: new_pos, scroll_offset: max(0, new_scroll)}
+  def handle_key(:space, state) do
+    state = ensure_mounted(state)
+    tree_items = build_tree(state)
+    activate_cursor_item_space(state, tree_items)
+  end
 
-        actions =
-          if new_pos < length(tree_items) do
-            item = Enum.at(tree_items, new_pos)
-            cursor_actions(new_state, item)
-          else
-            []
-          end
+  def handle_key(:left, state) do
+    state = ensure_mounted(state)
+    {:ok, %{state | h_scroll_offset: max(0, state.h_scroll_offset - 2)}}
+  end
 
-        {:ok, new_state, actions}
+  def handle_key(:right, state) do
+    state = ensure_mounted(state)
+    {:ok, %{state | h_scroll_offset: state.h_scroll_offset + 2}}
+  end
 
-      :down ->
-        new_pos = min(length(tree_items) - 1, state.cursor_pos + 1)
-        last_visible_idx = state.scroll_offset + state.viewport_height - 1
-
-        new_scroll =
-          if new_pos > last_visible_idx do
-            state.scroll_offset + 1
-          else
-            state.scroll_offset
-          end
-
-        new_state = %{state | cursor_pos: new_pos, scroll_offset: new_scroll}
-
-        actions =
-          if new_pos < length(tree_items) do
-            item = Enum.at(tree_items, new_pos)
-            cursor_actions(new_state, item)
-          else
-            []
-          end
-
-        {:ok, new_state, actions}
-
-      :enter ->
-        if state.cursor_pos < length(tree_items) do
-          item = Enum.at(tree_items, state.cursor_pos)
-          handle_item_selection(state, item)
-        else
-          {:ok, state}
-        end
-
-      :space ->
-        if state.cursor_pos < length(tree_items) do
-          item = Enum.at(tree_items, state.cursor_pos)
-
-          if item.type == :dir do
-            toggle_directory(state, item.path)
-          else
-            handle_item_selection(state, item)
-          end
-        else
-          {:ok, state}
-        end
-
-      :left ->
-        {:ok, %{state | h_scroll_offset: max(0, state.h_scroll_offset - 2)}}
-
-      :right ->
-        {:ok, %{state | h_scroll_offset: state.h_scroll_offset + 2}}
-
-      _ ->
-        {:ok, state}
-    end
+  def handle_key(_key, state) do
+    {:ok, ensure_mounted(state)}
   end
 
   @impl Drafter.Widget
   def handle_scroll(direction, state) do
-    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    state = ensure_mounted(state)
 
-    if :scroll not in state.handles do
-      {:ok, state}
+    if :scroll in state.handles do
+      do_scroll(direction, state)
     else
-      tree_items = build_tree(state)
-      scroll_amount = 3
-
-      {new_pos, new_scroll} =
-        case direction do
-          :up ->
-            pos = max(0, state.cursor_pos - scroll_amount)
-
-            scroll =
-              if pos < state.scroll_offset do
-                pos
-              else
-                state.scroll_offset
-              end
-
-            {pos, scroll}
-
-          :down ->
-            pos = min(length(tree_items) - 1, state.cursor_pos + scroll_amount)
-
-            scroll =
-              if pos >= state.scroll_offset + state.viewport_height do
-                pos - state.viewport_height + 1
-              else
-                state.scroll_offset
-              end
-
-            {pos, scroll}
-        end
-
-      new_state = %{state | cursor_pos: new_pos, scroll_offset: new_scroll}
-
-      actions =
-        if new_pos < length(tree_items) do
-          item = Enum.at(tree_items, new_pos)
-          cursor_actions(new_state, item)
-        else
-          []
-        end
-
-      {:ok, new_state, actions}
+      {:ok, state}
     end
   end
 
   @impl Drafter.Widget
   def handle_mouse_up(_x, y, state) do
-    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    state = ensure_mounted(state)
 
-    if :mouse_up not in state.handles do
-      {:ok, state}
-    else
+    if :mouse_up in state.handles do
       tree_items = build_tree(state)
+      actual_index = state.scroll_offset + y
 
-      if y < length(tree_items) do
-        item = Enum.at(tree_items, y)
-        new_state = %{state | cursor_pos: y}
+      if actual_index < length(tree_items) do
+        item = Enum.at(tree_items, actual_index)
+        new_state = %{state | cursor_pos: actual_index}
         handle_item_selection(new_state, item)
       else
         {:ok, state}
       end
+    else
+      {:ok, state}
     end
   end
 
   @impl Drafter.Widget
   def update(props, state) do
+    new_path = Map.get(props, :path, state.path)
+
+    expanded_dirs =
+      if new_path != state.path do
+        MapSet.new([new_path])
+      else
+        state.expanded_dirs
+      end
+
+    cursor_pos = if new_path != state.path, do: 0, else: state.cursor_pos
+    scroll_offset = if new_path != state.path, do: 0, else: state.scroll_offset
+
     %{
       state
-      | path: Map.get(props, :path, state.path),
+      | path: new_path,
+        expanded_dirs: expanded_dirs,
+        cursor_pos: cursor_pos,
+        scroll_offset: scroll_offset,
         show_hidden: Map.get(props, :show_hidden, state.show_hidden),
         style: Map.get(props, :style, state.style),
         classes: Map.get(props, :classes, state.classes),
@@ -374,20 +257,24 @@ defmodule Drafter.Widget.DirectoryTree do
   def from_component_opts(_args, opts) do
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
     base = %{
       path: Keyword.get(opts, :path, File.cwd!()),
       show_hidden: Keyword.get(opts, :show_hidden, false),
-      on_select: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_select)),
-      on_file_select: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_file_select)),
+      on_select: Callback.wrap_1(Keyword.get(opts, :on_select)),
+      on_file_select: Callback.wrap_1(Keyword.get(opts, :on_file_select)),
       target: Keyword.get(opts, :target),
       style: Keyword.get(opts, :style, %{}),
       classes: classes,
       app_module: Keyword.get(opts, :__app_module__)
     }
+
     case Keyword.get(opts, :handles) do
       nil -> base
       handles -> Map.put(base, :handles, handles)
@@ -402,18 +289,143 @@ defmodule Drafter.Widget.DirectoryTree do
       on_file_select: mount_props.on_file_select,
       target: mount_props.target
     }
+
     case Map.get(mount_props, :handles) do
       nil -> base
       handles -> Map.put(base, :handles, handles)
     end
   end
 
+  defp ensure_mounted(state) do
+    if is_struct(state, __MODULE__), do: state, else: mount(state)
+  end
+
+  defp compute_style(state) do
+    classes = state.classes ++ if state.focused, do: [:focus], else: []
+    classes = classes ++ if state.hovered, do: [:hover], else: []
+    computed_opts = [classes: classes, style: state.style]
+
+    computed_opts =
+      if state.app_module,
+        do: Keyword.put(computed_opts, :app_module, state.app_module),
+        else: computed_opts
+
+    Computed.for_widget(:directory_tree, state, computed_opts)
+  end
+
+  defp item_bg(is_cursor, is_selected, selected_bg, bg) do
+    cond do
+      is_cursor and is_selected -> {80, 100, 80}
+      is_cursor -> {50, 50, 60}
+      is_selected -> selected_bg
+      true -> bg
+    end
+  end
+
+  defp item_fg(:dir, _default_fg), do: {150, 200, 255}
+  defp item_fg(_type, default_fg), do: default_fg
+
+  defp dir_prefix(path, expanded_dirs) do
+    if MapSet.member?(expanded_dirs, path), do: "▼ ", else: "▶ "
+  end
+
+  defp render_item(item, idx, state, rect, default_fg, bg, selected_bg) do
+    absolute_idx = state.scroll_offset + idx
+    is_selected = item.path == state.selected_file
+    is_cursor = absolute_idx == state.cursor_pos
+
+    bg_color = item_bg(is_cursor, is_selected, selected_bg, bg)
+    fg_color = item_fg(item.type, default_fg)
+
+    indent = String.duplicate("  ", item.depth)
+    prefix = if item.type == :dir, do: dir_prefix(item.path, state.expanded_dirs), else: "  "
+
+    name = Path.basename(item.path)
+    full_text = indent <> prefix <> name
+    scrolled = String.slice(full_text, state.h_scroll_offset, String.length(full_text))
+
+    truncated =
+      if String.length(scrolled) > rect.width do
+        String.slice(scrolled, 0, max(0, rect.width - 1)) <> "…"
+      else
+        scrolled
+      end
+
+    padded = String.pad_trailing(truncated, rect.width, " ")
+    segment = Segment.new(padded, %{fg: fg_color, bg: bg_color})
+    Strip.new([segment])
+  end
+
+  defp render_items(visible_items, state, rect, default_fg, bg, selected_bg) do
+    Enum.with_index(visible_items, fn item, idx ->
+      render_item(item, idx, state, rect, default_fg, bg, selected_bg)
+    end)
+  end
+
+  defp do_scroll(:up, state) do
+    tree_items = build_tree(state)
+    scroll_amount = 3
+    pos = max(0, state.cursor_pos - scroll_amount)
+    scroll = if pos < state.scroll_offset, do: pos, else: state.scroll_offset
+    new_state = %{state | cursor_pos: pos, scroll_offset: scroll}
+    actions = cursor_actions_for_pos(new_state, tree_items, pos)
+    {:ok, new_state, actions}
+  end
+
+  defp do_scroll(:down, state) do
+    tree_items = build_tree(state)
+    scroll_amount = 3
+    pos = min(length(tree_items) - 1, state.cursor_pos + scroll_amount)
+
+    scroll =
+      if pos >= state.scroll_offset + state.viewport_height do
+        pos - state.viewport_height + 1
+      else
+        state.scroll_offset
+      end
+
+    new_state = %{state | cursor_pos: pos, scroll_offset: scroll}
+    actions = cursor_actions_for_pos(new_state, tree_items, pos)
+    {:ok, new_state, actions}
+  end
+
+  defp cursor_actions_for_pos(state, tree_items, pos) do
+    if pos < length(tree_items) do
+      item = Enum.at(tree_items, pos)
+      cursor_actions(state, item)
+    else
+      []
+    end
+  end
+
+  defp activate_cursor_item(state, tree_items) do
+    if state.cursor_pos < length(tree_items) do
+      item = Enum.at(tree_items, state.cursor_pos)
+      handle_item_selection(state, item)
+    else
+      {:ok, state}
+    end
+  end
+
+  defp activate_cursor_item_space(state, tree_items) do
+    if state.cursor_pos < length(tree_items) do
+      item = Enum.at(tree_items, state.cursor_pos)
+      activate_space_item(state, item)
+    else
+      {:ok, state}
+    end
+  end
+
+  defp activate_space_item(state, %{type: :dir, path: path}) do
+    toggle_directory(state, path)
+  end
+
+  defp activate_space_item(state, item) do
+    handle_item_selection(state, item)
+  end
+
   defp build_tree(state) do
-    root_item = %{
-      path: state.path,
-      type: :dir,
-      depth: 0
-    }
+    root_item = %{path: state.path, type: :dir, depth: 0}
 
     children =
       if MapSet.member?(state.expanded_dirs, state.path) do
@@ -428,58 +440,41 @@ defmodule Drafter.Widget.DirectoryTree do
   defp build_tree_recursive(path, expanded_dirs, show_hidden, depth, acc) do
     case File.ls(path) do
       {:ok, entries} ->
-        entries = Enum.sort(entries)
-
-        entries =
-          if not show_hidden do
-            Enum.reject(entries, fn entry ->
-              String.starts_with?(entry, ".")
-            end)
-          else
-            entries
-          end
-
-        {dirs, files} =
-          Enum.split_with(entries, fn entry ->
-            File.dir?(Path.join([path, entry]))
-          end)
-
-        dirs_with_children =
-          Enum.flat_map(dirs, fn dir ->
-            full_path = Path.join([path, dir])
-
-            dir_item = %{
-              path: full_path,
-              type: :dir,
-              depth: depth
-            }
-
-            children =
-              if MapSet.member?(expanded_dirs, full_path) do
-                build_tree_recursive(full_path, expanded_dirs, show_hidden, depth + 1, [])
-              else
-                []
-              end
-
-            [dir_item | children]
-          end)
-
-        file_items =
-          Enum.map(files, fn file ->
-            full_path = Path.join([path, file])
-
-            %{
-              path: full_path,
-              type: :file,
-              depth: depth
-            }
-          end)
-
-        acc ++ dirs_with_children ++ file_items
+        entries
+        |> Enum.sort()
+        |> filter_hidden(show_hidden)
+        |> build_items(path, expanded_dirs, show_hidden, depth, acc)
 
       {:error, _} ->
         acc
     end
+  end
+
+  defp filter_hidden(entries, true), do: entries
+  defp filter_hidden(entries, false), do: Enum.reject(entries, &String.starts_with?(&1, "."))
+
+  defp build_items(entries, path, expanded_dirs, show_hidden, depth, acc) do
+    {dirs, files} = Enum.split_with(entries, fn entry -> File.dir?(Path.join([path, entry])) end)
+
+    dirs_with_children = Enum.flat_map(dirs, fn dir -> expand_dir(dir, path, expanded_dirs, show_hidden, depth) end)
+
+    file_items = Enum.map(files, fn file -> %{path: Path.join([path, file]), type: :file, depth: depth} end)
+
+    acc ++ dirs_with_children ++ file_items
+  end
+
+  defp expand_dir(dir, parent_path, expanded_dirs, show_hidden, depth) do
+    full_path = Path.join([parent_path, dir])
+    dir_item = %{path: full_path, type: :dir, depth: depth}
+
+    children =
+      if MapSet.member?(expanded_dirs, full_path) do
+        build_tree_recursive(full_path, expanded_dirs, show_hidden, depth + 1, [])
+      else
+        []
+      end
+
+    [dir_item | children]
   end
 
   @spec handle_item_selection(t(), tree_item()) :: {:ok, t()}

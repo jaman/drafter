@@ -2,99 +2,92 @@ defmodule Drafter.Widget.EventRouter do
   @moduledoc false
 
   def route_event(module, event, state, handles, focusable, scroll_config \\ nil) do
-    case event do
-      {:mouse, %{type: :scroll, direction: direction}} ->
-        if :scroll in handles do
-          if function_exported?(module, :handle_scroll, 2) do
-            module.handle_scroll(direction, state)
-          else
-            default_scroll(direction, state, scroll_config)
-          end
-        else
-          {:bubble, state}
-        end
+    ctx = %{module: module, state: state, handles: handles, focusable: focusable, scroll_config: scroll_config}
+    do_route(event, ctx)
+  end
 
-      {:key, key} ->
-        cond do
-          :keyboard in handles and function_exported?(module, :handle_key, 2) ->
-            module.handle_key(key, state)
+  defp do_route({:mouse, %{type: :scroll, direction: dir}}, ctx), do: route_scroll(ctx.module, dir, ctx.state, ctx.handles, ctx.scroll_config)
+  defp do_route({:key, key}, ctx), do: route_key_simple(ctx.module, key, ctx.state, ctx.handles, ctx.scroll_config)
+  defp do_route({:char, _} = event, ctx), do: route_char(ctx.module, event, ctx.state, ctx.handles)
+  defp do_route({:key, key, mods}, ctx), do: route_key_with_mods(ctx.module, key, mods, ctx.state, ctx.handles)
+  defp do_route({:mouse, %{type: :mouse_down, x: x, y: y}}, ctx), do: route_guarded(ctx.module, :handle_press, [x, y, ctx.state], :press, ctx.handles, ctx.state)
+  defp do_route({:mouse, %{type: :mouse_up, x: x, y: y}}, ctx), do: route_guarded(ctx.module, :handle_mouse_up, [x, y, ctx.state], :mouse_up, ctx.handles, ctx.state)
+  defp do_route({:mouse, %{type: :drag, x: x, y: y}}, ctx), do: route_guarded(ctx.module, :handle_drag, [x, y, ctx.state], :drag, ctx.handles, ctx.state)
+  defp do_route({:mouse, %{type: :move, x: x, y: y}}, ctx), do: route_guarded(ctx.module, :handle_hover, [x, y, ctx.state], :hover, ctx.handles, ctx.state)
+  defp do_route({:focus}, ctx), do: route_focus(ctx.module, ctx.state, ctx.focusable)
+  defp do_route({:blur}, ctx), do: route_blur(ctx.state, ctx.focusable)
+  defp do_route(event, ctx), do: route_custom(ctx.module, event, ctx.state)
 
-          scroll_config != nil and key in [:left, :"ArrowLeft"] ->
-            default_scroll(:up, state, scroll_config)
+  defp route_scroll(module, direction, state, handles, scroll_config) do
+    cond do
+      :scroll in handles and function_exported?(module, :handle_scroll, 2) ->
+        module.handle_scroll(direction, state)
 
-          scroll_config != nil and key in [:right, :"ArrowRight"] ->
-            default_scroll(:down, state, scroll_config)
+      :scroll in handles ->
+        default_scroll(direction, state, scroll_config)
 
-          true ->
-            {:bubble, state}
-        end
+      true ->
+        {:bubble, state}
+    end
+  end
 
-      {:mouse, %{type: :mouse_down, x: x, y: y}} ->
-        if :press in handles and function_exported?(module, :handle_press, 3) do
-          module.handle_press(x, y, state)
-        else
-          {:bubble, state}
-        end
+  defp route_key_simple(module, key, state, handles, scroll_config) do
+    cond do
+      :keyboard in handles and function_exported?(module, :handle_key, 2) ->
+        module.handle_key(key, state)
 
-      {:mouse, %{type: :mouse_up, x: x, y: y}} ->
-        if :mouse_up in handles and function_exported?(module, :handle_mouse_up, 3) do
-          module.handle_mouse_up(x, y, state)
-        else
-          {:bubble, state}
-        end
+      scroll_config != nil and key in [:left, :"ArrowLeft"] ->
+        default_scroll(:up, state, scroll_config)
 
-      {:mouse, %{type: :drag, x: x, y: y}} ->
-        if :drag in handles and function_exported?(module, :handle_drag, 3) do
-          module.handle_drag(x, y, state)
-        else
-          {:bubble, state}
-        end
+      scroll_config != nil and key in [:right, :"ArrowRight"] ->
+        default_scroll(:down, state, scroll_config)
 
-      {:mouse, %{type: :move, x: x, y: y}} ->
-        if :hover in handles and function_exported?(module, :handle_hover, 3) do
-          module.handle_hover(x, y, state)
-        else
-          {:bubble, state}
-        end
+      true ->
+        {:bubble, state}
+    end
+  end
 
-      {:focus} ->
-        if focusable do
-          if function_exported?(module, :keybindings, 0) do
-            Drafter.FocusRegistry.set(module.keybindings())
-          else
-            Drafter.FocusRegistry.clear()
-          end
-          handle_focus(state, true)
-        else
-          {:bubble, state}
-        end
+  defp route_char(module, event, state, handles) do
+    if :char in handles and function_exported?(module, :handle_char, 2) do
+      module.handle_char(event, state)
+    else
+      route_custom(module, event, state)
+    end
+  end
 
-      {:blur} ->
-        if focusable do
-          Drafter.FocusRegistry.clear()
-          handle_focus(state, false)
-        else
-          {:bubble, state}
-        end
+  defp route_key_with_mods(module, key, mods, state, handles) do
+    cond do
+      :keyboard in handles and function_exported?(module, :handle_key, 3) ->
+        module.handle_key(key, mods, state)
 
-      {:key, key, mods} ->
-        cond do
-          :keyboard in handles and function_exported?(module, :handle_key, 3) ->
-            module.handle_key(key, mods, state)
+      :keyboard in handles and function_exported?(module, :handle_key, 2) ->
+        module.handle_key(key, state)
 
-          :keyboard in handles and function_exported?(module, :handle_key, 2) ->
-            module.handle_key(key, state)
+      true ->
+        {:bubble, state}
+    end
+  end
 
-          true ->
-            {:bubble, state}
-        end
+  defp route_guarded(module, callback, args, event_type, handles, state) do
+    if event_type in handles and function_exported?(module, callback, length(args)) do
+      apply(module, callback, args)
+    else
+      {:bubble, state}
+    end
+  end
 
-      _ ->
-        if function_exported?(module, :handle_custom_event, 2) do
-          module.handle_custom_event(event, state)
-        else
-          {:bubble, state}
-        end
+  defp route_focus(_module, state, true), do: handle_focus(state, true)
+  defp route_focus(_module, state, false), do: {:bubble, state}
+
+  defp route_blur(state, true), do: handle_focus(state, false)
+
+  defp route_blur(state, false), do: {:bubble, state}
+
+  defp route_custom(module, event, state) do
+    if function_exported?(module, :handle_custom_event, 2) do
+      module.handle_custom_event(event, state)
+    else
+      {:bubble, state}
     end
   end
 

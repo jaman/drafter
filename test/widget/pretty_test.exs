@@ -129,10 +129,11 @@ defmodule Drafter.Widget.PrettyTest do
         ],
         count: 2
       }
+
       state = Pretty.mount(%{data: data, syntax_highlighting: true})
       rect = %{width: 60, height: 10}
       strips = Pretty.render(state, rect)
-      assert length(strips) > 0
+      assert strips != ""
     end
   end
 

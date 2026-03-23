@@ -175,18 +175,9 @@ defmodule Drafter.Widget.Chart do
     :orientation,
     :bar_labels,
     :show_values,
-    :_render_timestamp,
-    :_animation_offset,
-    :_live_candle,
-    :_scroll_offset,
-    :_drag_last_x,
-    :_drag_last_y,
-    :_y_offset,
-    :_data_tuple,
-    :_data_hash,
     bar_gap: 0,
-    dragging_scrollbar: false,
-    focused: false
+    focused: false,
+    _internal: %{}
   ]
 
   @braille_base 0x2800
@@ -201,7 +192,6 @@ defmodule Drafter.Widget.Chart do
     {1, 2} => 0x20,
     {1, 3} => 0x80
   }
-
 
   @impl Drafter.Widget
   def mount(props) do
@@ -241,47 +231,56 @@ defmodule Drafter.Widget.Chart do
       orientation: Map.get(props, :orientation, :vertical),
       bar_labels: Map.get(props, :bar_labels, []),
       show_values: Map.get(props, :show_values, false),
-      _render_timestamp: Map.get(props, :_render_timestamp, 0),
-      _animation_offset: 0,
-      _live_candle: live_candle,
-      _scroll_offset: 0,
-      _drag_last_x: nil,
-      _drag_last_y: nil,
-      _y_offset: 0,
-      _data_tuple: data_tuple,
-      _data_hash: data_hash,
-      dragging_scrollbar: false
+      _internal: %{
+        render_timestamp: Map.get(props, :_render_timestamp, 0),
+        animation_offset: 0,
+        live_candle: live_candle,
+        scroll_offset: 0,
+        drag_last_x: nil,
+        drag_last_y: nil,
+        y_offset: 0,
+        data_tuple: data_tuple,
+        data_hash: data_hash,
+        dragging_scrollbar: false
+      }
     }
   end
 
   @impl Drafter.Widget
   def handle_mouse_up(_x, _y, state) do
-    {:ok, %{state | dragging_scrollbar: true, _drag_last_x: nil}}
+    {:ok, update_internal(state, dragging_scrollbar: true, drag_last_x: nil)}
   end
 
   @impl Drafter.Widget
   def handle_key(:left, state), do: scroll_left(state)
-  def handle_key(:"ArrowLeft", state), do: scroll_left(state)
+  def handle_key(:ArrowLeft, state), do: scroll_left(state)
   def handle_key(:right, state), do: scroll_right(state)
-  def handle_key(:"ArrowRight", state), do: scroll_right(state)
-  def handle_key(:up, state), do: {:ok, %{state | _y_offset: (state._y_offset || 0) + 1}}
-  def handle_key(:"ArrowUp", state), do: {:ok, %{state | _y_offset: (state._y_offset || 0) + 1}}
-  def handle_key(:down, state), do: {:ok, %{state | _y_offset: (state._y_offset || 0) - 1}}
-  def handle_key(:"ArrowDown", state), do: {:ok, %{state | _y_offset: (state._y_offset || 0) - 1}}
-  def handle_key(?c, state), do: {:ok, %{state | _y_offset: 0}}
+  def handle_key(:ArrowRight, state), do: scroll_right(state)
+  def handle_key(:up, state), do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) + 1)}
+  def handle_key(:ArrowUp, state), do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) + 1)}
+  def handle_key(:down, state), do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) - 1)}
+  def handle_key(:ArrowDown, state), do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) - 1)}
+  def handle_key(?c, state), do: {:ok, update_internal(state, y_offset: 0)}
   def handle_key(_key, state), do: {:bubble, state}
 
   @impl Drafter.Widget
-  def handle_drag(x, y, %{_drag_last_x: nil} = state) do
-    {:ok, %{state | _drag_last_x: x, _drag_last_y: y}}
+  def handle_drag(x, y, %{_internal: %{drag_last_x: nil}} = state) do
+    {:ok, update_internal(state, drag_last_x: x, drag_last_y: y)}
   end
 
   def handle_drag(x, y, state) do
-    dx = (state._drag_last_x || x) - x
-    dy = y - (state._drag_last_y || y)
-    new_x_offset = max(0, (state._scroll_offset || 0) + dx)
-    new_y_offset = (state._y_offset || 0) + dy
-    {:ok, %{state | _scroll_offset: new_x_offset, _drag_last_x: x, _y_offset: new_y_offset, _drag_last_y: y}}
+    dx = (state._internal.drag_last_x || x) - x
+    dy = y - (state._internal.drag_last_y || y)
+    new_x_offset = max(0, (state._internal.scroll_offset || 0) + dx)
+    new_y_offset = (state._internal.y_offset || 0) + dy
+
+    {:ok,
+     update_internal(state,
+       scroll_offset: new_x_offset,
+       drag_last_x: x,
+       y_offset: new_y_offset,
+       drag_last_y: y
+     )}
   end
 
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 5)
@@ -292,11 +291,15 @@ defmodule Drafter.Widget.Chart do
     rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
     all_data = if is_list(data), do: data, else: Keyword.get(opts, :data, [])
+
     %{
       data: all_data,
       chart_type: Keyword.get(opts, :chart_type, :line),
@@ -332,10 +335,12 @@ defmodule Drafter.Widget.Chart do
     Map.put(mount_props, :_render_timestamp, System.monotonic_time(:millisecond))
   end
 
-  defp scroll_left(state), do: {:ok, %{state | _scroll_offset: max(0, (state._scroll_offset || 0) - 5)}}
-  defp scroll_right(state), do: {:ok, %{state | _scroll_offset: (state._scroll_offset || 0) + 5}}
+  defp scroll_left(state),
+    do: {:ok, update_internal(state, scroll_offset: max(0, (state._internal.scroll_offset || 0) - 5))}
 
-  defp init_live_candle(data) when is_list(data) and length(data) > 0 do
+  defp scroll_right(state), do: {:ok, update_internal(state, scroll_offset: (state._internal.scroll_offset || 0) + 5)}
+
+  defp init_live_candle(data) when is_list(data) and data != [] do
     last_candle = List.last(data)
 
     close =
@@ -384,80 +389,57 @@ defmodule Drafter.Widget.Chart do
 
     animation_offset =
       if state.animated do
-        div(state._render_timestamp, state.animation_speed)
+        div(state._internal.render_timestamp, state.animation_speed)
       else
         0
       end
 
     horizontal? = state.orientation == :horizontal
 
-    strips =
-      case state.chart_type do
-        :line ->
-          render_line_chart(state, chart_width, chart_height, bg, fg, animation_offset)
-
-        :bar when horizontal? ->
-          render_bar_chart_h(state, chart_width, chart_height, bg, fg)
-
-        :bar ->
-          render_bar_chart_v(state, chart_width, chart_height, bg, fg)
-
-        :clustered_bar when horizontal? ->
-          render_clustered_bar_h(state, chart_width, chart_height, bg)
-
-        :clustered_bar ->
-          render_clustered_bar(state, chart_width, chart_height, bg)
-
-        :stacked_bar when horizontal? ->
-          render_stacked_bar_h(state, chart_width, chart_height, bg)
-
-        :stacked_bar ->
-          render_stacked_bar(state, chart_width, chart_height, bg)
-
-        :range_bar when horizontal? ->
-          render_range_bar_h(state, chart_width, chart_height, bg, fg)
-
-        :range_bar ->
-          render_range_bar(state, chart_width, chart_height, bg, fg)
-
-        :candlestick ->
-          render_candlestick_chart(state, chart_width, chart_height, bg, fg)
-
-        :area ->
-          render_area_chart(state, chart_width, chart_height, bg, fg, animation_offset)
-
-        :scatter ->
-          render_scatter_chart(state, chart_width, chart_height, bg, fg)
-
-        :braille ->
-          render_braille_chart(state, chart_width, chart_height, bg, fg, animation_offset)
-
-        _ ->
-          render_line_chart(state, chart_width, chart_height, bg, fg, animation_offset)
-      end
-
-    strips =
-      if state.show_axes do
-        add_axes(strips, state, rect, bg, fg)
-      else
-        strips
-      end
-
-    strips =
-      if state.title do
-        add_title(strips, state.title, rect, bg, fg)
-      else
-        strips
-      end
-
-    pad_strips(strips, rect.height)
+    dispatch_chart(state, chart_width, chart_height, bg, fg, animation_offset, horizontal?)
+    |> apply_axes(state, rect, bg, fg)
+    |> apply_title(state, rect, bg, fg)
+    |> pad_strips(rect.height)
   end
+
+  defp apply_axes(strips, %{show_axes: true} = state, rect, bg, fg), do: add_axes(strips, state, rect, bg, fg)
+  defp apply_axes(strips, _state, _rect, _bg, _fg), do: strips
+
+  defp apply_title(strips, %{title: title}, rect, bg, fg) when is_binary(title) and title != "",
+    do: add_title(strips, title, rect, bg, fg)
+
+  defp apply_title(strips, _state, _rect, _bg, _fg), do: strips
+
+  defp dispatch_chart(state, w, h, bg, fg, anim, true) do
+    case state.chart_type do
+      :bar -> render_bar_chart_h(state, w, h, bg, fg)
+      :clustered_bar -> render_clustered_bar_h(state, w, h, bg)
+      :stacked_bar -> render_stacked_bar_h(state, w, h, bg)
+      :range_bar -> render_range_bar_h(state, w, h, bg, fg)
+      _ -> dispatch_chart(state, w, h, bg, fg, anim, false)
+    end
+  end
+
+  defp dispatch_chart(state, w, h, bg, fg, anim, false) do
+    dispatch_chart_v(state.chart_type, state, w, h, bg, fg, anim)
+  end
+
+  defp dispatch_chart_v(:line, state, w, h, bg, fg, anim), do: render_line_chart(state, w, h, bg, fg, anim)
+  defp dispatch_chart_v(:bar, state, w, h, bg, fg, _anim), do: render_bar_chart_v(state, w, h, bg, fg)
+  defp dispatch_chart_v(:clustered_bar, state, w, h, bg, _fg, _anim), do: render_clustered_bar(state, w, h, bg)
+  defp dispatch_chart_v(:stacked_bar, state, w, h, bg, _fg, _anim), do: render_stacked_bar(state, w, h, bg)
+  defp dispatch_chart_v(:range_bar, state, w, h, bg, fg, _anim), do: render_range_bar(state, w, h, bg, fg)
+  defp dispatch_chart_v(:candlestick, state, w, h, bg, fg, _anim), do: render_candlestick_chart(state, w, h, bg, fg)
+  defp dispatch_chart_v(:area, state, w, h, bg, fg, anim), do: render_area_chart(state, w, h, bg, fg, anim)
+  defp dispatch_chart_v(:scatter, state, w, h, bg, fg, _anim), do: render_scatter_chart(state, w, h, bg, fg)
+  defp dispatch_chart_v(:braille, state, w, h, bg, fg, anim), do: render_braille_chart(state, w, h, bg, fg, anim)
+  defp dispatch_chart_v(_, state, w, h, bg, fg, anim), do: render_line_chart(state, w, h, bg, fg, anim)
 
   @impl Drafter.Widget
   def update(props, state) do
     new_data = Map.get(props, :data, state.data)
     new_hash = :erlang.phash2(new_data)
-    data_changed = new_hash != state._data_hash
+    data_changed = new_hash != state._internal.data_hash
 
     {min_val, max_val} =
       if data_changed do
@@ -473,13 +455,13 @@ defmodule Drafter.Widget.Chart do
         end
       end
 
-    live_candle = state._live_candle || init_live_candle(new_data)
+    live_candle = state._internal.live_candle || init_live_candle(new_data)
 
     {new_tuple, new_hash} =
       if data_changed do
         {data_to_tuple(new_data), new_hash}
       else
-        {state._data_tuple, state._data_hash}
+        {state._internal.data_tuple, state._internal.data_hash}
       end
 
     max_data_points = Map.get(props, :max_data_points, state.max_data_points)
@@ -510,13 +492,15 @@ defmodule Drafter.Widget.Chart do
         orientation: Map.get(props, :orientation, state.orientation),
         bar_labels: Map.get(props, :bar_labels, state.bar_labels),
         show_values: Map.get(props, :show_values, state.show_values),
-        _render_timestamp: Map.get(props, :_render_timestamp, state._render_timestamp),
-        _live_candle: live_candle,
-        _data_tuple: new_tuple,
-        _data_hash: new_hash
+        _internal:
+          Map.merge(state._internal, %{
+            render_timestamp: Map.get(props, :_render_timestamp, state._internal.render_timestamp),
+            live_candle: live_candle,
+            data_tuple: new_tuple,
+            data_hash: new_hash
+          })
     }
   end
-
 
   defp calculate_data_range(data, props) do
     custom_min = Map.get(props, :min_value)
@@ -536,7 +520,7 @@ defmodule Drafter.Widget.Chart do
     all_values = data_values ++ live_values
 
     {data_min, data_max} =
-      if length(all_values) > 0 do
+      if all_values != [] do
         {Enum.min(all_values), Enum.max(all_values)}
       else
         {0, 100}
@@ -553,21 +537,13 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
-  defp extract_values(data) when is_list(data) and length(data) > 0 do
-    first = hd(data)
+  defp extract_values([first | _] = data) when is_number(first), do: data
 
-    cond do
-      is_number(first) ->
-        data
-
-      is_list(first) and first != [] and is_number(hd(first)) ->
-        Enum.flat_map(data, & &1)
-
-      is_list(first) and first != [] and is_list(hd(first)) ->
-        data |> Enum.flat_map(& &1) |> Enum.flat_map(& &1)
-
-      true ->
-        []
+  defp extract_values([first | _] = data) when is_list(first) do
+    case first do
+      [nested | _] when is_number(nested) -> Enum.flat_map(data, & &1)
+      [nested | _] when is_list(nested) -> data |> Enum.flat_map(& &1) |> Enum.flat_map(& &1)
+      _ -> []
     end
   end
 
@@ -575,295 +551,253 @@ defmodule Drafter.Widget.Chart do
 
   defp render_line_chart(state, width, height, bg, fg, animation_offset) do
     data = state.data
-    data_src = state._data_tuple || data
+    data_src = state._internal.data_tuple || data
 
     cond do
       tuple_size_or_length(data_src) < 2 ->
         empty_strips(height, bg)
 
       is_list(data) and is_list(hd(data)) ->
-        colors =
-          if state.colors != [] do
-            state.colors
-          else
-            @default_series_colors
-          end
-
-        scroll_offset = state._scroll_offset || 0
-        viewport_width = width * 2
-
-        scrolled_series =
-          Enum.map(data, fn series ->
-            total = length(series)
-            end_idx = total - scroll_offset
-            start_idx = max(0, end_idx - viewport_width)
-            Enum.slice(series, start_idx, viewport_width)
-          end)
-
-        render_multi_series(scrolled_series, width, height,
-          bg: bg,
-          colors: colors,
-          min: state.min_value,
-          max: state.max_value
-        )
+        render_line_multi_series(state, data, width, height, bg)
 
       true ->
-        scroll_offset = state._scroll_offset || 0
-        total_points = tuple_size_or_length(data_src)
-        viewport_width = width * 2
-
-        end_index = total_points - scroll_offset
-        start_index = max(0, end_index - viewport_width)
-
-        viewport_data = tuple_slice(data_src, start_index, viewport_width)
-
-        range = state.max_value - state.min_value
-        pixel_height = height * 4
-
-        normalized = normalize_data(viewport_data, state.min_value, range, pixel_height)
-
-        shifted =
-          if animation_offset > 0 do
-            shift = rem(animation_offset, length(normalized))
-            Enum.drop(normalized, shift) ++ Enum.take(normalized, shift)
-          else
-            normalized
-          end
-
-        points = Enum.with_index(shifted) |> Enum.map(fn {y, x} -> {x, y} end)
-
-        lines = bresenham_lines(points)
-
-        case state.pixel_style do
-          :quadrant -> render_quadrant_pixels(lines, width, height, bg, fg)
-          _ -> render_braille_pixels(lines, width, height, bg, fg)
-        end
+        render_line_single_series(state, data_src, width, height, bg, fg, animation_offset)
     end
   end
+
+  defp render_line_multi_series(state, data, width, height, bg) do
+    colors = if state.colors != [], do: state.colors, else: @default_series_colors
+    scroll_offset = state._internal.scroll_offset || 0
+    viewport_width = width * 2
+
+    scrolled_series =
+      Enum.map(data, fn series ->
+        {_start, slice} = Drafter.ScrollMath.end_anchored_slice(series, scroll_offset, viewport_width)
+        slice
+      end)
+
+    render_multi_series(scrolled_series, width, height,
+      bg: bg,
+      colors: colors,
+      min: state.min_value,
+      max: state.max_value
+    )
+  end
+
+  defp render_line_single_series(state, data_src, width, height, bg, fg, animation_offset) do
+    scroll_offset = state._internal.scroll_offset || 0
+    viewport_width = width * 2
+    {_start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, viewport_width)
+    range = state.max_value - state.min_value
+    pixel_height = height * 4
+    normalized = normalize_data(viewport_data, state.min_value, range, pixel_height)
+    shifted = apply_animation_shift(normalized, animation_offset)
+    points = Enum.with_index(shifted) |> Enum.map(fn {y, x} -> {x, y} end)
+    lines = bresenham_lines(points)
+
+    case state.pixel_style do
+      :quadrant -> render_quadrant_pixels(lines, width, height, bg, fg)
+      _ -> render_braille_pixels(lines, width, height, bg, fg)
+    end
+  end
+
+  defp apply_animation_shift(normalized, animation_offset) when animation_offset > 0 do
+    shift = rem(animation_offset, length(normalized))
+    Enum.drop(normalized, shift) ++ Enum.take(normalized, shift)
+  end
+
+  defp apply_animation_shift(normalized, _animation_offset), do: normalized
 
   defp render_bar_chart_v(state, width, height, bg, fg) do
-    data_src = state._data_tuple || state.data
+    data_src = state._internal.data_tuple || state.data
 
     if tuple_size_or_length(data_src) == 0 do
       empty_strips(height, bg)
     else
-      scroll_offset = state._scroll_offset || 0
-      total_bars = tuple_size_or_length(data_src)
-      levels = CharacterSet.sparkline_levels_v()
-
-      label_row? = state.show_labels and state.bar_labels != []
-      bar_height = if label_row?, do: max(1, height - 1), else: height
-
-      end_index = total_bars - scroll_offset
-      start_index = max(0, end_index - width)
-      viewport_data = tuple_slice(data_src, start_index, width)
-      viewport_labels = Enum.slice(state.bar_labels, start_index, width)
-
-      bars =
-        viewport_data
-        |> Enum.with_index()
-        |> Enum.map(fn {value, i} ->
-          normalized = Visualization.normalize(value, state.min_value, state.max_value)
-          idx = Visualization.level_index(normalized, levels)
-          char = Enum.at(levels, idx)
-          value_str = if state.show_values, do: Visualization.format_number(value), else: nil
-          label = if state.show_labels, do: Enum.at(viewport_labels, i, ""), else: nil
-          {char, value_str, label}
-        end)
-
-      bar_strips =
-        for _row <- 1..bar_height do
-          segs = Enum.map(bars, fn {char, _val, _lbl} -> Segment.new(char, %{fg: fg, bg: bg}) end)
-          padding_count = max(0, width - length(segs))
-          Strip.new(segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
-        end
-
-      if label_row? do
-        label_segs =
-          Enum.map(bars, fn {_, _, lbl} ->
-            Segment.new(String.slice(lbl || "", 0, 1), %{fg: fg, bg: bg})
-          end)
-        padding_count = max(0, width - length(label_segs))
-        label_strip = Strip.new(label_segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
-        bar_strips ++ [label_strip]
-      else
-        bar_strips
-      end
+      render_bar_chart_v_data(state, data_src, width, height, bg, fg)
     end
   end
+
+  defp render_bar_chart_v_data(state, data_src, width, height, bg, fg) do
+    scroll_offset = state._internal.scroll_offset || 0
+    levels = CharacterSet.sparkline_levels_v()
+    label_row? = state.show_labels and state.bar_labels != []
+    bar_height = if label_row?, do: max(1, height - 1), else: height
+    {start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, width)
+    viewport_labels = Enum.slice(state.bar_labels, start_index, width)
+    bars = build_v_bars(state, viewport_data, viewport_labels, levels)
+    bar_strips = build_v_bar_strips(bars, bar_height, width, bg, fg)
+    maybe_append_label_row(bar_strips, bars, label_row?, width, bg, fg)
+  end
+
+  defp build_v_bars(state, viewport_data, viewport_labels, levels) do
+    viewport_data
+    |> Enum.with_index()
+    |> Enum.map(fn {value, i} ->
+      normalized = Visualization.normalize(value, state.min_value, state.max_value)
+      idx = Visualization.level_index(normalized, levels)
+      char = Enum.at(levels, idx)
+      value_str = if state.show_values, do: Visualization.format_number(value), else: nil
+      label = if state.show_labels, do: Enum.at(viewport_labels, i, ""), else: nil
+      {char, value_str, label}
+    end)
+  end
+
+  defp build_v_bar_strips(bars, bar_height, width, bg, fg) do
+    for _row <- 1..bar_height do
+      segs = Enum.map(bars, fn {char, _val, _lbl} -> Segment.new(char, %{fg: fg, bg: bg}) end)
+      padding_count = max(0, width - length(segs))
+      Strip.new(segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
+    end
+  end
+
+  defp maybe_append_label_row(bar_strips, bars, true, width, bg, fg) do
+    label_segs =
+      Enum.map(bars, fn {_, _, lbl} ->
+        Segment.new(String.slice(lbl || "", 0, 1), %{fg: fg, bg: bg})
+      end)
+
+    padding_count = max(0, width - length(label_segs))
+    label_strip = Strip.new(label_segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
+    bar_strips ++ [label_strip]
+  end
+
+  defp maybe_append_label_row(bar_strips, _bars, false, _width, _bg, _fg), do: bar_strips
 
   defp render_bar_chart_h(state, width, height, bg, fg) do
-    data_src = state._data_tuple || state.data
+    data_src = state._internal.data_tuple || state.data
 
     if tuple_size_or_length(data_src) == 0 do
       empty_strips(height, bg)
     else
-      scroll_offset = state._scroll_offset || 0
-      total_bars = tuple_size_or_length(data_src)
-
-      end_index = total_bars - scroll_offset
-      start_index = max(0, end_index - height)
-      viewport_data = tuple_slice(data_src, start_index, height)
-      viewport_labels = Enum.slice(state.bar_labels, start_index, height)
-
-      label_width =
-        if state.show_labels and state.bar_labels != [] do
-          viewport_labels |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> max(1)
-        else
-          0
-        end
-
-      value_width =
-        if state.show_values do
-          viewport_data
-          |> Enum.map(fn v -> String.length(Visualization.format_number(v)) end)
-          |> Enum.max(fn -> 0 end)
-          |> Kernel.+(1)
-        else
-          0
-        end
-
-      bar_width = max(1, width - label_width - value_width)
-      levels = CharacterSet.sparkline_levels_h()
-      level_count = length(levels) - 1
-      full_char = CharacterSet.fill(:full)
-      label_style = %{fg: fg, bg: bg}
-
-      viewport_data
-      |> Enum.with_index()
-      |> Enum.map(fn {value, i} ->
-        normalized = Visualization.normalize(value, state.min_value, state.max_value)
-        total_steps = round(normalized * bar_width * level_count)
-        full_blocks = div(total_steps, level_count)
-        partial_idx = rem(total_steps, level_count)
-
-        full_str = Visualization.safe_duplicate(full_char, full_blocks)
-
-        partial_str =
-          if partial_idx > 0 and full_blocks < bar_width,
-            do: Enum.at(levels, partial_idx, ""),
-            else: ""
-
-        bar_used = full_blocks + if(partial_idx > 0 and full_blocks < bar_width, do: 1, else: 0)
-        padding = Visualization.safe_duplicate(" ", bar_width - bar_used)
-
-        segs = []
-
-        segs =
-          if label_width > 0 do
-            lbl = Enum.at(viewport_labels, i, "") |> String.pad_trailing(label_width)
-            [Segment.new(lbl, label_style) | segs]
-          else
-            segs
-          end
-
-        segs = [Segment.new(full_str <> partial_str <> padding, %{fg: fg, bg: bg}) | segs]
-
-        segs =
-          if value_width > 0 do
-            val_str = " " <> Visualization.format_number(value)
-            [Segment.new(String.pad_trailing(val_str, value_width), label_style) | segs]
-          else
-            segs
-          end
-
-        Strip.new(Enum.reverse(segs))
-      end)
+      render_bar_chart_h_data(state, data_src, width, height, bg, fg)
     end
   end
+
+  defp render_bar_chart_h_data(state, data_src, width, height, bg, fg) do
+    scroll_offset = state._internal.scroll_offset || 0
+    {start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, height)
+    viewport_labels = Enum.slice(state.bar_labels, start_index, height)
+    label_width = h_label_width(state, viewport_labels)
+    value_width = h_value_width(state, viewport_data)
+    bar_width = max(1, width - label_width - value_width)
+    levels = CharacterSet.sparkline_levels_h()
+    level_count = length(levels) - 1
+    full_char = CharacterSet.fill(:full)
+
+    ctx = %{
+      state: state,
+      levels: levels,
+      level_count: level_count,
+      full_char: full_char,
+      bar_width: bar_width,
+      label_width: label_width,
+      value_width: value_width,
+      viewport_labels: viewport_labels,
+      fg: fg,
+      bg: bg
+    }
+
+    viewport_data
+    |> Enum.with_index()
+    |> Enum.map(fn {value, i} -> build_h_bar_strip(value, i, ctx) end)
+  end
+
+  defp h_label_width(state, viewport_labels) do
+    if state.show_labels and state.bar_labels != [] do
+      viewport_labels |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> max(1)
+    else
+      0
+    end
+  end
+
+  defp h_value_width(state, viewport_data) do
+    if state.show_values do
+      viewport_data
+      |> Enum.map(fn v -> String.length(Visualization.format_number(v)) end)
+      |> Enum.max(fn -> 0 end)
+      |> Kernel.+(1)
+    else
+      0
+    end
+  end
+
+  defp build_h_bar_strip(value, i, %{state: state, levels: levels, level_count: level_count, full_char: full_char, bar_width: bar_width, label_width: label_width, value_width: value_width, viewport_labels: viewport_labels, fg: fg, bg: bg} = _ctx) do
+    normalized = Visualization.normalize(value, state.min_value, state.max_value)
+    total_steps = round(normalized * bar_width * level_count)
+    full_blocks = div(total_steps, level_count)
+    partial_idx = rem(total_steps, level_count)
+    full_str = Visualization.safe_duplicate(full_char, full_blocks)
+    partial_str = if partial_idx > 0 and full_blocks < bar_width, do: Enum.at(levels, partial_idx, ""), else: ""
+    bar_used = full_blocks + if(partial_idx > 0 and full_blocks < bar_width, do: 1, else: 0)
+    padding = Visualization.safe_duplicate(" ", bar_width - bar_used)
+    label_style = %{fg: fg, bg: bg}
+
+    segs =
+      if label_width > 0 do
+        lbl = Enum.at(viewport_labels, i, "") |> String.pad_trailing(label_width)
+        [Segment.new(lbl, label_style)]
+      else
+        []
+      end
+
+    segs = segs ++ [Segment.new(full_str <> partial_str <> padding, %{fg: fg, bg: bg})]
+
+    segs =
+      if value_width > 0 do
+        val_str = " " <> Visualization.format_number(value)
+        segs ++ [Segment.new(String.pad_trailing(val_str, value_width), label_style)]
+      else
+        segs
+      end
+
+    Strip.new(segs)
+  end
+
+  defp valid_candle?(%{open: _, high: _, low: _, close: _}), do: true
+  defp valid_candle?(c) when is_list(c), do: length(c) >= 4
+  defp valid_candle?(_), do: false
 
   defp render_candlestick_chart(state, width, height, bg, _fg) do
     candles = state.data || []
 
-    if length(candles) == 0 do
+    cond do
+      candles == [] -> empty_strips(height, bg)
+      not valid_candle?(hd(candles)) -> empty_strips(height, bg)
+      true -> render_candlestick_filtered(state, candles, width, height, bg)
+    end
+  end
+
+  defp render_candlestick_filtered(state, candles, width, height, bg) do
+    filtered_candles = Enum.filter(candles, &valid_candle?/1)
+    scroll_offset = state._internal.scroll_offset || 0
+    y_offset = state._internal.y_offset || 0
+    label_width = 11
+    viewport_width = max(1, width - label_width)
+    {start_index, display_candles} = Drafter.ScrollMath.end_anchored_slice(filtered_candles, scroll_offset, viewport_width)
+
+    if display_candles == [] do
       empty_strips(height, bg)
     else
-      first = hd(candles)
-
-      is_valid_candle =
-        cond do
-          is_map(first) ->
-            Map.has_key?(first, :open) and Map.has_key?(first, :high) and
-              Map.has_key?(first, :low) and Map.has_key?(first, :close)
-
-          is_list(first) ->
-            length(first) >= 4
-
-          true ->
-            false
-        end
-
-      if not is_valid_candle do
-        empty_strips(height, bg)
-      else
-        filtered_candles =
-          Enum.filter(candles, fn c ->
-            cond do
-              is_map(c) ->
-                Map.has_key?(c, :open) and Map.has_key?(c, :high) and
-                  Map.has_key?(c, :low) and Map.has_key?(c, :close)
-
-              is_list(c) ->
-                length(c) >= 4
-
-              true ->
-                false
-            end
-          end)
-
-        total_candles = length(filtered_candles)
-        scroll_offset = state._scroll_offset || 0
-        y_offset = state._y_offset || 0
-
-        label_width = 11
-        viewport_width = max(1, width - label_width)
-
-        end_index = total_candles - scroll_offset
-        start_index = max(0, end_index - viewport_width)
-
-        display_candles = Enum.slice(filtered_candles, start_index, viewport_width)
-
-        if length(display_candles) == 0 do
-          empty_strips(height, bg)
-        else
-          rightmost = List.last(display_candles)
-          {anchor_open, _, _, _} = extract_ohlc(rightmost)
-
-          half_range = height / 2 * 0.0001
-          center = anchor_open + y_offset * 0.0001
-          min_val = Float.round(center - half_range, 4)
-          max_val = Float.round(center + half_range, 4)
-
-          bull_color = {52, 208, 88}
-          bear_color = {234, 74, 90}
-          label_color = {140, 140, 150}
-          time_label_color = {120, 120, 130}
-
-          chart_strips =
-            render_candlestick_body(
-              display_candles,
-              height - 1,
-              min_val,
-              max_val,
-              bull_color,
-              bear_color,
-              label_color,
-              bg
-            )
-
-          time_strip =
-            render_time_axis(
-              display_candles,
-              start_index,
-              label_color,
-              time_label_color,
-              bg
-            )
-
-          chart_strips ++ [time_strip]
-        end
-      end
+      render_candlestick_display(display_candles, start_index, height, y_offset, bg)
     end
+  end
+
+  defp render_candlestick_display(display_candles, start_index, height, y_offset, bg) do
+    rightmost = List.last(display_candles)
+    {anchor_open, _, _, _} = extract_ohlc(rightmost)
+    half_range = height / 2 * 0.0001
+    center = anchor_open + y_offset * 0.0001
+    min_val = Float.round(center - half_range, 4)
+    max_val = Float.round(center + half_range, 4)
+    bull_color = {52, 208, 88}
+    bear_color = {234, 74, 90}
+    label_color = {140, 140, 150}
+    time_label_color = {120, 120, 130}
+
+    chart_strips = render_candlestick_body(display_candles, height - 1, min_val, max_val, bull_color, bear_color, label_color, bg)
+    time_strip = render_time_axis(display_candles, start_index, label_color, time_label_color, bg)
+    chart_strips ++ [time_strip]
   end
 
   defp render_candlestick_body(
@@ -913,23 +847,24 @@ defmodule Drafter.Widget.Chart do
     for row <- 0..(height - 1) do
       row_mid_price = max_val - (row + 0.5) * price_per_row
       label_text = format_price_label(row_mid_price)
-      label_seg = Segment.new(String.pad_trailing(label_text, label_width), %{fg: label_color, bg: bg})
+
+      label_seg =
+        Segment.new(String.pad_trailing(label_text, label_width), %{fg: label_color, bg: bg})
 
       candle_segments =
-        Enum.map(precomputed, fn {color, high_row, low_row, body_top_row, body_bottom_row, body_char} ->
-          cond do
-            row >= body_top_row and row <= body_bottom_row ->
-              Segment.new(body_char, %{fg: color, bg: bg})
-
-            row >= high_row and row <= low_row ->
-              Segment.new("│", %{fg: color, bg: bg})
-
-            true ->
-              empty_seg
-          end
+        Enum.map(precomputed, fn precomputed_candle ->
+          candle_segment_for_row(row, precomputed_candle, empty_seg, bg)
         end)
 
       Strip.new([label_seg | candle_segments])
+    end
+  end
+
+  defp candle_segment_for_row(row, {color, high_row, low_row, body_top_row, body_bottom_row, body_char}, empty_seg, bg) do
+    cond do
+      row >= body_top_row and row <= body_bottom_row -> Segment.new(body_char, %{fg: color, bg: bg})
+      row >= high_row and row <= low_row -> Segment.new("│", %{fg: color, bg: bg})
+      true -> empty_seg
     end
   end
 
@@ -979,113 +914,112 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
+  @area_default_colors [
+    {100, 200, 255},
+    {255, 130, 80},
+    {80, 255, 150},
+    {255, 100, 180},
+    {200, 180, 60},
+    {180, 100, 255}
+  ]
+
   defp render_area_chart(state, width, height, bg, fg, animation_offset) do
     data = state.data
-    data_src = state._data_tuple || data
+    data_src = state._internal.data_tuple || data
 
     cond do
       tuple_size_or_length(data_src) < 2 ->
         empty_strips(height, bg)
 
       is_list(data) and is_list(hd(data)) ->
-        colors =
-          if state.colors != [],
-            do: state.colors,
-            else: [{100, 200, 255}, {255, 130, 80}, {80, 255, 150}, {255, 100, 180}, {200, 180, 60}, {180, 100, 255}]
-
-        render_multi_series(data, width, height,
-          bg: bg,
-          colors: colors,
-          min: state.min_value,
-          max: state.max_value
-        )
+        render_area_multi_series(state, data, width, height, bg)
 
       true ->
-        range = state.max_value - state.min_value
-        pixel_height = height * 4
-        scroll_offset = state._scroll_offset || 0
-
-        viewport_width = width * 2
-        total_points = tuple_size_or_length(data_src)
-        end_index = total_points - scroll_offset
-        start_index = max(0, end_index - viewport_width)
-        viewport_data = tuple_slice(data_src, start_index, viewport_width)
-
-        normalized = normalize_data(viewport_data, state.min_value, range, pixel_height)
-
-        shifted =
-          if animation_offset > 0 do
-            shift = rem(animation_offset, length(normalized))
-            Enum.drop(normalized, shift) ++ Enum.take(normalized, shift)
-          else
-            normalized
-          end
-
-        pixels =
-          shifted
-          |> Enum.with_index()
-          |> Enum.flat_map(fn {y, x} ->
-            case state.area_fill do
-              :inverted ->
-                flipped = pixel_height - 1 - y
-                for yi <- flipped..(pixel_height - 1), do: {x, yi}
-              _ ->
-                for yi <- 0..y, do: {x, yi}
-            end
-          end)
-
-        render_braille_pixels(pixels, width, height, bg, fg)
+        render_area_single_series(state, data_src, width, height, bg, fg, animation_offset)
     end
+  end
+
+  defp render_area_multi_series(state, data, width, height, bg) do
+    colors = if state.colors != [], do: state.colors, else: @area_default_colors
+    render_multi_series(data, width, height, bg: bg, colors: colors, min: state.min_value, max: state.max_value)
+  end
+
+  defp render_area_single_series(state, data_src, width, height, bg, fg, animation_offset) do
+    range = state.max_value - state.min_value
+    pixel_height = height * 4
+    scroll_offset = state._internal.scroll_offset || 0
+    viewport_width = width * 2
+    {_start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, viewport_width)
+    normalized = normalize_data(viewport_data, state.min_value, range, pixel_height)
+    shifted = apply_animation_shift(normalized, animation_offset)
+
+    pixels =
+      shifted
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {y, x} -> area_fill_pixels(x, y, pixel_height, state.area_fill) end)
+
+    render_braille_pixels(pixels, width, height, bg, fg)
+  end
+
+  defp area_fill_pixels(x, y, pixel_height, :inverted) do
+    flipped = pixel_height - 1 - y
+    for yi <- flipped..(pixel_height - 1), do: {x, yi}
+  end
+
+  defp area_fill_pixels(x, y, _pixel_height, _fill) do
+    for yi <- 0..y, do: {x, yi}
   end
 
   defp render_scatter_chart(state, width, height, bg, fg) do
     data = state.data
 
     cond do
-      length(data) == 0 ->
+      data == [] ->
         empty_strips(height, bg)
 
       is_list(hd(data)) and hd(data) != [] and is_list(hd(hd(data))) ->
         colors = if state.colors != [], do: state.colors, else: @default_series_colors
-        render_multi_series_scatter(data, width, height, bg, colors, state.min_value, state.max_value, state._scroll_offset || 0)
+        render_multi_series_scatter(data, width, height, bg, colors, state.min_value, state.max_value, state._internal.scroll_offset || 0)
 
       true ->
-        points =
-          cond do
-            is_list(hd(data)) and length(hd(data)) == 2 ->
-              data
-
-            is_tuple(hd(data)) and tuple_size(hd(data)) == 2 ->
-              Enum.map(data, fn {x, y} -> [x, y] end)
-
-            true ->
-              data |> Enum.with_index() |> Enum.map(fn {y, x} -> [x, y] end)
-          end
-
-        range = state.max_value - state.min_value
-        pixel_height = height * 4
-        scroll_offset = state._scroll_offset || 0
-        viewport_width = width * 2
-        max_x = Enum.map(points, fn [x, _] -> x end) |> Enum.max(fn -> 0 end)
-        end_x = max_x - scroll_offset
-        start_x = max(0, end_x - viewport_width)
-
-        pixels =
-          points
-          |> Enum.filter(fn [x, _y] -> x >= start_x and x < end_x end)
-          |> Enum.map(fn [x, y] ->
-            pixel_y = round((y - state.min_value) / range * pixel_height)
-            {x - start_x, pixel_height - pixel_y - 1}
-          end)
-
-        case state.pixel_style do
-          :quadrant -> render_quadrant_pixels(pixels, width, height, bg, fg)
-          _ -> render_braille_pixels(pixels, width, height, bg, fg)
-        end
+        render_scatter_single_series(state, data, width, height, bg, fg)
     end
   end
 
-  defp render_multi_series_scatter(data, width, height, bg, colors, min_val, max_val, scroll_offset) do
+  defp render_scatter_single_series(state, data, width, height, bg, fg) do
+    points = normalize_scatter_points(data)
+    range = state.max_value - state.min_value
+    pixel_height = height * 4
+    scroll_offset = state._internal.scroll_offset || 0
+    viewport_width = width * 2
+    max_x = Enum.map(points, fn [x, _] -> x end) |> Enum.max(fn -> 0 end)
+    end_x = max_x - scroll_offset
+    start_x = max(0, end_x - viewport_width)
+
+    pixels =
+      points
+      |> Enum.filter(fn [x, _y] -> x >= start_x and x < end_x end)
+      |> Enum.map(fn [x, y] ->
+        pixel_y = round((y - state.min_value) / range * pixel_height)
+        {x - start_x, pixel_height - pixel_y - 1}
+      end)
+
+    case state.pixel_style do
+      :quadrant -> render_quadrant_pixels(pixels, width, height, bg, fg)
+      _ -> render_braille_pixels(pixels, width, height, bg, fg)
+    end
+  end
+
+  defp render_multi_series_scatter(
+         data,
+         width,
+         height,
+         bg,
+         colors,
+         min_val,
+         max_val,
+         scroll_offset
+       ) do
     range = max_val - min_val
     pixel_height = height * 4
     viewport_width = width * 2
@@ -1113,7 +1047,7 @@ defmodule Drafter.Widget.Chart do
 
   defp normalize_scatter_points(series) do
     cond do
-      length(series) == 0 ->
+      series == [] ->
         []
 
       is_list(hd(series)) ->
@@ -1127,6 +1061,18 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
+  defp colored_braille_segment([], bg), do: Segment.new(braille_char(0), %{bg: bg})
+
+  defp colored_braille_segment(char_pixels, bg) do
+    {bits, color} =
+      Enum.reduce(char_pixels, {0, nil}, fn {x, y, c}, {b, _} ->
+        bit = Map.get(@braille_dot_offsets, {rem(x, 2), rem(y, 4)}, 0)
+        {b ||| bit, c}
+      end)
+
+    Segment.new(braille_char(bits), %{fg: color, bg: bg})
+  end
+
   defp render_braille_pixels_colored(colored_pixels, width, height, bg) do
     pixel_height = height * 4
 
@@ -1138,19 +1084,7 @@ defmodule Drafter.Widget.Chart do
     for row <- 0..(height - 1) do
       segments =
         for col <- 0..(width - 1) do
-          char_pixels = Map.get(pixels_by_char, {col, row}, [])
-
-          if char_pixels == [] do
-            Segment.new(braille_char(0), %{bg: bg})
-          else
-            {bits, color} =
-              Enum.reduce(char_pixels, {0, nil}, fn {x, y, c}, {b, _} ->
-                bit = Map.get(@braille_dot_offsets, {rem(x, 2), rem(y, 4)}, 0)
-                {b ||| bit, c}
-              end)
-
-            Segment.new(braille_char(bits), %{fg: color, bg: bg})
-          end
+          colored_braille_segment(Map.get(pixels_by_char, {col, row}, []), bg)
         end
 
       Strip.new(segments)
@@ -1165,392 +1099,391 @@ defmodule Drafter.Widget.Chart do
     data = state.data
 
     cond do
-      length(data) == 0 ->
-        empty_strips(height, bg)
-
-      not is_list(hd(data)) ->
-        fg = state.color || {100, 200, 100}
-        render_bar_chart_v(state, width, height, bg, fg)
-
-      true ->
-        colors = if state.colors != [], do: state.colors, else: @default_series_colors
-        num_series = length(data)
-        num_groups = data |> Enum.map(&length/1) |> Enum.max()
-        gap = max(0, state.bar_gap || 0)
-        group_width = num_series + gap
-
-        scroll_offset = state._scroll_offset || 0
-        viewport_groups = div(width, max(1, group_width))
-        end_g = num_groups - scroll_offset
-        start_g = max(0, end_g - viewport_groups)
-        actual_groups = min(end_g, num_groups) - start_g
-
-        sliced = Enum.map(data, fn s -> Enum.slice(s, start_g, actual_groups) end)
-
-        range = state.max_value - state.min_value
-        total_px = height * 2
-        zero_pb = round((0 - state.min_value) / range * total_px) |> max(0) |> min(total_px)
-
-        bars =
-          for g <- 0..(actual_groups - 1) do
-            for s <- 0..(num_series - 1) do
-              val = sliced |> Enum.at(s, []) |> Enum.at(g, 0) || 0
-              bar_pb = round((val - state.min_value) / range * total_px) |> max(0) |> min(total_px)
-              {zero_pb, bar_pb, Enum.at(colors, s, hd(colors))}
-            end
-          end
-
-        gap_seg = Segment.new(String.duplicate(" ", gap), %{bg: bg})
-
-        for row <- 0..(height - 1) do
-          segments =
-            Enum.flat_map(0..(actual_groups - 1), fn g ->
-              bar_segs =
-                for s <- 0..(num_series - 1) do
-                  col = g * group_width + s
-                  if col < width do
-                    {zpb, bpb, color} = bars |> Enum.at(g) |> Enum.at(s)
-                    half_block_bar_char(row, height, zpb, bpb, total_px, color, bg)
-                  end
-                end
-                |> Enum.reject(&is_nil/1)
-
-              if gap > 0 and g < actual_groups - 1, do: bar_segs ++ [gap_seg], else: bar_segs
-            end)
-
-          padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
-          Strip.new(segments ++ padding)
-        end
+      data == [] -> empty_strips(height, bg)
+      not is_list(hd(data)) -> render_bar_chart_v(state, width, height, bg, state.color || {100, 200, 100})
+      true -> render_clustered_bar_data(state, data, width, height, bg)
     end
+  end
+
+  defp render_clustered_bar_data(state, data, width, height, bg) do
+    colors = if state.colors != [], do: state.colors, else: @default_series_colors
+    num_series = length(data)
+    num_groups = data |> Enum.map(&length/1) |> Enum.max()
+    gap = max(0, state.bar_gap || 0)
+    group_width = num_series + gap
+    scroll_offset = state._internal.scroll_offset || 0
+    viewport_groups = div(width, max(1, group_width))
+    end_g = num_groups - scroll_offset
+    start_g = max(0, end_g - viewport_groups)
+    actual_groups = min(end_g, num_groups) - start_g
+    sliced = Enum.map(data, fn s -> Enum.slice(s, start_g, actual_groups) end)
+    range = state.max_value - state.min_value
+    total_px = height * 2
+    zero_pb = round((0 - state.min_value) / range * total_px) |> max(0) |> min(total_px)
+
+    bars =
+      for g <- 0..(actual_groups - 1) do
+        for s <- 0..(num_series - 1) do
+          val = sliced |> Enum.at(s, []) |> Enum.at(g, 0) || 0
+          bar_pb = round((val - state.min_value) / range * total_px) |> max(0) |> min(total_px)
+          {zero_pb, bar_pb, Enum.at(colors, s, hd(colors))}
+        end
+      end
+
+    gap_seg = Segment.new(String.duplicate(" ", gap), %{bg: bg})
+
+    ctx = %{
+      actual_groups: actual_groups,
+      num_series: num_series,
+      group_width: group_width,
+      width: width,
+      bars: bars,
+      height: height,
+      total_px: total_px,
+      gap: gap,
+      gap_seg: gap_seg,
+      bg: bg
+    }
+
+    for row <- 0..(height - 1) do
+      segments = build_clustered_row_segments(row, ctx)
+      padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
+      Strip.new(segments ++ padding)
+    end
+  end
+
+  defp build_clustered_row_segments(row, %{actual_groups: actual_groups, num_series: num_series, group_width: group_width, width: width, bars: bars, height: height, total_px: total_px, gap: gap, gap_seg: gap_seg, bg: bg}) do
+    Enum.flat_map(0..(actual_groups - 1), fn g ->
+      bar_segs =
+        0..(num_series - 1)
+        |> Enum.filter(fn s -> g * group_width + s < width end)
+        |> Enum.map(fn s ->
+          {zpb, bpb, color} = bars |> Enum.at(g) |> Enum.at(s)
+          half_block_bar_char(row, height, zpb, bpb, total_px, color, bg)
+        end)
+
+      if gap > 0 and g < actual_groups - 1, do: bar_segs ++ [gap_seg], else: bar_segs
+    end)
   end
 
   defp render_stacked_bar(state, width, height, bg) do
     data = state.data
 
     cond do
-      length(data) == 0 ->
-        empty_strips(height, bg)
-
-      not is_list(hd(data)) ->
-        fg = state.color || {100, 200, 100}
-        render_bar_chart_v(state, width, height, bg, fg)
-
-      true ->
-        colors = if state.colors != [], do: state.colors, else: @default_series_colors
-        num_series = length(data)
-        num_positions = data |> Enum.map(&length/1) |> Enum.max()
-        gap = max(0, state.bar_gap || 0)
-        bar_width = 1 + gap
-
-        scroll_offset = state._scroll_offset || 0
-        end_p = num_positions - scroll_offset
-        start_p = max(0, end_p - div(width, max(1, bar_width)))
-        actual = min(end_p, num_positions) - start_p
-
-        sliced = Enum.map(data, fn s -> Enum.slice(s, start_p, actual) end)
-
-        range = state.max_value - state.min_value
-        total_px = height * 2
-        zero_pb = round((0 - state.min_value) / range * total_px) |> max(0) |> min(total_px)
-
-        stacks =
-          for p <- 0..(actual - 1) do
-            Enum.reduce(0..(num_series - 1), {zero_pb, zero_pb, []}, fn s, {pos_top, neg_top, segs} ->
-              val = sliced |> Enum.at(s, []) |> Enum.at(p, 0) || 0
-              px = round(abs(val) / range * total_px)
-              color = Enum.at(colors, s, hd(colors))
-
-              if val >= 0 do
-                new_top = pos_top + px
-                {new_top, neg_top, [{pos_top, new_top, color} | segs]}
-              else
-                new_bot = neg_top - px
-                {pos_top, new_bot, [{new_bot, neg_top, color} | segs]}
-              end
-            end)
-            |> elem(2)
-            |> Enum.reverse()
-          end
-
-        gap_seg = Segment.new(String.duplicate(" ", gap), %{bg: bg})
-
-        for row <- 0..(height - 1) do
-          segments =
-            Enum.flat_map(0..(actual - 1), fn p ->
-              seg = stacked_bar_char(row, height, Enum.at(stacks, p, []), total_px, bg)
-              if gap > 0 and p < actual - 1, do: [seg, gap_seg], else: [seg]
-            end)
-
-          padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
-          Strip.new(segments ++ padding)
-        end
+      data == [] -> empty_strips(height, bg)
+      not is_list(hd(data)) -> render_bar_chart_v(state, width, height, bg, state.color || {100, 200, 100})
+      true -> render_stacked_bar_data(state, data, width, height, bg)
     end
+  end
+
+  defp render_stacked_bar_data(state, data, width, height, bg) do
+    colors = if state.colors != [], do: state.colors, else: @default_series_colors
+    num_series = length(data)
+    num_positions = data |> Enum.map(&length/1) |> Enum.max()
+    gap = max(0, state.bar_gap || 0)
+    bar_width = 1 + gap
+    scroll_offset = state._internal.scroll_offset || 0
+    end_p = num_positions - scroll_offset
+    start_p = max(0, end_p - div(width, max(1, bar_width)))
+    actual = min(end_p, num_positions) - start_p
+    sliced = Enum.map(data, fn s -> Enum.slice(s, start_p, actual) end)
+    range = state.max_value - state.min_value
+    total_px = height * 2
+    zero_pb = round((0 - state.min_value) / range * total_px) |> max(0) |> min(total_px)
+    stacks = build_stacks(actual, num_series, sliced, colors, zero_pb, range, total_px)
+    gap_seg = Segment.new(String.duplicate(" ", gap), %{bg: bg})
+
+    for row <- 0..(height - 1) do
+      segments = build_stacked_bar_row(row, height, actual, stacks, total_px, gap, gap_seg, bg)
+      padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
+      Strip.new(segments ++ padding)
+    end
+  end
+
+  defp build_stacked_bar_row(row, height, actual, stacks, total_px, gap, gap_seg, bg) do
+    Enum.flat_map(0..(actual - 1), fn p ->
+      seg = stacked_bar_char(row, height, Enum.at(stacks, p, []), total_px, bg)
+      if gap > 0 and p < actual - 1, do: [seg, gap_seg], else: [seg]
+    end)
+  end
+
+  defp build_stacks(actual, num_series, sliced, colors, zero_pb, range, total_px) do
+    for p <- 0..(actual - 1) do
+      Enum.reduce(0..(num_series - 1), {zero_pb, zero_pb, []}, fn s, {pos_top, neg_top, segs} ->
+        val = sliced |> Enum.at(s, []) |> Enum.at(p, 0) || 0
+        px = round(abs(val) / range * total_px)
+        color = Enum.at(colors, s, hd(colors))
+        accumulate_stack_segment(val, px, color, pos_top, neg_top, segs)
+      end)
+      |> elem(2)
+      |> Enum.reverse()
+    end
+  end
+
+  defp accumulate_stack_segment(val, px, color, pos_top, neg_top, segs) when val >= 0 do
+    new_top = pos_top + px
+    {new_top, neg_top, [{pos_top, new_top, color} | segs]}
+  end
+
+  defp accumulate_stack_segment(_val, px, color, pos_top, neg_top, segs) do
+    new_bot = neg_top - px
+    {pos_top, new_bot, [{new_bot, neg_top, color} | segs]}
   end
 
   defp render_clustered_bar_h(state, width, height, bg) do
     data = state.data
 
     cond do
-      length(data) == 0 ->
-        empty_strips(height, bg)
-
-      not is_list(hd(data)) ->
-        fg = state.color || {100, 200, 100}
-        render_bar_chart_h(state, width, height, bg, fg)
-
-      true ->
-        colors = if state.colors != [], do: state.colors, else: @default_series_colors
-        num_series = length(data)
-        num_groups = data |> Enum.map(&length/1) |> Enum.max()
-        gap = max(0, state.bar_gap || 0)
-
-        scroll_offset = state._scroll_offset || 0
-        viewport_groups = div(height, max(1, num_series + gap))
-        end_g = num_groups - scroll_offset
-        start_g = max(0, end_g - viewport_groups)
-        actual_groups = min(end_g, num_groups) - start_g
-
-        sliced = Enum.map(data, fn s -> Enum.slice(s, start_g, actual_groups) end)
-        viewport_labels = Enum.slice(state.bar_labels, start_g, actual_groups)
-
-        label_width =
-          if state.show_labels and state.bar_labels != [] do
-            viewport_labels |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> max(1)
-          else
-            0
-          end
-
-        value_width =
-          if state.show_values do
-            data
-            |> List.flatten()
-            |> Enum.map(fn v -> String.length(Visualization.format_number(v)) end)
-            |> Enum.max(fn -> 0 end)
-            |> Kernel.+(1)
-          else
-            0
-          end
-
-        bar_width = max(1, width - label_width - value_width)
-        levels = CharacterSet.sparkline_levels_h()
-        level_count = length(levels) - 1
-        full_char = CharacterSet.fill(:full)
-        gap_strip = Strip.new([Segment.new(String.duplicate(" ", width), %{bg: bg})])
-
-        strips =
-          for g <- 0..(actual_groups - 1) do
-            group_strips =
-              for s <- 0..(num_series - 1) do
-                val = sliced |> Enum.at(s, []) |> Enum.at(g, 0) || 0
-                color = Enum.at(colors, s, hd(colors))
-                normalized = Visualization.normalize(val, state.min_value, state.max_value)
-                total_steps = round(normalized * bar_width * level_count)
-                full_blocks = div(total_steps, level_count)
-                partial_idx = rem(total_steps, level_count)
-                full_str = Visualization.safe_duplicate(full_char, full_blocks)
-
-                partial_str =
-                  if partial_idx > 0 and full_blocks < bar_width,
-                    do: Enum.at(levels, partial_idx, ""),
-                    else: ""
-
-                bar_used = full_blocks + if(partial_idx > 0 and full_blocks < bar_width, do: 1, else: 0)
-                padding = Visualization.safe_duplicate(" ", bar_width - bar_used)
-
-                segs = []
-
-                segs =
-                  if label_width > 0 do
-                    lbl =
-                      if s == 0,
-                        do: (Enum.at(viewport_labels, g, "") |> String.pad_trailing(label_width)),
-                        else: String.duplicate(" ", label_width)
-                    [Segment.new(lbl, %{fg: color, bg: bg}) | segs]
-                  else
-                    segs
-                  end
-
-                segs = [Segment.new(full_str <> partial_str <> padding, %{fg: color, bg: bg}) | segs]
-
-                segs =
-                  if value_width > 0 do
-                    val_str = " " <> Visualization.format_number(val)
-                    [Segment.new(String.pad_trailing(val_str, value_width), %{fg: color, bg: bg}) | segs]
-                  else
-                    segs
-                  end
-
-                Strip.new(Enum.reverse(segs))
-              end
-
-            if gap > 0 and g < actual_groups - 1,
-              do: group_strips ++ List.duplicate(gap_strip, gap),
-              else: group_strips
-          end
-          |> List.flatten()
-
-        Enum.take(strips, height)
+      data == [] -> empty_strips(height, bg)
+      not is_list(hd(data)) -> render_bar_chart_h(state, width, height, bg, state.color || {100, 200, 100})
+      true -> render_clustered_bar_h_data(state, data, width, height, bg)
     end
+  end
+
+  defp render_clustered_bar_h_data(state, data, width, height, bg) do
+    colors = if state.colors != [], do: state.colors, else: @default_series_colors
+    num_series = length(data)
+    num_groups = data |> Enum.map(&length/1) |> Enum.max()
+    gap = max(0, state.bar_gap || 0)
+    scroll_offset = state._internal.scroll_offset || 0
+    viewport_groups = div(height, max(1, num_series + gap))
+    end_g = num_groups - scroll_offset
+    start_g = max(0, end_g - viewport_groups)
+    actual_groups = min(end_g, num_groups) - start_g
+    sliced = Enum.map(data, fn s -> Enum.slice(s, start_g, actual_groups) end)
+    viewport_labels = Enum.slice(state.bar_labels, start_g, actual_groups)
+    label_width = h_label_width(state, viewport_labels)
+    value_width = if state.show_values, do: data |> List.flatten() |> Enum.map(fn v -> String.length(Visualization.format_number(v)) end) |> Enum.max(fn -> 0 end) |> Kernel.+(1), else: 0
+    bar_width = max(1, width - label_width - value_width)
+    levels = CharacterSet.sparkline_levels_h()
+    level_count = length(levels) - 1
+    full_char = CharacterSet.fill(:full)
+    gap_strip = Strip.new([Segment.new(String.duplicate(" ", width), %{bg: bg})])
+
+    strips =
+      for g <- 0..(actual_groups - 1) do
+        h_ctx = %{
+          sliced: sliced,
+          colors: colors,
+          state: state,
+          levels: levels,
+          level_count: level_count,
+          full_char: full_char,
+          bar_width: bar_width,
+          label_width: label_width,
+          value_width: value_width,
+          viewport_labels: viewport_labels,
+          bg: bg
+        }
+
+        group_strips =
+          for s <- 0..(num_series - 1) do
+            build_clustered_h_series_strip(s, g, h_ctx)
+          end
+
+        if gap > 0 and g < actual_groups - 1,
+          do: group_strips ++ List.duplicate(gap_strip, gap),
+          else: group_strips
+      end
+      |> List.flatten()
+
+    Enum.take(strips, height)
+  end
+
+  defp build_clustered_h_series_strip(s, g, %{sliced: sliced, colors: colors, state: state, levels: levels, level_count: level_count, full_char: full_char, bar_width: bar_width, label_width: label_width, value_width: value_width, viewport_labels: viewport_labels, bg: bg}) do
+    val = sliced |> Enum.at(s, []) |> Enum.at(g, 0) || 0
+    color = Enum.at(colors, s, hd(colors))
+    normalized = Visualization.normalize(val, state.min_value, state.max_value)
+    total_steps = round(normalized * bar_width * level_count)
+    full_blocks = div(total_steps, level_count)
+    partial_idx = rem(total_steps, level_count)
+    full_str = Visualization.safe_duplicate(full_char, full_blocks)
+    partial_str = if partial_idx > 0 and full_blocks < bar_width, do: Enum.at(levels, partial_idx, ""), else: ""
+    bar_used = full_blocks + if(partial_idx > 0 and full_blocks < bar_width, do: 1, else: 0)
+    padding = Visualization.safe_duplicate(" ", bar_width - bar_used)
+
+    segs =
+      if label_width > 0 do
+        lbl = if s == 0, do: Enum.at(viewport_labels, g, "") |> String.pad_trailing(label_width), else: String.duplicate(" ", label_width)
+        [Segment.new(lbl, %{fg: color, bg: bg})]
+      else
+        []
+      end
+
+    segs = segs ++ [Segment.new(full_str <> partial_str <> padding, %{fg: color, bg: bg})]
+
+    segs =
+      if value_width > 0 do
+        val_str = " " <> Visualization.format_number(val)
+        segs ++ [Segment.new(String.pad_trailing(val_str, value_width), %{fg: color, bg: bg})]
+      else
+        segs
+      end
+
+    Strip.new(segs)
   end
 
   defp render_stacked_bar_h(state, width, height, bg) do
     data = state.data
 
     cond do
-      length(data) == 0 ->
-        empty_strips(height, bg)
-
-      not is_list(hd(data)) ->
-        fg = state.color || {100, 200, 100}
-        render_bar_chart_h(state, width, height, bg, fg)
-
-      true ->
-        colors = if state.colors != [], do: state.colors, else: @default_series_colors
-        num_series = length(data)
-        num_positions = data |> Enum.map(&length/1) |> Enum.max()
-        gap = max(0, state.bar_gap || 0)
-
-        scroll_offset = state._scroll_offset || 0
-        end_p = num_positions - scroll_offset
-        start_p = max(0, end_p - (height - gap * max(0, num_positions - 1)))
-        actual = min(end_p, num_positions) - start_p
-
-        sliced = Enum.map(data, fn s -> Enum.slice(s, start_p, actual) end)
-        viewport_labels = Enum.slice(state.bar_labels, start_p, actual)
-
-        label_width =
-          if state.show_labels and state.bar_labels != [] do
-            viewport_labels |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> max(1)
-          else
-            0
-          end
-
-        bar_width = max(1, width - label_width)
-        range = state.max_value - state.min_value
-        full_char = CharacterSet.fill(:full)
-
-        gap_strip = Strip.new([Segment.new(String.duplicate(" ", width), %{bg: bg})])
-
-        strips =
-          for p <- 0..(actual - 1) do
-            pos_segs = []
-
-            pos_segs =
-              if label_width > 0 do
-                lbl = Enum.at(viewport_labels, p, "") |> String.pad_trailing(label_width)
-                [Segment.new(lbl, %{fg: hd(colors), bg: bg}) | pos_segs]
-              else
-                pos_segs
-              end
-
-            bar_segs =
-              for s <- 0..(num_series - 1) do
-                val = sliced |> Enum.at(s, []) |> Enum.at(p, 0) || 0
-                color = Enum.at(colors, s, hd(colors))
-                seg_width = round(abs(val) / range * bar_width)
-                Segment.new(Visualization.safe_duplicate(full_char, seg_width), %{fg: color, bg: bg})
-              end
-
-            used = Enum.reduce(bar_segs, 0, fn seg, acc -> acc + String.length(seg.text) end)
-            padding = Visualization.safe_duplicate(" ", max(0, bar_width - used))
-
-            strip = Strip.new(Enum.reverse(pos_segs) ++ bar_segs ++ [Segment.new(padding, %{bg: bg})])
-
-            if gap > 0 and p < actual - 1,
-              do: [strip | List.duplicate(gap_strip, gap)],
-              else: [strip]
-          end
-          |> List.flatten()
-
-        Enum.take(strips, height)
+      data == [] -> empty_strips(height, bg)
+      not is_list(hd(data)) -> render_bar_chart_h(state, width, height, bg, state.color || {100, 200, 100})
+      true -> render_stacked_bar_h_data(state, data, width, height, bg)
     end
+  end
+
+  defp render_stacked_bar_h_data(state, data, width, height, bg) do
+    colors = if state.colors != [], do: state.colors, else: @default_series_colors
+    num_series = length(data)
+    num_positions = data |> Enum.map(&length/1) |> Enum.max()
+    gap = max(0, state.bar_gap || 0)
+    scroll_offset = state._internal.scroll_offset || 0
+    end_p = num_positions - scroll_offset
+    start_p = max(0, end_p - (height - gap * max(0, num_positions - 1)))
+    actual = min(end_p, num_positions) - start_p
+    sliced = Enum.map(data, fn s -> Enum.slice(s, start_p, actual) end)
+    viewport_labels = Enum.slice(state.bar_labels, start_p, actual)
+    label_width = h_label_width(state, viewport_labels)
+    bar_width = max(1, width - label_width)
+    range = state.max_value - state.min_value
+    full_char = CharacterSet.fill(:full)
+    gap_strip = Strip.new([Segment.new(String.duplicate(" ", width), %{bg: bg})])
+
+    sh_ctx = %{
+      sliced: sliced,
+      colors: colors,
+      num_series: num_series,
+      range: range,
+      bar_width: bar_width,
+      full_char: full_char,
+      label_width: label_width,
+      viewport_labels: viewport_labels,
+      bg: bg
+    }
+
+    strips =
+      for p <- 0..(actual - 1) do
+        strip = build_stacked_h_strip(p, sh_ctx)
+        if gap > 0 and p < actual - 1, do: [strip | List.duplicate(gap_strip, gap)], else: [strip]
+      end
+      |> List.flatten()
+
+    Enum.take(strips, height)
+  end
+
+  defp build_stacked_h_strip(p, %{sliced: sliced, colors: colors, num_series: num_series, range: range, bar_width: bar_width, full_char: full_char, label_width: label_width, viewport_labels: viewport_labels, bg: bg}) do
+    label_segs =
+      if label_width > 0 do
+        lbl = Enum.at(viewport_labels, p, "") |> String.pad_trailing(label_width)
+        [Segment.new(lbl, %{fg: hd(colors), bg: bg})]
+      else
+        []
+      end
+
+    bar_segs =
+      for s <- 0..(num_series - 1) do
+        val = sliced |> Enum.at(s, []) |> Enum.at(p, 0) || 0
+        color = Enum.at(colors, s, hd(colors))
+        seg_width = round(abs(val) / range * bar_width)
+        Segment.new(Visualization.safe_duplicate(full_char, seg_width), %{fg: color, bg: bg})
+      end
+
+    used = Enum.reduce(bar_segs, 0, fn seg, acc -> acc + String.length(seg.text) end)
+    padding = Visualization.safe_duplicate(" ", max(0, bar_width - used))
+    Strip.new(label_segs ++ bar_segs ++ [Segment.new(padding, %{bg: bg})])
   end
 
   defp render_range_bar_h(state, width, height, bg, fg) do
     data = state.data
 
-    if length(data) == 0 do
+    if data == [] do
       empty_strips(height, bg)
     else
-      scroll_offset = state._scroll_offset || 0
-      total = length(data)
-      end_i = total - scroll_offset
-      start_i = max(0, end_i - height)
-      viewport = Enum.slice(data, start_i, height)
-      viewport_labels = Enum.slice(state.bar_labels, start_i, height)
-
-      label_width =
-        if state.show_labels and state.bar_labels != [] do
-          viewport_labels |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> max(1)
-        else
-          0
-        end
-
-      value_width =
-        if state.show_values do
-          viewport
-          |> Enum.flat_map(fn item ->
-            {lo, hi} = extract_range_item(item, state)
-            [String.length(Visualization.format_number(lo)), String.length(Visualization.format_number(hi))]
-          end)
-          |> Enum.max(fn -> 0 end)
-          |> Kernel.+(1)
-        else
-          0
-        end
-
-      bar_width = max(1, width - label_width - value_width)
-      full_char = CharacterSet.fill(:full)
-      levels = CharacterSet.sparkline_levels_h()
-      level_count = length(levels) - 1
-
-      viewport
-      |> Enum.with_index()
-      |> Enum.map(fn {item, i} ->
-        {lo, hi} = extract_range_item(item, state)
-        lo_norm = Visualization.normalize(lo, state.min_value, state.max_value)
-        hi_norm = Visualization.normalize(hi, state.min_value, state.max_value)
-        lo_steps = round(lo_norm * bar_width * level_count)
-        hi_steps = round(hi_norm * bar_width * level_count)
-
-        lo_full = div(lo_steps, level_count)
-        hi_full = div(hi_steps, level_count)
-        hi_partial = rem(hi_steps, level_count)
-
-        empty_before = Visualization.safe_duplicate(" ", lo_full)
-        bar_fill = Visualization.safe_duplicate(full_char, max(0, hi_full - lo_full))
-
-        partial_str =
-          if hi_partial > 0 and hi_full < bar_width,
-            do: Enum.at(levels, hi_partial, ""),
-            else: ""
-
-        used = lo_full + max(0, hi_full - lo_full) + if(hi_partial > 0 and hi_full < bar_width, do: 1, else: 0)
-        padding = Visualization.safe_duplicate(" ", max(0, bar_width - used))
-
-        segs = []
-
-        segs =
-          if label_width > 0 do
-            lbl = Enum.at(viewport_labels, i, "") |> String.pad_trailing(label_width)
-            [Segment.new(lbl, %{fg: fg, bg: bg}) | segs]
-          else
-            segs
-          end
-
-        segs = [Segment.new(empty_before <> bar_fill <> partial_str <> padding, %{fg: fg, bg: bg}) | segs]
-
-        segs =
-          if value_width > 0 do
-            hi_str = " " <> Visualization.format_number(hi)
-            [Segment.new(String.pad_trailing(hi_str, value_width), %{fg: fg, bg: bg}) | segs]
-          else
-            segs
-          end
-
-        Strip.new(Enum.reverse(segs))
-      end)
+      render_range_bar_h_data(state, data, width, height, bg, fg)
     end
+  end
+
+  defp render_range_bar_h_data(state, data, width, height, bg, fg) do
+    scroll_offset = state._internal.scroll_offset || 0
+    total = length(data)
+    end_i = total - scroll_offset
+    start_i = max(0, end_i - height)
+    viewport = Enum.slice(data, start_i, height)
+    viewport_labels = Enum.slice(state.bar_labels, start_i, height)
+    label_width = h_label_width(state, viewport_labels)
+    value_width = range_bar_value_width(state, viewport)
+    bar_width = max(1, width - label_width - value_width)
+    full_char = CharacterSet.fill(:full)
+    levels = CharacterSet.sparkline_levels_h()
+    level_count = length(levels) - 1
+
+    rb_ctx = %{
+      state: state,
+      levels: levels,
+      level_count: level_count,
+      full_char: full_char,
+      bar_width: bar_width,
+      label_width: label_width,
+      value_width: value_width,
+      viewport_labels: viewport_labels,
+      fg: fg,
+      bg: bg
+    }
+
+    viewport
+    |> Enum.with_index()
+    |> Enum.map(fn {item, i} -> build_range_bar_h_strip(item, i, rb_ctx) end)
+  end
+
+  defp range_bar_value_width(state, viewport) do
+    if state.show_values do
+      viewport
+      |> Enum.flat_map(fn item ->
+        {lo, hi} = extract_range_item(item, state)
+        [String.length(Visualization.format_number(lo)), String.length(Visualization.format_number(hi))]
+      end)
+      |> Enum.max(fn -> 0 end)
+      |> Kernel.+(1)
+    else
+      0
+    end
+  end
+
+  defp build_range_bar_h_strip(item, i, %{state: state, levels: levels, level_count: level_count, full_char: full_char, bar_width: bar_width, label_width: label_width, value_width: value_width, viewport_labels: viewport_labels, fg: fg, bg: bg}) do
+    {lo, hi} = extract_range_item(item, state)
+    lo_norm = Visualization.normalize(lo, state.min_value, state.max_value)
+    hi_norm = Visualization.normalize(hi, state.min_value, state.max_value)
+    lo_steps = round(lo_norm * bar_width * level_count)
+    hi_steps = round(hi_norm * bar_width * level_count)
+    lo_full = div(lo_steps, level_count)
+    hi_full = div(hi_steps, level_count)
+    hi_partial = rem(hi_steps, level_count)
+    empty_before = Visualization.safe_duplicate(" ", lo_full)
+    bar_fill = Visualization.safe_duplicate(full_char, max(0, hi_full - lo_full))
+    partial_str = if hi_partial > 0 and hi_full < bar_width, do: Enum.at(levels, hi_partial, ""), else: ""
+    used = lo_full + max(0, hi_full - lo_full) + if(hi_partial > 0 and hi_full < bar_width, do: 1, else: 0)
+    padding = Visualization.safe_duplicate(" ", max(0, bar_width - used))
+
+    segs =
+      if label_width > 0 do
+        lbl = Enum.at(viewport_labels, i, "") |> String.pad_trailing(label_width)
+        [Segment.new(lbl, %{fg: fg, bg: bg})]
+      else
+        []
+      end
+
+    segs = segs ++ [Segment.new(empty_before <> bar_fill <> partial_str <> padding, %{fg: fg, bg: bg})]
+
+    segs =
+      if value_width > 0 do
+        hi_str = " " <> Visualization.format_number(hi)
+        segs ++ [Segment.new(String.pad_trailing(hi_str, value_width), %{fg: fg, bg: bg})]
+      else
+        segs
+      end
+
+    Strip.new(segs)
   end
 
   defp extract_range_item(item, state) do
@@ -1561,38 +1494,34 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
+  defp render_range_bar(state, _width, height, bg, _fg) when state.data == [], do: empty_strips(height, bg)
+
   defp render_range_bar(state, width, height, bg, fg) do
-    data = state.data
+    scroll_offset = state._internal.scroll_offset || 0
+    total = length(state.data)
+    end_i = total - scroll_offset
+    start_i = max(0, end_i - width)
+    viewport = Enum.slice(state.data, start_i, width)
+    range = state.max_value - state.min_value
+    total_px = height * 2
+    bars = render_range_bar_bars(viewport, state, range, total_px)
+    render_range_bar_rows(bars, height, width, total_px, fg, bg)
+  end
 
-    if length(data) == 0 do
-      empty_strips(height, bg)
-    else
-      scroll_offset = state._scroll_offset || 0
-      total = length(data)
-      end_i = total - scroll_offset
-      start_i = max(0, end_i - width)
-      viewport = Enum.slice(data, start_i, width)
+  defp render_range_bar_bars(viewport, state, range, total_px) do
+    Enum.map(viewport, fn item ->
+      {lo, hi} = extract_range_item(item, state)
+      lo_pb = round((lo - state.min_value) / range * total_px) |> max(0) |> min(total_px)
+      hi_pb = round((hi - state.min_value) / range * total_px) |> max(0) |> min(total_px)
+      {lo_pb, hi_pb}
+    end)
+  end
 
-      range = state.max_value - state.min_value
-      total_px = height * 2
-
-      bars =
-        Enum.map(viewport, fn item ->
-          {lo, hi} = extract_range_item(item, state)
-          lo_pb = round((lo - state.min_value) / range * total_px) |> max(0) |> min(total_px)
-          hi_pb = round((hi - state.min_value) / range * total_px) |> max(0) |> min(total_px)
-          {lo_pb, hi_pb}
-        end)
-
-      for row <- 0..(height - 1) do
-        segments =
-          Enum.map(bars, fn {lo_pb, hi_pb} ->
-            half_block_bar_char(row, height, lo_pb, hi_pb, total_px, fg, bg)
-          end)
-
-        padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
-        Strip.new(segments ++ padding)
-      end
+  defp render_range_bar_rows(bars, height, width, total_px, fg, bg) do
+    for row <- 0..(height - 1) do
+      segments = Enum.map(bars, fn {lo_pb, hi_pb} -> half_block_bar_char(row, height, lo_pb, hi_pb, total_px, fg, bg) end)
+      padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
+      Strip.new(segments ++ padding)
     end
   end
 
@@ -1619,31 +1548,30 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
-  defp stacked_bar_char(row, height, segs, total_px, bg) do
+  defp stacked_bar_char(row, _height, segs, total_px, bg) do
     top_pb = total_px - 1 - 2 * row
     bot_pb = total_px - 2 - 2 * row
-    _ = height
-
-    hit =
-      Enum.find(segs, fn {lo, hi, _color} -> lo <= top_pb and top_pb <= hi - 1 end) ||
-        Enum.find(segs, fn {lo, hi, _color} -> lo <= bot_pb and bot_pb <= hi - 1 end)
-
-    case hit do
-      nil ->
-        Segment.new(" ", %{bg: bg})
-
-      {lo, hi, color} ->
-        top_filled = lo <= top_pb and top_pb <= hi - 1
-        bot_filled = lo <= bot_pb and bot_pb <= hi - 1
-
-        cond do
-          top_filled and bot_filled -> Segment.new(CharacterSet.fill(:full), %{fg: color, bg: bg})
-          top_filled -> Segment.new(CharacterSet.fill(:upper_half), %{fg: color, bg: bg})
-          bot_filled -> Segment.new(CharacterSet.fill(:lower_half), %{fg: color, bg: bg})
-          true -> Segment.new(" ", %{bg: bg})
-        end
-    end
+    top_hit = Enum.find(segs, fn {lo, hi, _} -> lo <= top_pb and top_pb <= hi - 1 end)
+    bot_hit = Enum.find(segs, fn {lo, hi, _} -> lo <= bot_pb and bot_pb <= hi - 1 end)
+    stacked_bar_segment(top_hit, bot_hit, bg)
   end
+
+  defp stacked_bar_segment(nil, nil, bg), do: Segment.new(" ", %{bg: bg})
+
+  defp stacked_bar_segment({_lo, _hi, color}, {_lo2, _hi2, color}, bg),
+    do: Segment.new(CharacterSet.fill(:full), %{fg: color, bg: bg})
+
+  defp stacked_bar_segment({_lo, _hi, color}, nil, bg),
+    do: Segment.new(CharacterSet.fill(:upper_half), %{fg: color, bg: bg})
+
+  defp stacked_bar_segment(nil, {_lo, _hi, color}, bg),
+    do: Segment.new(CharacterSet.fill(:lower_half), %{fg: color, bg: bg})
+
+  defp stacked_bar_segment({_lo, _hi, top_color}, {_lo2, _hi2, _bot_color}, bg),
+    do: Segment.new(CharacterSet.fill(:upper_half), %{fg: top_color, bg: bg})
+
+  defp braille_char_for_pixels([], _fg, bg), do: Segment.new(braille_char(0), %{fg: bg, bg: bg})
+  defp braille_char_for_pixels(char_pixels, fg, bg), do: Segment.new(build_braille_char(char_pixels), %{fg: fg, bg: bg})
 
   defp render_braille_pixels(pixels, width, height, bg, fg) do
     pixel_height = height * 4
@@ -1651,30 +1579,23 @@ defmodule Drafter.Widget.Chart do
     pixels_by_char =
       pixels
       |> Enum.filter(fn {x, y} -> x >= 0 and x < width * 2 and y >= 0 and y < pixel_height end)
-      |> Enum.group_by(fn {x, y} ->
-        char_x = div(x, 2)
-        char_y = div(y, 4)
-        {char_x, char_y}
-      end)
+      |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 4)} end)
 
     for row <- 0..(height - 1) do
       segments =
         for col <- 0..(width - 1) do
-          char_pixels = Map.get(pixels_by_char, {col, row}, [])
-
-          char =
-            if length(char_pixels) > 0 do
-              build_braille_char(char_pixels)
-            else
-              braille_char(0)
-            end
-
-          Segment.new(char, %{fg: fg, bg: bg})
+          braille_char_for_pixels(Map.get(pixels_by_char, {col, row}, []), fg, bg)
         end
 
       Strip.new(segments)
     end
   end
+
+  defp quadrant_bit({0, 0}), do: 1
+  defp quadrant_bit({1, 0}), do: 2
+  defp quadrant_bit({0, 1}), do: 4
+  defp quadrant_bit({1, 1}), do: 8
+  defp quadrant_bit(_), do: 0
 
   defp render_quadrant_pixels(pixels, width, height, bg, fg) do
     pixel_height = height * 2
@@ -1685,32 +1606,15 @@ defmodule Drafter.Widget.Chart do
       |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 2)} end)
 
     for row <- 0..(height - 1) do
-      segments =
-        for col <- 0..(width - 1) do
-          char_pixels = Map.get(pixels_by_char, {col, row}, [])
-
-          bits =
-            Enum.reduce(char_pixels, 0, fn {x, y}, acc ->
-              local_x = rem(x, 2)
-              local_y = rem(y, 2)
-
-              bit =
-                case {local_x, local_y} do
-                  {0, 0} -> 1
-                  {1, 0} -> 2
-                  {0, 1} -> 4
-                  {1, 1} -> 8
-                end
-
-              acc ||| bit
-            end)
-
-          char = Map.get(@quadrant_chars, bits, " ")
-          Segment.new(char, %{fg: fg, bg: bg})
-        end
-
+      segments = for col <- 0..(width - 1), do: quadrant_pixel_segment(pixels_by_char, col, row, fg, bg)
       Strip.new(segments)
     end
+  end
+
+  defp quadrant_pixel_segment(pixels_by_char, col, row, fg, bg) do
+    char_pixels = Map.get(pixels_by_char, {col, row}, [])
+    bits = Enum.reduce(char_pixels, 0, fn {x, y}, acc -> acc ||| quadrant_bit({rem(x, 2), rem(y, 2)}) end)
+    Segment.new(Map.get(@quadrant_chars, bits, " "), %{fg: fg, bg: bg})
   end
 
   defp build_braille_char(pixels) do
@@ -1756,35 +1660,19 @@ defmodule Drafter.Widget.Chart do
   defp bresenham_line(x1, y1, x2, y2) do
     dx = abs(x2 - x1)
     dy = abs(y2 - y1)
-    sx = if x1 < x2, do: 1, else: -1
-    sy = if y1 < y2, do: 1, else: -1
-    err = dx - dy
-
-    bresenham_loop(x1, y1, x2, y2, sx, sy, dx, dy, err, [])
+    ctx = {x2, y2, if(x1 < x2, do: 1, else: -1), if(y1 < y2, do: 1, else: -1), dx, dy}
+    bresenham_loop(x1, y1, dx - dy, ctx, [])
   end
 
-  defp bresenham_loop(x, y, x2, y2, _sx, _sy, _dx, _dy, _err, acc) when x == x2 and y == y2 do
+  defp bresenham_loop(x, y, _err, {x2, y2, _sx, _sy, _dx, _dy}, acc) when x == x2 and y == y2 do
     Enum.reverse([{x, y} | acc])
   end
 
-  defp bresenham_loop(x, y, x2, y2, sx, sy, dx, dy, err, acc) do
+  defp bresenham_loop(x, y, err, {_x2, _y2, sx, sy, dx, dy} = ctx, acc) do
     e2 = 2 * err
-
-    {new_x, new_err} =
-      if e2 > -dy do
-        {x + sx, err - dy}
-      else
-        {x, err}
-      end
-
-    {new_y, final_err} =
-      if e2 < dx do
-        {y + sy, new_err + dx}
-      else
-        {y, new_err}
-      end
-
-    bresenham_loop(new_x, new_y, x2, y2, sx, sy, dx, dy, final_err, [{x, y} | acc])
+    {new_x, new_err} = if e2 > -dy, do: {x + sx, err - dy}, else: {x, err}
+    {new_y, final_err} = if e2 < dx, do: {y + sy, new_err + dx}, else: {y, new_err}
+    bresenham_loop(new_x, new_y, final_err, ctx, [{x, y} | acc])
   end
 
   defp empty_strips(height, bg) do
@@ -1795,22 +1683,6 @@ defmodule Drafter.Widget.Chart do
 
   defp data_to_tuple(data) when is_list(data), do: List.to_tuple(data)
   defp data_to_tuple(data), do: data
-
-  defp tuple_slice(tuple, start, count) when is_tuple(tuple) do
-    size = tuple_size(tuple)
-    safe_start = max(0, min(start, size))
-    safe_count = min(count, size - safe_start)
-
-    if safe_count <= 0 do
-      []
-    else
-      for i <- safe_start..(safe_start + safe_count - 1) do
-        elem(tuple, i)
-      end
-    end
-  end
-
-  defp tuple_slice(list, start, count), do: Enum.slice(list, start, count)
 
   defp tuple_size_or_length(tuple) when is_tuple(tuple), do: tuple_size(tuple)
   defp tuple_size_or_length(list), do: length(list)
@@ -1901,62 +1773,28 @@ defmodule Drafter.Widget.Chart do
       row_bottom = row_top + 1
 
       segments =
-        bars
-        |> Enum.map(fn {normalized, _value} ->
+        Enum.map(bars, fn {normalized, _value} ->
           bar_pixel = round(normalized * pixel_height)
-
-          cond do
-            bar_pixel <= row_top ->
-              Segment.new(" ", %{bg: bg})
-
-            bar_pixel >= row_bottom + 1 ->
-              Segment.new(CharacterSet.fill(:full), %{fg: color, bg: bg})
-
-            true ->
-              if bar_pixel == row_top + 1 do
-                Segment.new(CharacterSet.fill(:lower_half), %{fg: color, bg: bg})
-              else
-                Segment.new(" ", %{bg: bg})
-              end
-          end
+          tall_bar_segment(bar_pixel, row_top, row_bottom, color, bg)
         end)
 
       Strip.new(segments)
     end
   end
 
+  defp tall_bar_segment(bar_pixel, row_top, _row_bottom, _color, bg) when bar_pixel <= row_top, do: Segment.new(" ", %{bg: bg})
+  defp tall_bar_segment(bar_pixel, _row_top, row_bottom, color, bg) when bar_pixel >= row_bottom + 1, do: Segment.new(CharacterSet.fill(:full), %{fg: color, bg: bg})
+  defp tall_bar_segment(bar_pixel, row_top, _row_bottom, color, bg) when bar_pixel == row_top + 1, do: Segment.new(CharacterSet.fill(:lower_half), %{fg: color, bg: bg})
+  defp tall_bar_segment(_bar_pixel, _row_top, _row_bottom, _color, bg), do: Segment.new(" ", %{bg: bg})
+
+  @multi_series_default_colors [{255, 100, 100}, {100, 255, 100}, {100, 100, 255}, {255, 255, 100}]
+
   def render_multi_series(data_series, width, height, opts \\ []) do
     bg = Keyword.get(opts, :bg, {20, 20, 30})
-
-    colors =
-      Keyword.get(opts, :colors, [
-        {255, 100, 100},
-        {100, 255, 100},
-        {100, 100, 255},
-        {255, 255, 100}
-      ])
-
-    {min_val, max_val} =
-      case {Keyword.get(opts, :min), Keyword.get(opts, :max)} do
-        {nil, nil} ->
-          all_values = List.flatten(data_series)
-          {Enum.min(all_values), Enum.max(all_values)}
-
-        {nil, max} ->
-          all_values = List.flatten(data_series)
-          {Enum.min(all_values), max}
-
-        {min, nil} ->
-          all_values = List.flatten(data_series)
-          {min, Enum.max(all_values)}
-
-        {min, max} ->
-          {min, max}
-      end
+    colors = Keyword.get(opts, :colors, @multi_series_default_colors)
+    {min_val, max_val} = resolve_multi_series_range(opts, data_series)
     range = max_val - min_val
-
     pixel_height = height * 4
-
     colors_tuple = List.to_tuple(colors)
     color_count = tuple_size(colors_tuple)
 
@@ -1965,14 +1803,7 @@ defmodule Drafter.Widget.Chart do
       |> Enum.with_index()
       |> Enum.flat_map(fn {series, series_idx} ->
         color = elem(colors_tuple, rem(series_idx, color_count))
-
-        series
-        |> Enum.with_index()
-        |> Enum.map(fn {value, x} ->
-          normalized = (value - min_val) / range
-          y = round((1 - normalized) * (pixel_height - 1))
-          {{div(x, 2), div(y, 4)}, {rem(x, 2), rem(y, 4)}, color}
-        end)
+        series_to_pixels(series, color, min_val, range, pixel_height)
       end)
 
     pixels_by_char = Enum.group_by(all_pixels, fn {{cx, cy}, _, _} -> {cx, cy} end)
@@ -1980,22 +1811,53 @@ defmodule Drafter.Widget.Chart do
     for row <- 0..(height - 1) do
       segments =
         for col <- 0..(width - 1) do
-          char_pixels = Map.get(pixels_by_char, {col, row}, [])
-
-          if char_pixels != [] do
-            {bits, color} =
-              Enum.reduce(char_pixels, {0, nil}, fn {_, {lx, ly}, c}, {b, _} ->
-                bit = Map.get(@braille_dot_offsets, {lx, ly}, 0)
-                {b ||| bit, c}
-              end)
-
-            Segment.new(braille_char(bits), %{fg: color || hd(colors), bg: bg})
-          else
-            Segment.new(" ", %{bg: bg})
-          end
+          multi_series_segment(Map.get(pixels_by_char, {col, row}, []), hd(colors), bg)
         end
 
       Strip.new(segments)
     end
+  end
+
+  defp resolve_multi_series_range(opts, data_series) do
+    case {Keyword.get(opts, :min), Keyword.get(opts, :max)} do
+      {nil, nil} ->
+        all_values = List.flatten(data_series)
+        {Enum.min(all_values), Enum.max(all_values)}
+
+      {nil, max} ->
+        {data_series |> List.flatten() |> Enum.min(), max}
+
+      {min, nil} ->
+        {min, data_series |> List.flatten() |> Enum.max()}
+
+      {min, max} ->
+        {min, max}
+    end
+  end
+
+  defp series_to_pixels(series, color, min_val, range, pixel_height) do
+    series
+    |> Enum.with_index()
+    |> Enum.map(fn {value, x} ->
+      normalized = (value - min_val) / range
+      y = round((1 - normalized) * (pixel_height - 1))
+      {{div(x, 2), div(y, 4)}, {rem(x, 2), rem(y, 4)}, color}
+    end)
+  end
+
+  defp multi_series_segment([], _fallback_color, bg), do: Segment.new(" ", %{bg: bg})
+
+  defp multi_series_segment(char_pixels, fallback_color, bg) do
+    {bits, color} =
+      Enum.reduce(char_pixels, {0, nil}, fn {_, {lx, ly}, c}, {b, _} ->
+        bit = Map.get(@braille_dot_offsets, {lx, ly}, 0)
+        {b ||| bit, c}
+      end)
+
+    Segment.new(braille_char(bits), %{fg: color || fallback_color, bg: bg})
+  end
+
+  defp update_internal(state, updates) do
+    %{state | _internal: Enum.into(updates, state._internal)}
   end
 end

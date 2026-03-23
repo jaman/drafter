@@ -73,20 +73,11 @@ defmodule Drafter.Widget.Label do
     bg_style = %{fg: segment_style[:fg], bg: segment_style[:bg]}
 
     if String.length(state.text) == 0 do
-      empty_segment = Segment.new(String.duplicate(" ", rect.width), bg_style)
-      [Strip.new([empty_segment])]
+      [Strip.new([Segment.new(String.duplicate(" ", rect.width), bg_style)])]
     else
-      lines = String.split(state.text, "\n")
-
-      Enum.map(lines, fn line ->
-        if String.length(line) == 0 do
-          Strip.new([Segment.new(String.duplicate(" ", rect.width), bg_style)])
-        else
-          segment = Segment.new(line, segment_style)
-          strip = Strip.new([segment])
-          align_strip(strip, state.align, rect.width, bg_style)
-        end
-      end)
+      state.text
+      |> String.split("\n")
+      |> Enum.map(&render_label_line(&1, segment_style, bg_style, state.align, rect.width))
     end
   end
 
@@ -127,6 +118,15 @@ defmodule Drafter.Widget.Label do
   end
 
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
+
+  defp render_label_line("", _segment_style, bg_style, _align, width) do
+    Strip.new([Segment.new(String.duplicate(" ", width), bg_style)])
+  end
+
+  defp render_label_line(line, segment_style, bg_style, align, width) do
+    strip = Strip.new([Segment.new(line, segment_style)])
+    align_strip(strip, align, width, bg_style)
+  end
 
   defp align_strip(strip, :left, width, bg_style) do
     strip_width = Strip.width(strip)

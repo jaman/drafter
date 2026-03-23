@@ -1,4 +1,5 @@
 defmodule Drafter.Examples.ScreenDemo do
+  @moduledoc false
   use Drafter.App
 
   def mount(_props) do
@@ -119,6 +120,7 @@ defmodule Drafter.Examples.ScreenDemo do
 end
 
 defmodule Drafter.Examples.ScreenDemo.InfoModal do
+  @moduledoc false
   use Drafter.Screen
 
   def mount(props) do
@@ -163,6 +165,7 @@ defmodule Drafter.Examples.ScreenDemo.InfoModal do
 end
 
 defmodule Drafter.Examples.ScreenDemo.ConfirmModal do
+  @moduledoc false
   use Drafter.Screen
 
   def mount(props) do

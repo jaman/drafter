@@ -62,7 +62,7 @@ defmodule Drafter.Test do
   end
 
   def send_click(_ctx, widget_id) when is_atom(widget_id) do
-    Drafter.AppRegistry.send_to_loop( {:widget_click, widget_id})
+    Drafter.AppRegistry.send_to_loop({:widget_click, widget_id})
     Process.sleep(10)
     :ok
   end
@@ -74,7 +74,7 @@ defmodule Drafter.Test do
   end
 
   def get_state(_ctx) do
-    Drafter.AppRegistry.send_to_loop( {:get_state, self()})
+    Drafter.AppRegistry.send_to_loop({:get_state, self()})
 
     receive do
       {:state, state} -> state
@@ -84,7 +84,7 @@ defmodule Drafter.Test do
   end
 
   def get_widget_value(_ctx, widget_id) do
-    Drafter.AppRegistry.send_to_loop( {:get_widget_value, widget_id, self()})
+    Drafter.AppRegistry.send_to_loop({:get_widget_value, widget_id, self()})
 
     receive do
       {:widget_value, ^widget_id, value} -> value
@@ -94,7 +94,7 @@ defmodule Drafter.Test do
   end
 
   def get_widget_state(_ctx, widget_id) do
-    Drafter.AppRegistry.send_to_loop( {:get_widget_state, widget_id, self()})
+    Drafter.AppRegistry.send_to_loop({:get_widget_state, widget_id, self()})
 
     receive do
       {:widget_state, ^widget_id, state} -> state
@@ -104,7 +104,7 @@ defmodule Drafter.Test do
   end
 
   def query_one(_ctx, selector) do
-    Drafter.AppRegistry.send_to_loop( {:query_one, selector, self()})
+    Drafter.AppRegistry.send_to_loop({:query_one, selector, self()})
 
     receive do
       {:query_result, :one, result} -> result
@@ -114,7 +114,7 @@ defmodule Drafter.Test do
   end
 
   def query_all(_ctx, selector) do
-    Drafter.AppRegistry.send_to_loop( {:query_all, selector, self()})
+    Drafter.AppRegistry.send_to_loop({:query_all, selector, self()})
 
     receive do
       {:query_result, :all, result} -> result
@@ -128,7 +128,7 @@ defmodule Drafter.Test do
   end
 
   def get_widget_hierarchy(_ctx) do
-    Drafter.AppRegistry.send_to_loop( {:get_hierarchy, self()})
+    Drafter.AppRegistry.send_to_loop({:get_hierarchy, self()})
 
     receive do
       {:hierarchy, hierarchy} -> hierarchy
@@ -153,49 +153,34 @@ defmodule Drafter.Test do
   end
 
   defp wait_for_render_count(target_count, timeout) do
-    start_time = System.monotonic_time(:millisecond)
-
-    wait_loop = fn wait_loop ->
-      current_count = HeadlessDriver.get_render_count()
-
-      if current_count >= target_count do
-        :ok
-      else
-        elapsed = System.monotonic_time(:millisecond) - start_time
-
-        if elapsed >= timeout do
-          :timeout
-        else
-          Process.sleep(10)
-          wait_loop.(wait_loop)
-        end
-      end
-    end
-
-    wait_loop.(wait_loop)
+    poll_until(timeout, 10, fn ->
+      HeadlessDriver.get_render_count() >= target_count
+    end)
   end
 
   def wait_for(ctx, condition_fn, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 1000)
     interval = Keyword.get(opts, :interval, 50)
-    start_time = System.monotonic_time(:millisecond)
 
-    wait_loop = fn wait_loop ->
-      if condition_fn.(ctx) do
-        :ok
+    poll_until(timeout, interval, fn -> condition_fn.(ctx) end)
+  end
+
+  defp poll_until(timeout, interval, condition_fn) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_poll(deadline, interval, condition_fn)
+  end
+
+  defp do_poll(deadline, interval, condition_fn) do
+    if condition_fn.() do
+      :ok
+    else
+      if System.monotonic_time(:millisecond) >= deadline do
+        :timeout
       else
-        elapsed = System.monotonic_time(:millisecond) - start_time
-
-        if elapsed >= timeout do
-          :timeout
-        else
-          Process.sleep(interval)
-          wait_loop.(wait_loop)
-        end
+        Process.sleep(interval)
+        do_poll(deadline, interval, condition_fn)
       end
     end
-
-    wait_loop.(wait_loop)
   end
 
   defmacro assert_widget_present(ctx, selector) do

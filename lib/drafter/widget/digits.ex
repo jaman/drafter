@@ -182,24 +182,39 @@ defmodule Drafter.Widget.Digits do
       if state.size == :small, do: {@small_patterns, 3}, else: {@large_patterns, 5}
 
     computed = Computed.for_widget(:digits, state, style: state.style)
-    effective_style = Computed.to_segment_style(computed)
-    digit_fg = Map.get(effective_style, :fg)
+    digit_fg = Map.get(Computed.to_segment_style(computed), :fg)
 
-    glyph_width =
-      digits
-      |> Enum.map(&(Map.get(patterns, &1, patterns[" "]) |> hd() |> String.length()))
-      |> Enum.sum()
-
-    left_offset =
-      case state.align do
-        :center -> max(0, div(rect.width - glyph_width, 2))
-        :right -> max(0, rect.width - glyph_width)
-        _ -> 0
-      end
-
+    glyph_width = Enum.reduce(digits, 0, &(&2 + (Map.get(patterns, &1, patterns[" "]) |> hd() |> String.length())))
+    left_offset = alignment_offset(state.align, rect.width, glyph_width)
     top_offset = max(0, div(rect.height - digit_height, 2))
     glyph_map = build_glyph_map(digits, patterns, left_offset, top_offset)
+    braille_map = build_braille_map(data, rect, state)
 
+    Enum.map(0..(rect.height - 1), fn row ->
+      segments = Enum.map(0..(rect.width - 1), &render_bg_cell(glyph_map, braille_map, row, &1, digit_fg, state.color))
+      Strip.new(segments)
+    end)
+  end
+
+  defp alignment_offset(:center, width, glyph_width), do: max(0, div(width - glyph_width, 2))
+  defp alignment_offset(:right, width, glyph_width), do: max(0, width - glyph_width)
+  defp alignment_offset(_, _width, _glyph_width), do: 0
+
+  defp render_bg_cell(glyph_map, braille_map, row, col, digit_fg, line_color) do
+    glyph_char = Map.get(glyph_map, {row, col})
+    braille = Map.get(braille_map, {col, row})
+
+    cond do
+      glyph_char && glyph_char != " " ->
+        Segment.new(glyph_char, if(digit_fg, do: %{fg: digit_fg}, else: %{}))
+      braille ->
+        Segment.new(braille, %{fg: line_color})
+      true ->
+        Segment.new(" ", %{})
+    end
+  end
+
+  defp build_braille_map(data, rect, state) do
     pixel_width = rect.width * 2
     pixel_height = rect.height * 4
     sampled = sample_data(data, pixel_width)
@@ -207,47 +222,16 @@ defmodule Drafter.Widget.Digits do
     max_val = state.bg_max || Enum.max(sampled, fn -> 1 end)
     range = max(max_val - min_val, 1)
 
-    line_pixels =
-      Enum.with_index(sampled, fn v, x ->
-        y_norm = (v - min_val) / range * (pixel_height - 1)
-        y = y_norm |> round() |> min(pixel_height - 1) |> max(0)
-        {x, pixel_height - 1 - y}
-      end)
-
-    braille_map =
-      line_pixels
-      |> Enum.filter(fn {x, y} -> x >= 0 and x < pixel_width and y >= 0 and y < pixel_height end)
-      |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 4)} end)
-      |> Map.new(fn {{cx, cy}, pixels} ->
-        bits =
-          Enum.reduce(pixels, 0, fn {x, y}, acc ->
-            acc + Map.get(@braille_dot_offsets, {rem(x, 2), rem(y, 4)}, 0)
-          end)
-
-        {{cx, cy}, <<@braille_base + bits::utf8>>}
-      end)
-
-    line_color = state.color
-
-    Enum.map(0..(rect.height - 1), fn row ->
-      segments =
-        Enum.map(0..(rect.width - 1), fn col ->
-          glyph_char = Map.get(glyph_map, {row, col})
-          braille = Map.get(braille_map, {col, row})
-
-          cond do
-            glyph_char && glyph_char != " " ->
-              Segment.new(glyph_char, if(digit_fg, do: %{fg: digit_fg}, else: %{}))
-
-            braille ->
-              Segment.new(braille, %{fg: line_color})
-
-            true ->
-              Segment.new(" ", %{})
-          end
-        end)
-
-      Strip.new(segments)
+    sampled
+    |> Enum.with_index(fn v, x ->
+      y_norm = (v - min_val) / range * (pixel_height - 1)
+      {x, pixel_height - 1 - (y_norm |> round() |> min(pixel_height - 1) |> max(0))}
+    end)
+    |> Enum.filter(fn {x, y} -> x >= 0 and x < pixel_width and y >= 0 and y < pixel_height end)
+    |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 4)} end)
+    |> Map.new(fn {key, pixels} ->
+      bits = Enum.reduce(pixels, 0, fn {x, y}, acc -> acc + Map.get(@braille_dot_offsets, {rem(x, 2), rem(y, 4)}, 0) end)
+      {key, <<@braille_base + bits::utf8>>}
     end)
   end
 
@@ -257,22 +241,27 @@ defmodule Drafter.Widget.Digits do
     |> Enum.reduce({%{}, left_offset}, fn digit, {map, col_offset} ->
       pattern = Map.get(patterns, digit, patterns[" "])
       char_width = pattern |> hd() |> String.length()
-
-      row_map =
-        pattern
-        |> Enum.with_index()
-        |> Enum.reduce(map, fn {row_str, row_idx}, acc ->
-          row_str
-          |> String.graphemes()
-          |> Enum.with_index()
-          |> Enum.reduce(acc, fn {ch, c}, inner ->
-            Map.put(inner, {top_offset + row_idx, col_offset + c}, ch)
-          end)
-        end)
-
+      row_map = place_pattern(pattern, map, col_offset, top_offset)
       {row_map, col_offset + char_width}
     end)
     |> elem(0)
+  end
+
+  defp place_pattern(pattern, map, col_offset, top_offset) do
+    pattern
+    |> Enum.with_index()
+    |> Enum.reduce(map, fn {row_str, row_idx}, acc ->
+      place_row(row_str, acc, col_offset, top_offset + row_idx)
+    end)
+  end
+
+  defp place_row(row_str, acc, col_offset, row_key) do
+    row_str
+    |> String.graphemes()
+    |> Enum.with_index()
+    |> Enum.reduce(acc, fn {ch, c}, inner ->
+      Map.put(inner, {row_key, col_offset + c}, ch)
+    end)
   end
 
 
@@ -307,12 +296,10 @@ defmodule Drafter.Widget.Digits do
       0..(digit_height - 1)
       |> Enum.map(fn row ->
         line_text =
-          digits
-          |> Enum.map(fn digit ->
+          Enum.map_join(digits, fn digit ->
             pattern = Map.get(patterns, digit, patterns[" "])
             Enum.at(pattern, row, "     ")
           end)
-          |> Enum.join("")
 
         segment = Segment.new(line_text, effective_style)
         strip = Strip.new([segment])

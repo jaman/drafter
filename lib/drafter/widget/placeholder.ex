@@ -128,100 +128,70 @@ defmodule Drafter.Widget.Placeholder do
   end
 
   defp render_with_border(state, content_width, content_height, padding) do
-    # Simple box border using ASCII characters
     top_border = "┌" <> String.duplicate("─", content_width) <> "┐"
     bottom_border = "└" <> String.duplicate("─", content_width) <> "┘"
-
     text_lines = wrap_text(state.text, content_width - 2)
     text_y = div(content_height - 2, 2)
 
-    0..(content_height + 1)
-    |> Enum.map(fn row ->
-      cond do
-        row == 0 ->
-          # Top border
-          segment = Segment.new(top_border, state.style)
-
-          if padding > 0 do
-            padding_segment = Segment.new(String.duplicate(" ", padding))
-            Strip.new([padding_segment, segment, padding_segment])
-          else
-            Strip.new([segment])
-          end
-
-        row == content_height + 1 ->
-          # Bottom border
-          segment = Segment.new(bottom_border, state.style)
-
-          if padding > 0 do
-            padding_segment = Segment.new(String.duplicate(" ", padding))
-            Strip.new([padding_segment, segment, padding_segment])
-          else
-            Strip.new([segment])
-          end
-
-        row == text_y + 1 and not Enum.empty?(text_lines) ->
-          # Text content
-          text = List.first(text_lines)
-          padded_text = String.pad_trailing(text, content_width - 2)
-          line_content = "│" <> padded_text <> "│"
-          segment = Segment.new(line_content, state.style)
-
-          if padding > 0 do
-            padding_segment = Segment.new(String.duplicate(" ", padding))
-            Strip.new([padding_segment, segment, padding_segment])
-          else
-            Strip.new([segment])
-          end
-
-        true ->
-          # Empty content with side borders
-          empty_content = "│" <> String.duplicate(" ", content_width) <> "│"
-          segment = Segment.new(empty_content, state.style)
-
-          if padding > 0 do
-            padding_segment = Segment.new(String.duplicate(" ", padding))
-            Strip.new([padding_segment, segment, padding_segment])
-          else
-            Strip.new([segment])
-          end
-      end
+    Enum.map(0..(content_height + 1), fn row ->
+      text = border_row_text(row, content_height, text_y, text_lines, top_border, bottom_border, content_width)
+      padded_strip(Segment.new(text, state.style), padding)
     end)
+  end
+
+  defp border_row_text(0, _ch, _ty, _tl, top, _bottom, _cw), do: top
+  defp border_row_text(row, ch, _ty, _tl, _top, bottom, _cw) when row == ch + 1, do: bottom
+
+  defp border_row_text(row, _ch, text_y, text_lines, _top, _bottom, content_width)
+       when row == text_y + 1 and text_lines != [] do
+    "│" <> String.pad_trailing(List.first(text_lines), content_width - 2) <> "│"
+  end
+
+  defp border_row_text(_row, _ch, _ty, _tl, _top, _bottom, content_width) do
+    "│" <> String.duplicate(" ", content_width) <> "│"
+  end
+
+  defp padded_strip(segment, 0), do: Strip.new([segment])
+
+  defp padded_strip(segment, padding) do
+    padding_segment = Segment.new(String.duplicate(" ", padding))
+    Strip.new([padding_segment, segment, padding_segment])
   end
 
   defp render_without_border(state, content_width, content_height, padding) do
     text_lines = wrap_text(state.text, content_width)
     center_row = div(content_height, 2)
 
-    0..(content_height - 1)
-    |> Enum.map(fn row ->
-      line_text =
-        if row == center_row and not Enum.empty?(text_lines) do
-          # Center the text in the middle row
-          text = List.first(text_lines)
-          text_length = String.length(text)
-
-          if text_length <= content_width do
-            padding_left = div(content_width - text_length, 2)
-            padding_right = content_width - text_length - padding_left
-            String.duplicate(" ", padding_left) <> text <> String.duplicate(" ", padding_right)
-          else
-            String.slice(text, 0, content_width)
-          end
-        else
-          # Fill with background-colored spaces
-          String.duplicate(" ", content_width)
-        end
-
+    Enum.map(0..(content_height - 1), fn row ->
+      line_text = borderless_row_text(row, center_row, text_lines, content_width)
       segment = Segment.new(line_text, state.style)
-
-      if padding > 0 do
-        padding_segment = Segment.new(String.duplicate(" ", padding), state.style)
-        Strip.new([padding_segment, segment, padding_segment])
-      else
-        Strip.new([segment])
-      end
+      padded_strip_styled(segment, padding, state.style)
     end)
+  end
+
+  defp borderless_row_text(row, center_row, text_lines, content_width)
+       when row == center_row and text_lines != [] do
+    text = List.first(text_lines)
+    text_length = String.length(text)
+
+    if text_length <= content_width do
+      padding_left = div(content_width - text_length, 2)
+      padding_right = content_width - text_length - padding_left
+      String.duplicate(" ", padding_left) <> text <> String.duplicate(" ", padding_right)
+    else
+      String.slice(text, 0, content_width)
+    end
+  end
+
+  defp borderless_row_text(_row, _center_row, _text_lines, content_width) do
+    String.duplicate(" ", content_width)
+  end
+
+  defp padded_strip_styled(segment, 0, _style), do: Strip.new([segment])
+
+  defp padded_strip_styled(segment, padding, style) do
+    padding_segment = Segment.new(String.duplicate(" ", padding), style)
+    Strip.new([padding_segment, segment, padding_segment])
   end
 
   defp wrap_text(text, width) do

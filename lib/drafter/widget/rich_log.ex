@@ -79,24 +79,40 @@ defmodule Drafter.Widget.RichLog do
 
     classes = state.classes
     computed_opts = [classes: classes, style: state.style]
-    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
+
+    computed_opts =
+      if state.app_module,
+        do: Keyword.put(computed_opts, :app_module, state.app_module),
+        else: computed_opts
+
     computed = Computed.for_widget(:rich_log, state, computed_opts)
 
     default_fg = computed[:color] || {200, 200, 200}
     default_bg = computed[:background] || {30, 30, 30}
 
-    line_number_width = if state.show_line_numbers, do: String.length("#{length(state.lines)}") + 2, else: 0
+    line_number_width =
+      if state.show_line_numbers, do: String.length("#{length(state.lines)}") + 2, else: 0
+
     content_width = rect.width - line_number_width
 
     visible_lines = get_visible_lines(state, rect.height)
 
-    rendered_lines = Enum.with_index(visible_lines, fn line, idx ->
-      render_rich_line(line, idx, state, content_width, line_number_width, default_fg, default_bg)
-    end)
+    rendered_lines =
+      Enum.with_index(visible_lines, fn line, idx ->
+        render_rich_line(
+          line,
+          idx,
+          state,
+          content_width,
+          line_number_width,
+          default_fg,
+          default_bg
+        )
+      end)
 
     all_segments = List.flatten(rendered_lines)
 
-    if length(all_segments) > 0 do
+    if all_segments != [] do
       [Strip.new(all_segments)]
     else
       empty_line = String.duplicate(" ", rect.width)
@@ -108,47 +124,28 @@ defmodule Drafter.Widget.RichLog do
   @impl Drafter.Widget
   def handle_event(event, state) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
-
-    case event do
-      {:write, content} when is_binary(content) or is_tuple(content) ->
-        new_lines = add_line(state, content)
-        new_state = %{state | lines: new_lines}
-        new_state = if state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state
-        {:ok, new_state}
-
-      {:write_lines, lines} when is_list(lines) ->
-        new_lines = Enum.reduce(lines, state.lines, fn line, acc ->
-          add_line(%{state | lines: acc}, line)
-        end)
-        new_state = %{state | lines: new_lines}
-        new_state = if state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state
-        {:ok, new_state}
-
-      :clear ->
-        {:ok, %{state | lines: [], scroll_offset: 0}}
-
-      {:key, :end} ->
-        {:ok, scroll_to_bottom(state)}
-
-      {:key, :home} ->
-        {:ok, %{state | scroll_offset: 0}}
-
-      {:key, :page_down} ->
-        {:ok, scroll_down(state, 10)}
-
-      {:key, :page_up} ->
-        {:ok, scroll_up(state, 10)}
-
-      {:key, :down} ->
-        {:ok, scroll_down(state, 1)}
-
-      {:key, :up} ->
-        {:ok, scroll_up(state, 1)}
-
-      _ ->
-        {:noreply, state}
-    end
+    dispatch_rich_log_event(event, state)
   end
+
+  defp dispatch_rich_log_event({:write, content}, state) when is_binary(content) or is_tuple(content) do
+    new_state = %{state | lines: add_line(state, content)}
+    {:ok, if(state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state)}
+  end
+
+  defp dispatch_rich_log_event({:write_lines, lines}, state) when is_list(lines) do
+    new_lines = Enum.reduce(lines, state.lines, fn line, acc -> add_line(%{state | lines: acc}, line) end)
+    new_state = %{state | lines: new_lines}
+    {:ok, if(state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state)}
+  end
+
+  defp dispatch_rich_log_event(:clear, state), do: {:ok, %{state | lines: [], scroll_offset: 0}}
+  defp dispatch_rich_log_event({:key, :end}, state), do: {:ok, scroll_to_bottom(state)}
+  defp dispatch_rich_log_event({:key, :home}, state), do: {:ok, %{state | scroll_offset: 0}}
+  defp dispatch_rich_log_event({:key, :page_down}, state), do: {:ok, scroll_down(state, 10)}
+  defp dispatch_rich_log_event({:key, :page_up}, state), do: {:ok, scroll_up(state, 10)}
+  defp dispatch_rich_log_event({:key, :down}, state), do: {:ok, scroll_down(state, 1)}
+  defp dispatch_rich_log_event({:key, :up}, state), do: {:ok, scroll_up(state, 1)}
+  defp dispatch_rich_log_event(_, state), do: {:noreply, state}
 
   @impl Drafter.Widget
   def update(props, state) do
@@ -172,10 +169,13 @@ defmodule Drafter.Widget.RichLog do
   def from_component_opts(_args, opts) do
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
     %{
       lines: Keyword.get(opts, :lines, []),
       max_lines: Keyword.get(opts, :max_lines, 1000),
@@ -202,20 +202,29 @@ defmodule Drafter.Widget.RichLog do
   defp get_visible_lines(state, visible_count) do
     total_lines = length(state.lines)
 
-    lines_to_show = if state.reverse do
-      start_index = max(0, total_lines - visible_count - state.scroll_offset)
-      end_index = min(total_lines, start_index + visible_count)
-      Enum.slice(state.lines, start_index, end_index - start_index)
-    else
-      start_index = min(state.scroll_offset, max(0, total_lines - visible_count))
-      end_index = min(total_lines, start_index + visible_count)
-      Enum.slice(state.lines, start_index, end_index - start_index)
-    end
+    lines_to_show =
+      if state.reverse do
+        start_index = max(0, total_lines - visible_count - state.scroll_offset)
+        end_index = min(total_lines, start_index + visible_count)
+        Enum.slice(state.lines, start_index, end_index - start_index)
+      else
+        start_index = min(state.scroll_offset, max(0, total_lines - visible_count))
+        end_index = min(total_lines, start_index + visible_count)
+        Enum.slice(state.lines, start_index, end_index - start_index)
+      end
 
     lines_to_show
   end
 
-  defp render_rich_line({text, meta}, line_index, state, width, line_number_width, default_fg, default_bg) do
+  defp render_rich_line(
+         {text, meta},
+         line_index,
+         state,
+         width,
+         line_number_width,
+         default_fg,
+         default_bg
+       ) do
     fg = Map.get(meta, :color, default_fg)
     bg = Map.get(meta, :background, default_bg)
     bold = Map.get(meta, :bold, false)
@@ -225,36 +234,43 @@ defmodule Drafter.Widget.RichLog do
 
     base_style = %{fg: fg, bg: bg}
 
-    line_style = base_style
-    |> Map.put(:bold, bold)
-    |> Map.put(:dim, dim)
-    |> Map.put(:italic, italic)
-    |> Map.put(:underline, underline)
+    line_style =
+      base_style
+      |> Map.put(:bold, bold)
+      |> Map.put(:dim, dim)
+      |> Map.put(:italic, italic)
+      |> Map.put(:underline, underline)
 
-    line_number = if state.show_line_numbers do
-      total_lines = length(state.lines)
-      actual_index = if state.reverse do
-        total_lines - line_index
+    line_number =
+      if state.show_line_numbers do
+        total_lines = length(state.lines)
+
+        actual_index =
+          if state.reverse do
+            total_lines - line_index
+          else
+            line_index + 1
+          end
+
+        num = String.pad_trailing("#{actual_index} ", line_number_width, " ")
+        num_style = %{fg: {100, 100, 100}, bg: bg}
+        [Segment.new(num, num_style)]
       else
-        line_index + 1
+        []
       end
-      num = String.pad_trailing("#{actual_index} ", line_number_width, " ")
-      num_style = %{fg: {100, 100, 100}, bg: bg}
-      [Segment.new(num, num_style)]
-    else
-      []
-    end
 
-    wrapped = if state.wrap do
-      Text.wrap(text, width)
-    else
-      [Text.truncate(text, width)]
-    end
+    wrapped =
+      if state.wrap do
+        Text.wrap(text, width)
+      else
+        [Text.truncate(text, width)]
+      end
 
-    content_segments = Enum.map(wrapped, fn wrapped_line ->
-      padded = String.pad_trailing(wrapped_line, width, " ")
-      Segment.new(padded, line_style)
-    end)
+    content_segments =
+      Enum.map(wrapped, fn wrapped_line ->
+        padded = String.pad_trailing(wrapped_line, width, " ")
+        Segment.new(padded, line_style)
+      end)
 
     line_number ++ content_segments
   end

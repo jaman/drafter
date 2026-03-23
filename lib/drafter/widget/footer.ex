@@ -71,7 +71,7 @@ defmodule Drafter.Widget.Footer do
       end)
 
     segments =
-      if length(segments) > 0 do
+      if segments != [] do
         Enum.drop(segments, -1)
       else
         segments
@@ -92,10 +92,11 @@ defmodule Drafter.Widget.Footer do
   end
 
   def update(props, state) do
-    bindings = case Map.fetch(props, :bindings) do
-      {:ok, val} -> val
-      :error -> state.bindings
-    end
+    bindings =
+      case Map.fetch(props, :bindings) do
+        {:ok, val} -> val
+        :error -> state.bindings
+      end
 
     %{
       state
@@ -127,29 +128,21 @@ defmodule Drafter.Widget.Footer do
 
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
 
-  defp resolve_bindings(state) do
-    cond do
-      state.bindings != nil ->
-        state.bindings
+  defp resolve_bindings(%{bindings: bindings}) when bindings != nil, do: bindings
 
-      true ->
-        focused = Drafter.FocusRegistry.get()
+  defp resolve_bindings(state), do: resolve_module_bindings(state)
 
-        if focused != [] do
-          focused
-        else
-          active_module =
-            case Drafter.ScreenManager.get_active_screen() do
-              %{module: mod} when mod != nil -> mod
-              _ -> state.app_module
-            end
+  defp resolve_module_bindings(state) do
+    active_module =
+      case Drafter.ScreenManager.get_active_screen() do
+        %{module: mod} when mod != nil -> mod
+        _ -> state.app_module
+      end
 
-          if active_module && function_exported?(active_module, :keybindings, 0) do
-            active_module.keybindings()
-          else
-            []
-          end
-        end
+    if active_module && function_exported?(active_module, :keybindings, 0) do
+      active_module.keybindings()
+    else
+      []
     end
   end
 end

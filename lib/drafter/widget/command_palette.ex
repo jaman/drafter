@@ -59,53 +59,33 @@ defmodule Drafter.Widget.CommandPalette do
     Map.merge(state, props)
   end
 
-  def handle_event(event, state) do
-    case event do
-      {:key, :up} ->
-        new_index = max(0, state.selected_index - 1)
-        {:ok, %{state | selected_index: new_index}}
+  @command_actions %{
+    "Toggle theme" => :toggle_theme,
+    "Quit application" => :quit_application,
+    "Show help" => :show_help,
+    "Refresh screen" => :refresh_screen,
+    "About" => :show_about,
+    "Settings" => :show_settings
+  }
 
-      {:key, :down} ->
-        max_index = length(state.commands) - 1
-        new_index = min(max_index, state.selected_index + 1)
-        {:ok, %{state | selected_index: new_index}}
+  def handle_event({:key, :up}, state), do: {:ok, %{state | selected_index: max(0, state.selected_index - 1)}}
 
-      {:key, :enter} ->
-        selected_command = Enum.at(state.commands, state.selected_index)
+  def handle_event({:key, :down}, state) do
+    {:ok, %{state | selected_index: min(length(state.commands) - 1, state.selected_index + 1)}}
+  end
 
-        case selected_command do
-          {"Toggle theme", _} ->
-            {:action, :toggle_theme}
-
-          {"Quit application", _} ->
-            {:action, :quit_application}
-
-          {"Show help", _} ->
-            {:action, :show_help}
-
-          {"Refresh screen", _} ->
-            {:action, :refresh_screen}
-
-          {"About", _} ->
-            {:action, :show_about}
-
-          {"Settings", _} ->
-            {:action, :show_settings}
-
-          _ ->
-            {:close}
-        end
-
-      {:key, :escape} ->
-        {:close}
-
-      {:key, :q} ->
-        {:close}
-
-      _ ->
-        {:noreply, state}
+  def handle_event({:key, :enter}, state) do
+    case Enum.at(state.commands, state.selected_index) do
+      {name, _} -> Map.get(@command_actions, name, :close) |> wrap_action()
+      _ -> {:close}
     end
   end
+
+  def handle_event({:key, key}, _state) when key in [:escape, :q], do: {:close}
+  def handle_event(_, state), do: {:noreply, state}
+
+  defp wrap_action(:close), do: {:close}
+  defp wrap_action(action), do: {:action, action}
 
   defp render_command_palette(state, rect) do
     # Calculate modal size (centered, 60% width, 50% height)
@@ -121,26 +101,23 @@ defmodule Drafter.Widget.CommandPalette do
   defp create_combined_overlay(state, rect, modal_x, modal_y, modal_width, modal_height) do
     overlay_computed = Computed.for_part(:command_palette, state, :overlay)
     overlay_style = Computed.to_segment_style(overlay_computed)
-
     modal_content = create_modal_content_strips(state, modal_width, modal_height)
+    empty_strip = Strip.new([Segment.new(String.duplicate(" ", rect.width), overlay_style)])
 
-    0..(rect.height - 1)
-    |> Enum.map(fn y ->
-      if y >= modal_y and y < modal_y + modal_height do
-        modal_line_index = y - modal_y
-
-        if modal_line_index < length(modal_content) do
-          modal_strip = Enum.at(modal_content, modal_line_index)
-          create_positioned_modal_strip(modal_strip, modal_x, rect.width, overlay_style)
-        else
-          segment = Segment.new(String.duplicate(" ", rect.width), overlay_style)
-          Strip.new([segment])
-        end
-      else
-        segment = Segment.new(String.duplicate(" ", rect.width), overlay_style)
-        Strip.new([segment])
-      end
+    Enum.map(0..(rect.height - 1), fn y ->
+      render_overlay_row(y, modal_y, modal_height, modal_content, modal_x, rect.width, overlay_style, empty_strip)
     end)
+  end
+
+  defp render_overlay_row(y, modal_y, modal_height, modal_content, modal_x, screen_width, overlay_style, empty_strip) do
+    modal_line_index = y - modal_y
+
+    if y >= modal_y and y < modal_y + modal_height and modal_line_index < length(modal_content) do
+      modal_strip = Enum.at(modal_content, modal_line_index)
+      create_positioned_modal_strip(modal_strip, modal_x, screen_width, overlay_style)
+    else
+      empty_strip
+    end
   end
 
   defp create_positioned_modal_strip(modal_strip, modal_x, screen_width, overlay_style) do

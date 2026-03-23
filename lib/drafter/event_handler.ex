@@ -1,4 +1,6 @@
 defmodule Drafter.EventHandler do
+  @moduledoc false
+
   use GenServer
 
   defstruct [:handlers, :monitors]

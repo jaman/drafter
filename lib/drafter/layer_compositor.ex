@@ -86,12 +86,13 @@ defmodule Drafter.LayerCompositor do
   ]
 
   def widget_layer(widget_id, strips, bounds, z_base \\ 0, widget_module \\ nil) do
-    z_index = cond do
-      :erlang.atom_to_binary(widget_id) |> String.starts_with?("footer") -> z_base + 50
-      :erlang.atom_to_binary(widget_id) |> String.starts_with?("header") -> z_base + 40
-      widget_module in @container_modules -> z_base + 10
-      true -> z_base + 20
-    end
+    z_index =
+      cond do
+        :erlang.atom_to_binary(widget_id) |> String.starts_with?("footer") -> z_base + 50
+        :erlang.atom_to_binary(widget_id) |> String.starts_with?("header") -> z_base + 40
+        widget_module in @container_modules -> z_base + 10
+        true -> z_base + 20
+      end
 
     create_layer(widget_id, strips, bounds, z_index)
   end
@@ -135,7 +136,7 @@ defmodule Drafter.LayerCompositor do
     canvas_segments = canvas_strip.segments || []
     layer_segments = layer_strip.segments || []
 
-    if length(layer_segments) == 0 or x_offset < 0 or x_offset >= viewport_width do
+    if layer_segments == [] or x_offset < 0 or x_offset >= viewport_width do
       canvas_strip
     else
       layer_width = Strip.width(layer_strip)
@@ -168,7 +169,7 @@ defmodule Drafter.LayerCompositor do
     canvas_graphemes = build_grapheme_list(canvas_segments)
     layer_graphemes = build_grapheme_list(layer_segments)
 
-    default_style = if length(canvas_segments) > 0, do: hd(canvas_segments).style, else: %{}
+    default_style = if canvas_segments != [], do: hd(canvas_segments).style, else: %{}
 
     layer_end = min(layer_x + layer_width, viewport_width)
 
@@ -190,7 +191,7 @@ defmodule Drafter.LayerCompositor do
       final_graphemes
       |> Enum.chunk_by(fn {_col, _char, style} -> style end)
       |> Enum.map(fn chunk ->
-        text = chunk |> Enum.map(fn {_col, ch, _style} -> ch end) |> Enum.join("")
+        text = Enum.map_join(chunk, fn {_col, ch, _style} -> ch end)
         {_col, _char, style} = hd(chunk)
         Segment.new(text, style)
       end)
@@ -225,26 +226,7 @@ defmodule Drafter.LayerCompositor do
     in_layer_region = col >= layer_x and col < layer_end
 
     {grapheme, style, width, new_canvas, new_layer} =
-      if in_layer_region do
-        layer_col = col - layer_x
-
-        case pop_grapheme_at_col(layer_graphemes, layer_col) do
-          {:ok, {g, s, w}, rest} ->
-            {_, new_canvas_rest} = skip_columns(canvas_graphemes, col, w)
-            {g, s, w, new_canvas_rest, rest}
-
-          :none ->
-            case pop_grapheme_at_col(canvas_graphemes, col) do
-              {:ok, {g, s, w}, rest} -> {g, s, w, rest, layer_graphemes}
-              :none -> {" ", default_style, 1, canvas_graphemes, layer_graphemes}
-            end
-        end
-      else
-        case pop_grapheme_at_col(canvas_graphemes, col) do
-          {:ok, {g, s, w}, rest} -> {g, s, w, rest, layer_graphemes}
-          :none -> {" ", default_style, 1, canvas_graphemes, layer_graphemes}
-        end
-      end
+      resolve_column(in_layer_region, col, layer_x, canvas_graphemes, layer_graphemes, default_style)
 
     new_acc = [{col, grapheme, style} | acc]
     next_col = col + width
@@ -267,27 +249,51 @@ defmodule Drafter.LayerCompositor do
     {graphemes, _col} =
       Enum.reduce(segments, {[], 0}, fn segment, {acc, col} ->
         parts = Regex.split(ansi_pattern, segment.text, include_captures: true)
-
-        {part_acc, part_col, _current_style} =
-          Enum.reduce(parts, {acc, col, segment.style}, fn part, {g_acc, current_col, style} ->
-            if Regex.match?(ansi_pattern, part) do
-              new_style = parse_ansi_to_style(part, style)
-              {g_acc, current_col, new_style}
-            else
-              part
-              |> String.graphemes()
-              |> Enum.reduce({g_acc, current_col, style}, fn grapheme, {ga, cc, s} ->
-                width = char_width(grapheme)
-                {[{cc, grapheme, s, width} | ga], cc + width, s}
-              end)
-            end
-          end)
-
+        {part_acc, part_col, _} = process_ansi_parts(parts, acc, col, segment.style, ansi_pattern)
         {part_acc, part_col}
       end)
 
     Enum.reverse(graphemes)
   end
+
+  defp process_ansi_parts(parts, acc, col, style, ansi_pattern) do
+    Enum.reduce(parts, {acc, col, style}, fn part, {g_acc, current_col, current_style} ->
+      if Regex.match?(ansi_pattern, part) do
+        {g_acc, current_col, parse_ansi_to_style(part, current_style)}
+      else
+        expand_graphemes(part, g_acc, current_col, current_style)
+      end
+    end)
+  end
+
+  defp expand_graphemes(text, acc, col, style) do
+    text
+    |> String.graphemes()
+    |> Enum.reduce({acc, col, style}, fn grapheme, {ga, cc, s} ->
+      width = char_width(grapheme)
+      {[{cc, grapheme, s, width} | ga], cc + width, s}
+    end)
+  end
+
+  @ansi_style_map %{
+    "1" => {:bold, true},
+    "2" => {:dim, true},
+    "3" => {:italic, true},
+    "4" => {:underline, true},
+    "7" => {:reverse, true}
+  }
+
+  @ansi_fg_map %{
+    "30" => {0, 0, 0},
+    "31" => {205, 49, 49},
+    "32" => {13, 188, 121},
+    "33" => {229, 229, 16},
+    "34" => {36, 114, 200},
+    "35" => {188, 63, 188},
+    "36" => {17, 168, 205},
+    "37" => {229, 229, 229},
+    "90" => {128, 128, 128}
+  }
 
   defp parse_ansi_to_style("\e[0m", _current_style), do: %{}
 
@@ -296,25 +302,22 @@ defmodule Drafter.LayerCompositor do
     codes = String.split(code_str, ";")
 
     Enum.reduce(codes, current_style, fn code, style ->
-      case code do
-        "1" -> Map.put(style, :bold, true)
-        "2" -> Map.put(style, :dim, true)
-        "3" -> Map.put(style, :italic, true)
-        "4" -> Map.put(style, :underline, true)
-        "7" -> Map.put(style, :reverse, true)
-        "90" -> Map.put(style, :fg, {128, 128, 128})
-        "30" -> Map.put(style, :fg, {0, 0, 0})
-        "31" -> Map.put(style, :fg, {205, 49, 49})
-        "32" -> Map.put(style, :fg, {13, 188, 121})
-        "33" -> Map.put(style, :fg, {229, 229, 16})
-        "34" -> Map.put(style, :fg, {36, 114, 200})
-        "35" -> Map.put(style, :fg, {188, 63, 188})
-        "36" -> Map.put(style, :fg, {17, 168, 205})
-        "37" -> Map.put(style, :fg, {229, 229, 229})
-        _ ->
-          parse_extended_color(code, codes, style)
-      end
+      apply_ansi_code(code, codes, style)
     end)
+  end
+
+  defp apply_ansi_code(code, codes, style) do
+    cond do
+      Map.has_key?(@ansi_style_map, code) ->
+        {key, val} = Map.fetch!(@ansi_style_map, code)
+        Map.put(style, key, val)
+
+      Map.has_key?(@ansi_fg_map, code) ->
+        Map.put(style, :fg, Map.fetch!(@ansi_fg_map, code))
+
+      true ->
+        parse_extended_color(code, codes, style)
+    end
   end
 
   defp parse_extended_color(_code, codes, style) do
@@ -327,6 +330,30 @@ defmodule Drafter.LayerCompositor do
 
       _ ->
         style
+    end
+  end
+
+  defp resolve_column(true, col, layer_x, canvas_graphemes, layer_graphemes, default_style) do
+    layer_col = col - layer_x
+
+    case pop_grapheme_at_col(layer_graphemes, layer_col) do
+      {:ok, {g, s, w}, rest} ->
+        {_, new_canvas_rest} = skip_columns(canvas_graphemes, col, w)
+        {g, s, w, new_canvas_rest, rest}
+
+      :none ->
+        pop_canvas_or_default(canvas_graphemes, col, layer_graphemes, default_style)
+    end
+  end
+
+  defp resolve_column(false, col, _layer_x, canvas_graphemes, layer_graphemes, default_style) do
+    pop_canvas_or_default(canvas_graphemes, col, layer_graphemes, default_style)
+  end
+
+  defp pop_canvas_or_default(canvas_graphemes, col, layer_graphemes, default_style) do
+    case pop_grapheme_at_col(canvas_graphemes, col) do
+      {:ok, {g, s, w}, rest} -> {g, s, w, rest, layer_graphemes}
+      :none -> {" ", default_style, 1, canvas_graphemes, layer_graphemes}
     end
   end
 
@@ -348,27 +375,5 @@ defmodule Drafter.LayerCompositor do
     {:ok, remaining}
   end
 
-  defp char_width(grapheme) do
-    case String.to_charlist(grapheme) do
-      [codepoint | _] ->
-        cond do
-          codepoint >= 0x1F300 and codepoint <= 0x1F9FF -> 2
-          codepoint >= 0x2600 and codepoint <= 0x26FF -> 2
-          codepoint >= 0x2700 and codepoint <= 0x27BF -> 2
-          codepoint >= 0x1F600 and codepoint <= 0x1F64F -> 2
-          codepoint >= 0x1F680 and codepoint <= 0x1F6FF -> 2
-          codepoint >= 0x1100 and codepoint <= 0x11FF -> 2
-          codepoint >= 0x2E80 and codepoint <= 0x9FFF -> 2
-          codepoint >= 0xAC00 and codepoint <= 0xD7AF -> 2
-          codepoint >= 0xFE10 and codepoint <= 0xFE1F -> 2
-          codepoint >= 0xFE30 and codepoint <= 0xFE6F -> 2
-          codepoint >= 0xFF00 and codepoint <= 0xFF60 -> 2
-          codepoint >= 0xFFE0 and codepoint <= 0xFFE6 -> 2
-          true -> 1
-        end
-
-      [] ->
-        0
-    end
-  end
+  defp char_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
 end

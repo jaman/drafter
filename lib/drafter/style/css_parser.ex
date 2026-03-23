@@ -116,8 +116,6 @@ defmodule Drafter.Style.CSSParser do
 
         with {:ok, properties} <- parse_properties(properties_str) do
           {:ok, %{selector_strings: selector_strings, properties: properties}}
-        else
-          {:error, _} = error -> error
         end
 
       _ ->
@@ -156,27 +154,28 @@ defmodule Drafter.Style.CSSParser do
     end
   end
 
+  @property_key_map %{
+    "color" => :color,
+    "background" => :background,
+    "background-color" => :background,
+    "border-color" => :border_color,
+    "bold" => :bold,
+    "dim" => :dim,
+    "italic" => :italic,
+    "underline" => :underline,
+    "reverse" => :reverse,
+    "width" => :width,
+    "height" => :height,
+    "padding" => :padding,
+    "margin" => :margin,
+    "border" => :border,
+    "text-align" => :text_align,
+    "text_align" => :text_align,
+    "opacity" => :opacity
+  }
+
   defp normalize_property_key(key) do
-    case key do
-      "color" -> :color
-      "background" -> :background
-      "background-color" -> :background
-      "border-color" -> :border_color
-      "bold" -> :bold
-      "dim" -> :dim
-      "italic" -> :italic
-      "underline" -> :underline
-      "reverse" -> :reverse
-      "width" -> :width
-      "height" -> :height
-      "padding" -> :padding
-      "margin" -> :margin
-      "border" -> :border
-      "text-align" -> :text_align
-      "text_align" -> :text_align
-      "opacity" -> :opacity
-      _ -> String.to_atom(key)
-    end
+    Map.get(@property_key_map, key, String.to_atom(key))
   end
 
   defp parse_value(value_str) do

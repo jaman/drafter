@@ -260,282 +260,258 @@ defmodule Drafter.Widget.TextInput do
   end
 
   defp handle_editable_event(event, state) do
-    case event do
-      {:key, :left, [:shift]} when state.focused ->
-        new_position = max(0, state.cursor_position - 1)
-        new_state = extend_selection(state, new_position) |> adjust_scroll_offset()
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :right, [:shift]} when state.focused ->
-        text_length = String.length(state.text)
-        new_position = min(text_length, state.cursor_position + 1)
-        new_state = extend_selection(state, new_position) |> adjust_scroll_offset()
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :home, [:shift]} when state.focused ->
-        new_state = extend_selection(state, 0) |> adjust_scroll_offset()
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :end, [:shift]} when state.focused ->
-        text_length = String.length(state.text)
-        new_state = extend_selection(state, text_length) |> adjust_scroll_offset()
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :left} when state.focused ->
-        new_position = max(0, state.cursor_position - 1)
-
-        new_state =
-          clear_selection(state)
-          |> Map.put(:cursor_position, new_position)
-          |> adjust_scroll_offset()
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :right} when state.focused ->
-        text_length = String.length(state.text)
-        new_position = min(text_length, state.cursor_position + 1)
-
-        new_state =
-          clear_selection(state)
-          |> Map.put(:cursor_position, new_position)
-          |> adjust_scroll_offset()
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :home} when state.focused ->
-        new_state =
-          clear_selection(state) |> Map.put(:cursor_position, 0) |> Map.put(:scroll_offset, 0)
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :end} when state.focused ->
-        text_length = String.length(state.text)
-
-        new_state =
-          clear_selection(state)
-          |> Map.put(:cursor_position, text_length)
-          |> adjust_scroll_offset()
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :backspace} when state.focused ->
-        if has_selection?(state) do
-          delete_selection(state)
-        else
-          if state.cursor_position > 0 do
-            {before, after_text} = String.split_at(state.text, state.cursor_position)
-            new_text = String.slice(before, 0..-2//1) <> after_text
-
-            new_state =
-              %{state | text: new_text, cursor_position: state.cursor_position - 1}
-              |> adjust_scroll_offset()
-
-            trigger_change(new_state)
-            {:ok, new_state}
-          else
-            {:noreply, state}
-          end
-        end
-
-      {:key, :delete} when state.focused ->
-        if has_selection?(state) do
-          delete_selection(state)
-        else
-          if state.cursor_position < String.length(state.text) do
-            {before, after_text} = String.split_at(state.text, state.cursor_position)
-            new_text = before <> String.slice(after_text, 1..-1//1)
-            new_state = %{state | text: new_text}
-            trigger_change(new_state)
-            {:ok, new_state}
-          else
-            {:noreply, state}
-          end
-        end
-
-      {:key, :c, [:ctrl]} when state.focused ->
-        if has_selection?(state) do
-          copy_selection(state)
-        end
-
-        {:noreply, state}
-
-      {:key, :x, [:ctrl]} when state.focused ->
-        if has_selection?(state) do
-          new_state = cut_selection(state)
-          {:ok, new_state}
-        else
-          {:noreply, state}
-        end
-
-      {:key, :v, [:ctrl]} when state.focused ->
-        paste_from_clipboard(state)
-
-      {:key, :a, [:ctrl]} when state.focused ->
-        text_length = String.length(state.text)
-
-        new_state = %{
-          state
-          | selection_start: 0,
-            selection_end: text_length,
-            cursor_position: text_length
-        }
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :u, [:ctrl]} when state.focused ->
-        after_text = String.slice(state.text, state.cursor_position..-1//1)
-        new_state = %{state | text: after_text, cursor_position: 0, scroll_offset: 0}
-        |> clear_selection()
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :k, [:ctrl]} when state.focused ->
-        before_text = String.slice(state.text, 0, state.cursor_position)
-        new_state = %{state | text: before_text}
-        |> clear_selection()
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :w, [:ctrl]} when state.focused ->
-        new_state = delete_word_left(state)
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:key, :enter} when state.focused and state.on_submit != nil ->
-        new_state = %{state | cursor_position: 0, scroll_offset: 0}
-        actions =
-          case trigger_submit(state) do
-            {:app_callback, _, _} = cb -> [cb]
-            _ -> []
-          end
-        {:ok, new_state, actions}
-
-      {:key, :enter} when state.focused ->
-        {:bubble, state}
-
-      {:key, :d, [:ctrl]} when state.focused ->
-        {:noreply, state}
-
-      {:key, :" "} when state.focused ->
-        if can_insert_char?(state) and char_allowed?(state, " ") do
-          if has_selection?(state) do
-            insert_char_replace_selection(state, " ")
-          else
-            insert_char(state, " ")
-          end
-        else
-          {:noreply, state}
-        end
-
-      {:key, key, [:ctrl]} when state.focused and key in [:left, :right] ->
-        handle_word_navigation(state, key)
-
-      {:key, key, [:ctrl, :shift]} when state.focused and key in [:left, :right] ->
-        handle_word_selection(state, key)
-
-      {:key, _key, [:ctrl]} when state.focused ->
-        {:bubble, state}
-
-      {:key, _key, [:ctrl | _]} when state.focused ->
-        {:bubble, state}
-
-      {:char, char} when state.focused and is_integer(char) ->
-        char_str = <<char::utf8>>
-
-        if printable_char?(char_str) and can_insert_char?(state) and char_allowed?(state, char_str) do
-          if has_selection?(state) do
-            insert_char_replace_selection(state, char_str)
-          else
-            insert_char(state, char_str)
-          end
-        else
-          {:noreply, state}
-        end
-
-      {:key, key} when state.focused and is_atom(key) ->
-        char = Atom.to_string(key)
-
-        if printable_char?(char) and can_insert_char?(state) and char_allowed?(state, char) do
-          if has_selection?(state) do
-            insert_char_replace_selection(state, char)
-          else
-            insert_char(state, char)
-          end
-        else
-          {:noreply, state}
-        end
-
-      {:mouse, %{type: :mouse_up, x: x}} ->
-        click_pos = max(0, x - 1)
-        actual_pos = min(click_pos + state.scroll_offset, String.length(state.text))
-
-        new_state =
-          clear_selection(state)
-          |> Map.put(:focused, true)
-          |> Map.put(:cursor_position, actual_pos)
-          |> adjust_scroll_offset()
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      {:mouse, %{type: :drag, x: x}} ->
-        drag_pos = max(0, x - 1)
-        actual_pos = min(drag_pos + state.scroll_offset, String.length(state.text))
-
-        new_state =
-          state
-          |> Map.put(:focused, true)
-          |> Map.put(:cursor_position, actual_pos)
-          |> extend_selection(actual_pos)
-          |> adjust_scroll_offset()
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      :activate ->
-        {:ok, %{state | focused: true}}
-
-      {:focus} ->
-        new_state =
-          if state.select_on_focus do
-            text_length = String.length(state.text)
-            %{state | focused: true, selection_start: 0, selection_end: text_length, cursor_position: text_length}
-          else
-            %{state | focused: true}
-          end
-        {:ok, new_state}
-
-      {:blur} ->
-        new_state = %{state | focused: false, touched: true}
-        new_state = validate_if_touched(new_state)
-        {:ok, new_state}
-
-      :validate ->
-        new_state = do_validate(state)
-        {:ok, new_state}
-
-      :clear_error ->
-        {:ok, %{state | error: nil}}
-
-      _ ->
-        {:noreply, state}
+    if state.focused do
+      handle_focused_event(event, state)
+    else
+      handle_unfocused_event(event, state)
     end
+  end
+
+  defp handle_unfocused_event(:activate, state), do: {:ok, %{state | focused: true}}
+  defp handle_unfocused_event({:focus}, state), do: handle_focus_event(state)
+  defp handle_unfocused_event({:blur}, state), do: handle_blur_event(state)
+  defp handle_unfocused_event({:mouse, %{type: :mouse_up, x: x}}, state), do: handle_mouse_click(state, x)
+  defp handle_unfocused_event(:validate, state), do: {:ok, do_validate(state)}
+  defp handle_unfocused_event(:clear_error, state), do: {:ok, %{state | error: nil}}
+  defp handle_unfocused_event(_, state), do: {:noreply, state}
+
+  defp handle_focused_event({:key, dir, [:shift]}, state) when dir in [:left, :right, :home, :end] do
+    handle_shift_selection(state, dir)
+  end
+
+  defp handle_focused_event({:key, dir}, state) when dir in [:left, :right, :home, :end] do
+    handle_cursor_move(state, dir)
+  end
+
+  defp handle_focused_event({:key, :backspace}, state), do: handle_backspace(state)
+  defp handle_focused_event({:key, :delete}, state), do: handle_delete_key(state)
+  defp handle_focused_event({:key, key, [:ctrl]}, state), do: handle_ctrl_key(state, key)
+  defp handle_focused_event({:key, key, [:ctrl, :shift]}, state) when key in [:left, :right], do: handle_word_selection(state, key)
+  defp handle_focused_event({:key, _key, [:ctrl | _]}, state), do: {:bubble, state}
+
+  defp handle_focused_event({:key, :enter}, state) when state.on_submit != nil do
+    new_state = %{state | cursor_position: 0, scroll_offset: 0}
+    actions =
+      case trigger_submit(state) do
+        {:app_callback, _, _} = cb -> [cb]
+        _ -> []
+      end
+    {:ok, new_state, actions}
+  end
+
+  defp handle_focused_event({:key, :enter}, state), do: {:bubble, state}
+
+  defp handle_focused_event({:key, :" "}, state) do
+    try_insert_char(state, " ")
+  end
+
+  defp handle_focused_event({:char, char}, state) when is_integer(char) do
+    try_insert_char(state, <<char::utf8>>)
+  end
+
+  defp handle_focused_event({:key, key}, state) when is_atom(key) do
+    try_insert_char(state, Atom.to_string(key))
+  end
+
+  defp handle_focused_event({:mouse, %{type: :mouse_up, x: x}}, state), do: handle_mouse_click(state, x)
+  defp handle_focused_event({:mouse, %{type: :drag, x: x}}, state), do: handle_mouse_drag(state, x)
+  defp handle_focused_event(:activate, state), do: {:ok, %{state | focused: true}}
+  defp handle_focused_event({:focus}, state), do: handle_focus_event(state)
+  defp handle_focused_event({:blur}, state), do: handle_blur_event(state)
+  defp handle_focused_event(:validate, state), do: {:ok, do_validate(state)}
+  defp handle_focused_event(:clear_error, state), do: {:ok, %{state | error: nil}}
+  defp handle_focused_event(_, state), do: {:noreply, state}
+
+  defp handle_shift_selection(state, :left) do
+    new_position = max(0, state.cursor_position - 1)
+    new_state = extend_selection(state, new_position) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_shift_selection(state, :right) do
+    new_position = min(String.length(state.text), state.cursor_position + 1)
+    new_state = extend_selection(state, new_position) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_shift_selection(state, :home) do
+    new_state = extend_selection(state, 0) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_shift_selection(state, :end) do
+    new_state = extend_selection(state, String.length(state.text)) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_cursor_move(state, :left) do
+    new_position = max(0, state.cursor_position - 1)
+    new_state = clear_selection(state) |> Map.put(:cursor_position, new_position) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_cursor_move(state, :right) do
+    new_position = min(String.length(state.text), state.cursor_position + 1)
+    new_state = clear_selection(state) |> Map.put(:cursor_position, new_position) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_cursor_move(state, :home) do
+    new_state = clear_selection(state) |> Map.put(:cursor_position, 0) |> Map.put(:scroll_offset, 0)
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_cursor_move(state, :end) do
+    text_length = String.length(state.text)
+    new_state = clear_selection(state) |> Map.put(:cursor_position, text_length) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_backspace(state) do
+    if has_selection?(state) do
+      delete_selection(state)
+    else
+      delete_char_before_cursor(state)
+    end
+  end
+
+  defp delete_char_before_cursor(%{cursor_position: 0} = state), do: {:noreply, state}
+
+  defp delete_char_before_cursor(state) do
+    {before, after_text} = String.split_at(state.text, state.cursor_position)
+    new_text = String.slice(before, 0..-2//1) <> after_text
+    new_state = %{state | text: new_text, cursor_position: state.cursor_position - 1} |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_delete_key(state) do
+    if has_selection?(state) do
+      delete_selection(state)
+    else
+      delete_char_at_cursor(state)
+    end
+  end
+
+  defp delete_char_at_cursor(state) do
+    if state.cursor_position < String.length(state.text) do
+      {before, after_text} = String.split_at(state.text, state.cursor_position)
+      new_text = before <> String.slice(after_text, 1..-1//1)
+      new_state = %{state | text: new_text}
+      trigger_change(new_state)
+      {:ok, new_state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  defp handle_ctrl_key(state, :c) do
+    if has_selection?(state), do: copy_selection(state)
+    {:noreply, state}
+  end
+
+  defp handle_ctrl_key(state, :x) do
+    if has_selection?(state), do: {:ok, cut_selection(state)}, else: {:noreply, state}
+  end
+
+  defp handle_ctrl_key(state, :v), do: paste_from_clipboard(state)
+
+  defp handle_ctrl_key(state, :a) do
+    text_length = String.length(state.text)
+    new_state = %{state | selection_start: 0, selection_end: text_length, cursor_position: text_length}
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_ctrl_key(state, :u) do
+    after_text = String.slice(state.text, state.cursor_position..-1//1)
+    new_state = %{state | text: after_text, cursor_position: 0, scroll_offset: 0} |> clear_selection()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_ctrl_key(state, :k) do
+    before_text = String.slice(state.text, 0, state.cursor_position)
+    new_state = %{state | text: before_text} |> clear_selection()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_ctrl_key(state, :w) do
+    new_state = delete_word_left(state)
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_ctrl_key(state, key) when key in [:left, :right], do: handle_word_navigation(state, key)
+  defp handle_ctrl_key(state, :d), do: {:noreply, state}
+  defp handle_ctrl_key(state, _key), do: {:bubble, state}
+
+  defp try_insert_char(state, char_str) do
+    if printable_char?(char_str) and can_insert_char?(state) and char_allowed?(state, char_str) do
+      if has_selection?(state) do
+        insert_char_replace_selection(state, char_str)
+      else
+        insert_char(state, char_str)
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
+  defp handle_mouse_click(state, x) do
+    click_pos = max(0, x - 1)
+    actual_pos = min(click_pos + state.scroll_offset, String.length(state.text))
+    new_state = clear_selection(state) |> Map.put(:focused, true) |> Map.put(:cursor_position, actual_pos) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_mouse_drag(state, x) do
+    drag_pos = max(0, x - 1)
+    actual_pos = min(drag_pos + state.scroll_offset, String.length(state.text))
+    new_state = state |> Map.put(:focused, true) |> Map.put(:cursor_position, actual_pos) |> extend_selection(actual_pos) |> adjust_scroll_offset()
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_focus_event(state) do
+    new_state =
+      if state.select_on_focus do
+        text_length = String.length(state.text)
+        %{state | focused: true, selection_start: 0, selection_end: text_length, cursor_position: text_length}
+      else
+        %{state | focused: true}
+      end
+    {:ok, new_state}
+  end
+
+  defp handle_blur_event(state) do
+    new_state = %{state | focused: false, touched: true}
+    new_state = validate_if_touched(new_state)
+    {:ok, new_state}
   end
 
   @impl Drafter.Widget
   def update(props, state) do
+    bound_text =
+      if state.focused do
+        state.text
+      else
+        normalize_text_prop(Map.get(props, :text, state.text), state.text)
+      end
+
     %{
       state
-      | text: normalize_text_prop(Map.get(props, :text, state.text), state.text),
+      | text: bound_text,
         placeholder: Map.get(props, :placeholder, state.placeholder),
         focused: Map.get(props, :focused, state.focused),
         style: Map.get(props, :style, state.style),
@@ -577,14 +553,7 @@ defmodule Drafter.Widget.TextInput do
       c when is_binary(c) -> String.to_atom(c)
       c when is_atom(c) -> c
     end)
-    on_submit_fn = if on_submit do
-      fn {text, _vr} ->
-        Drafter.Widget.Callback.wrap_1(on_submit).(text)
-        if keep_focus, do: send(session_pid, {:focus_widget, widget_id})
-      end
-    else
-      nil
-    end
+    on_submit_fn = build_submit_fn(on_submit, keep_focus, session_pid, widget_id)
     %{
       text: value,
       placeholder: Keyword.get(opts, :placeholder, ""),
@@ -653,13 +622,22 @@ defmodule Drafter.Widget.TextInput do
         pattern -> Regex.match?(pattern, char)
       end
 
-    if not type_ok do
-      false
-    else
+    if type_ok do
       case state.restrict do
         nil -> true
         pattern -> Regex.match?(pattern, char)
       end
+    else
+      false
+    end
+  end
+
+  defp build_submit_fn(nil, _keep_focus, _session_pid, _widget_id), do: nil
+
+  defp build_submit_fn(on_submit, keep_focus, session_pid, widget_id) do
+    fn {text, _vr} ->
+      Drafter.Widget.Callback.wrap_1(on_submit).(text)
+      if keep_focus, do: send(session_pid, {:focus_widget, widget_id})
     end
   end
 

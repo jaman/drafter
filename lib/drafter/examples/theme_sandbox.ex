@@ -1,4 +1,5 @@
 defmodule Drafter.Examples.ThemeSandbox do
+  @moduledoc false
   use Drafter.App
   import Drafter.App
 

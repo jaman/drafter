@@ -81,26 +81,50 @@ defmodule Drafter.Terminal.ANSI do
   defp parse_sequence("", events), do: {Enum.reverse(events), ""}
 
   defp parse_sequence(buffer, events) do
+    case parse_bracketed_paste(buffer) do
+      {:bracketed_paste, content, rest} -> parse_sequence(rest, [{:bracketed_paste, content} | events])
+      :no_match -> parse_sequence_match(buffer, events)
+    end
+  end
+
+  defp parse_sequence_match(buffer, events) do
     case find_longest_match(buffer) do
-      {:ignore, rest} ->
-        parse_sequence(rest, events)
+      {:ignore, rest} -> parse_sequence(rest, events)
+      {event, rest} -> parse_sequence(rest, [event | events])
+      :no_match -> parse_sequence_char(buffer, events)
+    end
+  end
 
-      {event, rest} ->
-        parse_sequence(rest, [event | events])
+  defp parse_sequence_char(<<char::utf8, rest::binary>>, events) when char >= 32 and char <= 126 do
+    parse_sequence(rest, [{:key, String.to_atom(<<char::utf8>>)} | events])
+  end
 
-      :no_match ->
-        case buffer do
-          <<char::utf8, rest::binary>> when char >= 32 and char <= 126 ->
-            key_atom = String.to_atom(<<char::utf8>>)
-            event = {:key, key_atom}
-            parse_sequence(rest, [event | events])
+  defp parse_sequence_char(<<char::utf8, rest::binary>>, events) do
+    parse_sequence(rest, [{:char, char} | events])
+  end
 
-          <<_char::utf8, rest::binary>> ->
-            parse_sequence(rest, events)
+  defp parse_sequence_char(incomplete, events) do
+    {Enum.reverse(events), incomplete}
+  end
 
-          incomplete ->
-            {Enum.reverse(events), incomplete}
-        end
+  defp parse_bracketed_paste(buffer) do
+    start_seq = "\e[200~"
+    end_seq = "\e[201~"
+
+    if String.starts_with?(buffer, start_seq) do
+      <<_::binary-size(byte_size(start_seq)), after_start::binary>> = buffer
+
+      case :binary.match(after_start, end_seq) do
+        {pos, _len} ->
+          content = binary_part(after_start, 0, pos)
+          rest = binary_part(after_start, pos + byte_size(end_seq), byte_size(after_start) - pos - byte_size(end_seq))
+          {:bracketed_paste, content, rest}
+
+        :nomatch ->
+          :no_match
+      end
+    else
+      :no_match
     end
   end
 
@@ -112,10 +136,11 @@ defmodule Drafter.Terminal.ANSI do
       :no_match ->
         @key_sequences
         |> Enum.filter(fn {seq, _event} -> String.starts_with?(buffer, seq) end)
-        |> Enum.max_by(fn {seq, _event} -> String.length(seq) end, fn -> nil end)
+        |> Enum.max_by(fn {seq, _event} -> byte_size(seq) end, fn -> nil end)
         |> case do
           {seq, event} ->
-            rest = String.slice(buffer, String.length(seq)..-1//1)
+            seq_len = byte_size(seq)
+            <<_::binary-size(seq_len), rest::binary>> = buffer
             {event, rest}
 
           nil ->
@@ -125,37 +150,41 @@ defmodule Drafter.Terminal.ANSI do
   end
 
   defp parse_mouse_event(buffer) do
+    parse_mouse_sgr(buffer) ||
+      parse_mouse_sgr_h(buffer) ||
+      parse_x10_mouse_event_opt(buffer) ||
+      parse_mouse_legacy(buffer) ||
+      :no_match
+  end
+
+  defp parse_x10_mouse_event_opt(buffer) do
+    case parse_x10_mouse_event(buffer) do
+      :no_match -> nil
+      result -> result
+    end
+  end
+
+  defp parse_mouse_sgr(buffer) do
     case Regex.run(~r/^\e\[<(\d+);(\d+);(\d+)([Mm])/, buffer) do
       [full_match, button_str, x_str, y_str, action_char] ->
         parse_sgr_mouse_event(buffer, full_match, button_str, x_str, y_str, action_char)
+      nil -> nil
+    end
+  end
 
-      nil ->
-        case Regex.run(~r/^\e\[<(\d+);(\d+);(\d+)H/, buffer) do
-          [full_match, button_str, x_str, y_str] ->
-            parse_sgr_mouse_event(buffer, full_match, button_str, x_str, y_str, "M")
+  defp parse_mouse_sgr_h(buffer) do
+    case Regex.run(~r/^\e\[<(\d+);(\d+);(\d+)H/, buffer) do
+      [full_match, button_str, x_str, y_str] ->
+        parse_sgr_mouse_event(buffer, full_match, button_str, x_str, y_str, "M")
+      nil -> nil
+    end
+  end
 
-          nil ->
-            case parse_x10_mouse_event(buffer) do
-              {event, rest} ->
-                {event, rest}
-
-              :no_match ->
-                case Regex.run(~r/^\e\[(\d+);(\d+);(\d+)([Mm])/, buffer) do
-                  [full_match, button_str, x_str, y_str, action_char] ->
-                    parse_legacy_mouse_event(
-                      buffer,
-                      full_match,
-                      button_str,
-                      x_str,
-                      y_str,
-                      action_char
-                    )
-
-                  nil ->
-                    :no_match
-                end
-            end
-        end
+  defp parse_mouse_legacy(buffer) do
+    case Regex.run(~r/^\e\[(\d+);(\d+);(\d+)([Mm])/, buffer) do
+      [full_match, button_str, x_str, y_str, action_char] ->
+        parse_legacy_mouse_event(buffer, full_match, button_str, x_str, y_str, action_char)
+      nil -> nil
     end
   end
 
@@ -165,67 +194,8 @@ defmodule Drafter.Terminal.ANSI do
         button = button_byte - 32
         x = x_byte - 33
         y = y_byte - 33
-
-        base = Bitwise.band(button, 0x03)
-        motion = Bitwise.band(button, 0x20) != 0
-
-        {type, extra} =
-          cond do
-            button >= 64 and button <= 67 ->
-              direction =
-                case button do
-                  64 -> :up
-                  65 -> :down
-                  66 -> :right
-                  67 -> :left
-                end
-
-              {:scroll, direction}
-
-            motion and base == 3 ->
-              {:move, nil}
-
-            motion ->
-              {:drag, nil}
-
-            true ->
-              {:mouse_down, nil}
-          end
-
-        mouse_event =
-          case type do
-            :scroll ->
-              {:mouse,
-               %{
-                 type: :scroll,
-                 direction: extra,
-                 x: x,
-                 y: y,
-                 modifiers: parse_mouse_modifiers(button)
-               }}
-
-            :move ->
-              {:mouse,
-               %{
-                 type: :move,
-                 x: x,
-                 y: y,
-                 modifiers: parse_mouse_modifiers(button)
-               }}
-
-            _ ->
-              {:mouse,
-               %{
-                 type: type,
-                 button: parse_mouse_button(button),
-                 x: x,
-                 y: y,
-                 modifiers: parse_mouse_modifiers(button)
-               }}
-          end
-
-        rest = String.slice(buffer, String.length(full_match)..-1//1)
-        {mouse_event, rest}
+        {type, extra} = classify_mouse_action(button, "M", :x10)
+        build_mouse_result(buffer, full_match, button, x, y, type, extra)
 
       _ ->
         :no_match
@@ -236,161 +206,69 @@ defmodule Drafter.Terminal.ANSI do
     button = String.to_integer(button_str)
     x = String.to_integer(x_str) - 1
     y = String.to_integer(y_str) - 1
-
-    base = Bitwise.band(button, 0x03)
-    motion = Bitwise.band(button, 0x20) != 0
-
-    {type, extra} =
-      cond do
-        button >= 64 and button <= 67 ->
-          direction =
-            case button do
-              64 -> :up
-              65 -> :down
-              66 -> :right
-              67 -> :left
-            end
-
-          {:scroll, direction}
-
-        action_char == "m" ->
-          {:mouse_up, nil}
-
-        action_char == "M" and motion and base == 3 ->
-          {:move, nil}
-
-        action_char == "M" and motion ->
-          {:drag, nil}
-
-        action_char == "M" ->
-          {:mouse_down, nil}
-
-        true ->
-          {:mouse_down, nil}
-      end
-
-    mouse_payload =
-      case type do
-        :scroll ->
-          %{
-            type: :scroll,
-            direction: extra,
-            x: x,
-            y: y,
-            modifiers: parse_mouse_modifiers(button)
-          }
-
-        :move ->
-          %{
-            type: :move,
-            x: x,
-            y: y,
-            modifiers: parse_mouse_modifiers(button)
-          }
-
-        _ ->
-          %{
-            type: type,
-            button: parse_mouse_button(button),
-            x: x,
-            y: y,
-            modifiers: parse_mouse_modifiers(button)
-          }
-      end
-
-    mouse_event = {:mouse, mouse_payload}
-    rest = String.slice(buffer, String.length(full_match)..-1//1)
-    {mouse_event, rest}
+    {type, extra} = classify_mouse_action(button, action_char, :sgr)
+    build_mouse_result(buffer, full_match, button, x, y, type, extra)
   end
 
   defp parse_legacy_mouse_event(buffer, full_match, button_str, x_str, y_str, action_char) do
     button = String.to_integer(button_str)
     x = String.to_integer(x_str) - 1
     y = String.to_integer(y_str) - 1
-
-    base = Bitwise.band(button, 0x03)
-    motion = Bitwise.band(button, 0x20) != 0
-
-    {type, extra} =
-      cond do
-        button >= 64 and button <= 67 ->
-          direction =
-            case button do
-              64 -> :up
-              65 -> :down
-              66 -> :right
-              67 -> :left
-            end
-
-          {:scroll, direction}
-
-        action_char == "m" ->
-          {:mouse_up, nil}
-
-        action_char == "M" and motion and base == 3 ->
-          {:move, nil}
-
-        action_char == "M" and motion ->
-          {:drag, nil}
-
-        action_char == "M" and base == 3 ->
-          {:mouse_up, nil}
-
-        action_char == "M" ->
-          {:mouse_down, nil}
-
-        true ->
-          {:mouse_down, nil}
-      end
-
-    mouse_event =
-      case type do
-        :scroll ->
-          {:mouse,
-           %{
-             type: :scroll,
-             direction: extra,
-             x: x,
-             y: y,
-             modifiers: parse_mouse_modifiers(button)
-           }}
-
-        :move ->
-          {:mouse,
-           %{
-             type: :move,
-             x: x,
-             y: y,
-             modifiers: parse_mouse_modifiers(button)
-           }}
-
-        _ ->
-          {:mouse,
-           %{
-             type: type,
-             button: parse_mouse_button(button),
-             x: x,
-             y: y,
-             modifiers: parse_mouse_modifiers(button)
-           }}
-      end
-
-    rest = String.slice(buffer, String.length(full_match)..-1//1)
-    {mouse_event, rest}
+    {type, extra} = classify_mouse_action(button, action_char, :legacy)
+    build_mouse_result(buffer, full_match, button, x, y, type, extra)
   end
 
-  defp parse_mouse_button(button) do
-    cond do
-      button >= 64 and button <= 67 ->
-        :scroll
+  defp classify_mouse_action(button, _action_char, _format) when button >= 64 and button <= 67,
+    do: {:scroll, scroll_direction(button)}
 
-      true ->
-        case Bitwise.band(button, 0x03) do
-          0 -> :left
-          1 -> :middle
-          2 -> :right
-          _ -> :unknown
-        end
+  defp classify_mouse_action(_button, "m", _format), do: {:mouse_up, nil}
+
+  defp classify_mouse_action(button, _action_char, :legacy) do
+    base = Bitwise.band(button, 0x03)
+    if base == 3, do: {:mouse_up, nil}, else: {:mouse_down, nil}
+  end
+
+  defp classify_mouse_action(button, _action_char, _format) do
+    base = Bitwise.band(button, 0x03)
+    motion = Bitwise.band(button, 0x20) != 0
+    classify_motion(motion, base)
+  end
+
+  defp classify_motion(true, 3), do: {:move, nil}
+  defp classify_motion(true, _base), do: {:drag, nil}
+  defp classify_motion(false, _base), do: {:mouse_down, nil}
+
+  defp scroll_direction(64), do: :up
+  defp scroll_direction(65), do: :down
+  defp scroll_direction(66), do: :right
+  defp scroll_direction(67), do: :left
+
+  defp build_mouse_result(buffer, full_match, button, x, y, type, extra) do
+    payload = build_mouse_payload(button, x, y, type, extra)
+    rest = String.slice(buffer, String.length(full_match)..-1//1)
+    {{:mouse, payload}, rest}
+  end
+
+  defp build_mouse_payload(button, x, y, :scroll, direction) do
+    %{type: :scroll, direction: direction, x: x, y: y, modifiers: parse_mouse_modifiers(button)}
+  end
+
+  defp build_mouse_payload(button, x, y, :move, _extra) do
+    %{type: :move, x: x, y: y, modifiers: parse_mouse_modifiers(button)}
+  end
+
+  defp build_mouse_payload(button, x, y, type, _extra) do
+    %{type: type, button: parse_mouse_button(button), x: x, y: y, modifiers: parse_mouse_modifiers(button)}
+  end
+
+  defp parse_mouse_button(button) when button >= 64 and button <= 67, do: :scroll
+
+  defp parse_mouse_button(button) do
+    case Bitwise.band(button, 0x03) do
+      0 -> :left
+      1 -> :middle
+      2 -> :right
+      _ -> :unknown
     end
   end
 
@@ -408,51 +286,47 @@ defmodule Drafter.Terminal.ANSI do
 
   @doc "Clear entire screen"
   @spec clear_screen() :: String.t()
-  def clear_screen(), do: "\e[2J"
+  def clear_screen, do: "\e[2J"
 
   @doc "Clear from cursor to end of screen"
   @spec clear_to_end() :: String.t()
-  def clear_to_end(), do: "\e[0J"
+  def clear_to_end, do: "\e[0J"
 
   @doc "Clear current line"
   @spec clear_line() :: String.t()
-  def clear_line(), do: "\e[2K"
+  def clear_line, do: "\e[2K"
 
   @doc "Hide cursor"
   @spec hide_cursor() :: String.t()
-  def hide_cursor(), do: "\e[?25l"
+  def hide_cursor, do: "\e[?25l"
 
   @doc "Show cursor"
   @spec show_cursor() :: String.t()
-  def show_cursor(), do: "\e[?25h"
+  def show_cursor, do: "\e[?25h"
 
   @doc "Enable mouse reporting"
   @spec enable_mouse() :: String.t()
-  def enable_mouse() do
-    "\e[?1002h\e[?1006h"
-  end
+  def enable_mouse, do: "\e[?1002h\e[?1006h"
 
   @doc "Disable mouse reporting"
   @spec disable_mouse() :: String.t()
-  def disable_mouse() do
-    "\e[?1006l\e[?1002l"
-  end
+  def disable_mouse, do: "\e[?1006l\e[?1002l"
 
   @doc "Enter alternative screen buffer"
   @spec enter_alt_screen() :: String.t()
-  def enter_alt_screen(), do: "\e[?1049h"
+  def enter_alt_screen, do: "\e[?1049h"
 
   @doc "Exit alternative screen buffer"
   @spec exit_alt_screen() :: String.t()
-  def exit_alt_screen(), do: "\e[?1049l"
+  def exit_alt_screen, do: "\e[?1049l"
 
   @doc "Enable synchronized rendering"
   @spec sync_start() :: String.t()
-  def sync_start(), do: "\e[?2026h"
+  def sync_start, do: "\e[?2026h"
 
   @doc "Disable synchronized rendering"
   @spec sync_end() :: String.t()
-  def sync_end(), do: "\e[?2026l"
+  def sync_end, do: "\e[?2026l"
 
   @doc "Set foreground color (RGB)"
   @spec fg_color(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: String.t()
@@ -464,25 +338,25 @@ defmodule Drafter.Terminal.ANSI do
 
   @doc "Reset all formatting"
   @spec reset() :: String.t()
-  def reset(), do: "\e[0m"
+  def reset, do: "\e[0m"
 
   @doc "Bold text"
   @spec bold() :: String.t()
-  def bold(), do: "\e[1m"
+  def bold, do: "\e[1m"
 
   @doc "Dim text"
   @spec dim() :: String.t()
-  def dim(), do: "\e[2m"
+  def dim, do: "\e[2m"
 
   @doc "Italic text"
   @spec italic() :: String.t()
-  def italic(), do: "\e[3m"
+  def italic, do: "\e[3m"
 
   @doc "Underline text"
   @spec underline() :: String.t()
-  def underline(), do: "\e[4m"
+  def underline, do: "\e[4m"
 
   @doc "Reverse video (swap fg/bg colors)"
   @spec reverse() :: String.t()
-  def reverse(), do: "\e[7m"
+  def reverse, do: "\e[7m"
 end

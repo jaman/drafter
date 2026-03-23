@@ -49,7 +49,17 @@ defmodule Drafter.App do
 
   @callback refresh_rate() :: pos_integer() | String.t() | :unlimited
 
-  @optional_callbacks [update: 2, unmount: 1, on_ready: 1, on_timer: 2, handle_event: 3, on_scroll_active: 1, on_scroll_idle: 1, on_message: 2, refresh_rate: 0]
+  @optional_callbacks [
+    update: 2,
+    unmount: 1,
+    on_ready: 1,
+    on_timer: 2,
+    handle_event: 3,
+    on_scroll_active: 1,
+    on_scroll_idle: 1,
+    on_message: 2,
+    refresh_rate: 0
+  ]
 
   defmacro __using__(opts) do
     quote do
@@ -114,7 +124,7 @@ defmodule Drafter.App do
   end
 
   defp build_key_hint({key, mods}) when is_list(mods) do
-    mod_prefix = mods |> Enum.map(&mod_label/1) |> Enum.join("+")
+    mod_prefix = Enum.map_join(mods, "+", &mod_label/1)
     "#{mod_prefix}+#{key_label(key)}"
   end
 
@@ -396,45 +406,34 @@ defmodule Drafter.App do
   end
 
   def screen_layout(parts) when is_list(parts) do
-    {has_header, header} =
-      if Keyword.has_key?(parts, :header), do: {true, parts[:header]}, else: {false, nil}
+    header = parts[:header]
+    footer = parts[:footer]
+    content = parts[:content]
 
-    {has_footer, footer} =
-      if Keyword.has_key?(parts, :footer), do: {true, parts[:footer]}, else: {false, nil}
-
-    {has_content, content} =
-      if Keyword.has_key?(parts, :content), do: {true, parts[:content]}, else: {false, nil}
-
-    _content_layout =
-      case content do
-        nil -> []
-        c when is_list(c) -> c
-        c -> [c]
-      end
-
-    layout_parts = []
-
-    layout_parts =
-      if has_header do
-        layout_parts ++ [header]
-      else
-        layout_parts
-      end
-
-    layout_parts =
-      if has_content and has_footer do
-        layout_parts ++ [vertical(content ++ [], flex: 1)]
-      else
-        if has_content, do: layout_parts ++ content, else: layout_parts
-      end
-
-    layout_parts =
-      if has_footer do
-        layout_parts ++ [footer]
-      else
-        layout_parts
-      end
-
-    vertical(layout_parts)
+    []
+    |> maybe_prepend_header(header)
+    |> append_content(content, footer)
+    |> maybe_append_footer(footer)
+    |> vertical()
   end
+
+  defp maybe_prepend_header(parts, nil), do: parts
+  defp maybe_prepend_header(parts, header), do: parts ++ [header]
+
+  defp append_content(parts, nil, _footer), do: parts
+
+  defp append_content(parts, content, footer) when not is_nil(footer) do
+    parts ++ [vertical(content, flex: 1)]
+  end
+
+  defp append_content(parts, content, _footer) when is_list(content) do
+    parts ++ content
+  end
+
+  defp append_content(parts, content, _footer) do
+    parts ++ [content]
+  end
+
+  defp maybe_append_footer(parts, nil), do: parts
+  defp maybe_append_footer(parts, footer), do: parts ++ [footer]
 end

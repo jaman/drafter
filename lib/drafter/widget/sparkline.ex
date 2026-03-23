@@ -56,7 +56,7 @@ defmodule Drafter.Widget.Sparkline do
     data = Map.get(props, :data, [])
 
     {min_val, max_val} =
-      if length(data) > 0 do
+      if data != [] do
         {Enum.min(data), Enum.max(data)}
       else
         {0, 0}
@@ -101,43 +101,7 @@ defmodule Drafter.Widget.Sparkline do
     if state.orientation == :horizontal do
       render_horizontal(state, rect, bg, min_color, max_color)
     else
-      summary_style = %{fg: {150, 150, 150}, bg: bg}
-
-      spark_width = if state.summary, do: rect.width - 20, else: rect.width
-
-      {sparkline_chars, normalized_values} =
-        render_sparkline_with_values(state.data, state.min_value, state.max_value, spark_width)
-
-      spark_segments =
-        sparkline_chars
-        |> String.graphemes()
-        |> Enum.zip(normalized_values)
-        |> Enum.map(fn {char, normalized} ->
-          interpolated_color = interpolate_color(min_color, max_color, normalized)
-          Segment.new(char, %{fg: interpolated_color, bg: bg})
-        end)
-
-      output =
-        if state.summary and length(state.data) > 0 do
-          summary_text = render_summary(state.data, state.min_value, state.max_value)
-
-          padding_width =
-            max(0, rect.width - String.length(sparkline_chars) - String.length(summary_text))
-
-          summary_padding = String.duplicate(" ", padding_width)
-
-          spark_segments ++
-            [
-              Segment.new(summary_padding, %{fg: default_color, bg: bg}),
-              Segment.new(summary_text, summary_style)
-            ]
-        else
-          padding_width = max(0, rect.width - String.length(sparkline_chars))
-          padding = String.duplicate(" ", padding_width)
-          spark_segments ++ [Segment.new(padding, %{fg: default_color, bg: bg})]
-        end
-
-      [Strip.new(output)]
+      render_vertical(state, rect, bg, min_color, max_color, default_color)
     end
   end
 
@@ -152,7 +116,7 @@ defmodule Drafter.Widget.Sparkline do
     new_data = Map.get(props, :data, state.data)
 
     {min_val, max_val} =
-      if length(new_data) > 0 do
+      if new_data != [] do
         {Enum.min(new_data), Enum.max(new_data)}
       else
         {state.min_value, state.max_value}
@@ -184,11 +148,15 @@ defmodule Drafter.Widget.Sparkline do
   def from_component_opts(data, opts) do
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
     all_data = if is_list(data), do: data, else: Keyword.get(opts, :data, [])
+
     %{
       data: all_data,
       min_value: Keyword.get(opts, :min_value),
@@ -205,6 +173,39 @@ defmodule Drafter.Widget.Sparkline do
   end
 
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
+
+  defp render_vertical(state, rect, bg, min_color, max_color, default_color) do
+    spark_width = if state.summary, do: rect.width - 20, else: rect.width
+
+    {sparkline_chars, normalized_values} =
+      render_sparkline_with_values(state.data, state.min_value, state.max_value, spark_width)
+
+    spark_segments =
+      sparkline_chars
+      |> String.graphemes()
+      |> Enum.zip(normalized_values)
+      |> Enum.map(fn {char, normalized} ->
+        Segment.new(char, %{fg: interpolate_color(min_color, max_color, normalized), bg: bg})
+      end)
+
+    output = append_sparkline_tail(spark_segments, state, rect.width, sparkline_chars, default_color, bg)
+    [Strip.new(output)]
+  end
+
+  defp append_sparkline_tail(segments, %{summary: true, data: data}, width, sparkline_chars, _default_color, bg)
+       when data != [] do
+    summary_text = render_summary(data, Enum.min(data), Enum.max(data))
+    padding_width = max(0, width - String.length(sparkline_chars) - String.length(summary_text))
+    segments ++ [
+      Segment.new(String.duplicate(" ", padding_width), %{bg: bg}),
+      Segment.new(summary_text, %{fg: {150, 150, 150}, bg: bg})
+    ]
+  end
+
+  defp append_sparkline_tail(segments, _state, width, sparkline_chars, default_color, bg) do
+    padding_width = max(0, width - String.length(sparkline_chars))
+    segments ++ [Segment.new(String.duplicate(" ", padding_width), %{fg: default_color, bg: bg})]
+  end
 
   defp render_horizontal(state, rect, bg, min_color, max_color) do
     levels = CharacterSet.sparkline_levels_h()
@@ -232,14 +233,17 @@ defmodule Drafter.Widget.Sparkline do
       padding = Visualization.safe_duplicate(" ", rect.width - bar_len)
 
       interpolated_color = interpolate_color(min_color, max_color, normalized)
-      Strip.new([Segment.new(full_str <> partial_str <> padding, %{fg: interpolated_color, bg: bg})])
+
+      Strip.new([
+        Segment.new(full_str <> partial_str <> padding, %{fg: interpolated_color, bg: bg})
+      ])
     end)
   end
 
   def render_sparkline_with_values(data, min_val, max_val, width) do
     levels = CharacterSet.sparkline_levels_v()
 
-    if length(data) == 0 do
+    if data == [] do
       {String.duplicate(" ", width), List.duplicate(0.5, width)}
     else
       result =
@@ -251,8 +255,7 @@ defmodule Drafter.Widget.Sparkline do
           {Enum.at(levels, idx), normalized}
         end)
 
-      {Enum.map_join(result, fn {char, _} -> char end),
-       Enum.map(result, fn {_, val} -> val end)}
+      {Enum.map_join(result, fn {char, _} -> char end), Enum.map(result, fn {_, val} -> val end)}
     end
   end
 
@@ -264,7 +267,8 @@ defmodule Drafter.Widget.Sparkline do
   end
 
   defp render_summary(data, min_val, max_val) do
-    avg = if length(data) > 0, do: Enum.sum(data) / length(data), else: 0
+    avg = if data != [], do: Enum.sum(data) / length(data), else: 0
+
     "min:#{Visualization.format_number(min_val)} max:#{Visualization.format_number(max_val)} avg:#{Visualization.format_number(avg)}"
   end
 end

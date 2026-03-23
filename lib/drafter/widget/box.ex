@@ -1,4 +1,11 @@
 defmodule Drafter.Widget.Box do
+  @moduledoc """
+  A container widget that draws a titled border around its children.
+
+  Supports single, double, rounded, and thick border styles. The title is
+  rendered in the top border. Use the `box/2` helper in `Drafter.App`.
+  """
+
   @behaviour Drafter.Widget
 
   alias Drafter.Draw.{Segment, Strip}
@@ -43,7 +50,10 @@ defmodule Drafter.Widget.Box do
 
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    render_box(state, rect)
+  end
 
+  defp render_box(state, rect) do
     computed = Computed.for_widget(:box, state, classes: state.classes, style: state.style)
     bg = computed[:background] || {40, 44, 52}
     fg = computed[:color] || {200, 200, 200}
@@ -56,79 +66,15 @@ defmodule Drafter.Widget.Box do
     chars = Map.get(@border_chars, state.border, @border_chars[:rounded])
     has_border = state.border != :none
     border_offset = if has_border, do: 1, else: 0
-    padding = state.padding
 
-    _content_width = max(0, rect.width - border_offset * 2 - padding * 2)
-    content_height = max(0, rect.height - border_offset * 2 - padding * 2)
+    content_height = max(0, rect.height - border_offset * 2 - state.padding * 2)
+    top = if has_border, do: [render_top_border(chars, rect.width, state.title, border_style_map, title_style_map)], else: []
+    pad_top = if state.padding > 0, do: render_padding_rows(chars, rect.width, state.padding, has_border, base_style, border_style_map), else: []
+    content = render_content_rows(chars, rect.width, content_height, state.padding, has_border, base_style, border_style_map)
+    pad_bot = pad_top
+    bot = if has_border, do: [render_bottom_border(chars, rect.width, border_style_map)], else: []
 
-    strips = []
-
-    strips =
-      if has_border do
-        top_border =
-          render_top_border(chars, rect.width, state.title, border_style_map, title_style_map)
-
-        strips ++ [top_border]
-      else
-        strips
-      end
-
-    strips =
-      if padding > 0 do
-        padding_strips =
-          render_padding_rows(
-            chars,
-            rect.width,
-            padding,
-            has_border,
-            base_style,
-            border_style_map
-          )
-
-        strips ++ padding_strips
-      else
-        strips
-      end
-
-    content_strips =
-      render_content_rows(
-        chars,
-        rect.width,
-        content_height,
-        padding,
-        has_border,
-        base_style,
-        border_style_map
-      )
-
-    strips = strips ++ content_strips
-
-    strips =
-      if padding > 0 do
-        padding_strips =
-          render_padding_rows(
-            chars,
-            rect.width,
-            padding,
-            has_border,
-            base_style,
-            border_style_map
-          )
-
-        strips ++ padding_strips
-      else
-        strips
-      end
-
-    strips =
-      if has_border do
-        bottom_border = render_bottom_border(chars, rect.width, border_style_map)
-        strips ++ [bottom_border]
-      else
-        strips
-      end
-
-    strips
+    top ++ pad_top ++ content ++ pad_bot ++ bot
   end
 
   def update(props, state) do

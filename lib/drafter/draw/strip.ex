@@ -88,9 +88,7 @@ defmodule Drafter.Draw.Strip do
   @doc "Convert strip to ANSI string for terminal output"
   @spec to_ansi(t()) :: String.t()
   def to_ansi(%__MODULE__{segments: segments}) do
-    segments
-    |> Enum.map(&Segment.to_ansi/1)
-    |> Enum.join("")
+    Enum.map_join(segments, &Segment.to_ansi/1)
   end
 
   @doc "Get display width of strip"
@@ -162,9 +160,7 @@ defmodule Drafter.Draw.Strip do
   @doc "Convert strip to plain text without styling"
   @spec to_plain_text(t()) :: String.t()
   def to_plain_text(%__MODULE__{segments: segments}) do
-    segments
-    |> Enum.map(fn %Segment{text: text} -> text end)
-    |> Enum.join("")
+    Enum.map_join(segments, fn %Segment{text: text} -> text end)
   end
 
   defp crop_segments(segments, remaining_width, acc \\ [])
@@ -229,49 +225,28 @@ defmodule Drafter.Draw.Strip do
 
     {_, result} =
       Enum.reduce(parts, {0, ""}, fn part, {skipped, acc} ->
-        if Regex.match?(ansi_pattern, part) do
-          if skipped >= columns_to_skip do
-            {skipped, acc <> part}
-          else
-            {skipped, acc}
-          end
-        else
-          part
-          |> String.graphemes()
-          |> Enum.reduce({skipped, acc}, fn grapheme, {w, a} ->
-            if w >= columns_to_skip do
-              {w + char_width(grapheme), a <> grapheme}
-            else
-              {w + char_width(grapheme), a}
-            end
-          end)
-        end
+        skip_part(part, skipped, acc, columns_to_skip, ansi_pattern)
       end)
 
     result
   end
 
-  defp char_width(grapheme) do
-    case String.to_charlist(grapheme) do
-      [codepoint | _] ->
-        cond do
-          codepoint >= 0x1F300 and codepoint <= 0x1F9FF -> 2
-          codepoint >= 0x2600 and codepoint <= 0x26FF -> 2
-          codepoint >= 0x2700 and codepoint <= 0x27BF -> 2
-          codepoint >= 0x1F600 and codepoint <= 0x1F64F -> 2
-          codepoint >= 0x1F680 and codepoint <= 0x1F6FF -> 2
-          codepoint >= 0x1100 and codepoint <= 0x11FF -> 2
-          codepoint >= 0x2E80 and codepoint <= 0x9FFF -> 2
-          codepoint >= 0xAC00 and codepoint <= 0xD7AF -> 2
-          codepoint >= 0xFE10 and codepoint <= 0xFE1F -> 2
-          codepoint >= 0xFE30 and codepoint <= 0xFE6F -> 2
-          codepoint >= 0xFF00 and codepoint <= 0xFF60 -> 2
-          codepoint >= 0xFFE0 and codepoint <= 0xFFE6 -> 2
-          true -> 1
-        end
-
-      [] ->
-        0
+  defp skip_part(part, skipped, acc, columns_to_skip, ansi_pattern) do
+    cond do
+      Regex.match?(ansi_pattern, part) and skipped >= columns_to_skip -> {skipped, acc <> part}
+      Regex.match?(ansi_pattern, part) -> {skipped, acc}
+      true -> skip_graphemes(part, skipped, acc, columns_to_skip)
     end
   end
+
+  defp skip_graphemes(text, skipped, acc, columns_to_skip) do
+    text
+    |> String.graphemes()
+    |> Enum.reduce({skipped, acc}, fn grapheme, {w, a} ->
+      gw = char_width(grapheme)
+      if w >= columns_to_skip, do: {w + gw, a <> grapheme}, else: {w + gw, a}
+    end)
+  end
+
+  defp char_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
 end

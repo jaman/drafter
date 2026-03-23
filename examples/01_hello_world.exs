@@ -12,7 +12,7 @@ defmodule HelloWorld do
     vertical([
       header("Hello, World!"),
       label(""),
-      label("Welcome to Drafter!", style: %{bold: true, fg: :cyan}),
+      label("你好. Welcome to Drafter! 반갑습니다", style: %{bold: true, fg: :cyan}),
       label(""),
       label("Press q to quit"),
       footer()

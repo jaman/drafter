@@ -20,44 +20,45 @@ defmodule Drafter.Binding do
 
   def create_bound_callback(opts, _value_key) do
     session_pid = self()
+    build_bound_callback(session_pid, Keyword.get(opts, :bind), opts)
+  end
 
-    case Keyword.get(opts, :bind) do
-      nil ->
-        case Keyword.get(opts, :on_change) do
-          nil -> nil
-          callback -> fn value -> send_app_callback(session_pid, callback, value) end
-        end
+  defp build_bound_callback(_session_pid, nil, opts) do
+    on_change = Keyword.get(opts, :on_change)
+    if on_change do
+      session_pid = self()
+      fn value -> send_app_callback(session_pid, on_change, value) end
+    end
+  end
 
-      bind_key when is_atom(bind_key) ->
-        on_change = Keyword.get(opts, :on_change)
+  defp build_bound_callback(session_pid, bind_key, opts) when is_atom(bind_key) do
+    on_change = Keyword.get(opts, :on_change)
 
-        fn value ->
-          send(session_pid, {:bound_state_update, bind_key, value})
-
-          if on_change do
-            send_app_callback(session_pid, on_change, value)
-          end
-        end
+    fn value ->
+      send(session_pid, {:bound_state_update, bind_key, value})
+      if on_change, do: send_app_callback(session_pid, on_change, value)
     end
   end
 
   def create_text_input_callback(opts) do
     session_pid = self()
+    build_text_input_callback(session_pid, Keyword.get(opts, :bind), opts)
+  end
 
-    case Keyword.get(opts, :bind) do
-      nil ->
-        case Keyword.get(opts, :on_change) do
-          nil -> nil
-          callback -> fn {text, vr} -> send_app_callback(session_pid, callback, {text, vr}) end
-        end
+  defp build_text_input_callback(_session_pid, nil, opts) do
+    on_change = Keyword.get(opts, :on_change)
+    if on_change do
+      session_pid = self()
+      fn {text, vr} -> send_app_callback(session_pid, on_change, {text, vr}) end
+    end
+  end
 
-      bind_key when is_atom(bind_key) ->
-        on_change = Keyword.get(opts, :on_change)
+  defp build_text_input_callback(session_pid, bind_key, opts) when is_atom(bind_key) do
+    on_change = Keyword.get(opts, :on_change)
 
-        fn {text, vr} ->
-          send(session_pid, {:bound_state_update, bind_key, text})
-          if on_change, do: send_app_callback(session_pid, on_change, {text, vr})
-        end
+    fn {text, vr} ->
+      send(session_pid, {:bound_state_update, bind_key, text})
+      if on_change, do: send_app_callback(session_pid, on_change, {text, vr})
     end
   end
 

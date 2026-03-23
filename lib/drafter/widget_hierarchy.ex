@@ -180,20 +180,7 @@ defmodule Drafter.WidgetHierarchy do
 
         Drafter.WidgetStripCache.delete(widget_id)
 
-        new_widgets =
-          if widget_info.parent do
-            case Map.get(hierarchy.widgets, widget_info.parent) do
-              nil ->
-                hierarchy.widgets
-
-              parent_info ->
-                updated_children = List.delete(parent_info.children, widget_id)
-                updated_parent = %{parent_info | children: updated_children}
-                Map.put(hierarchy.widgets, widget_info.parent, updated_parent)
-            end
-          else
-            hierarchy.widgets
-          end
+        new_widgets = detach_from_parent(hierarchy.widgets, widget_id, widget_info.parent)
 
         new_widgets =
           Enum.reduce(widget_info.children, new_widgets, fn child_id, acc_widgets ->
@@ -220,16 +207,22 @@ defmodule Drafter.WidgetHierarchy do
     end
   end
 
+  defp detach_from_parent(widgets, _widget_id, nil), do: widgets
+
+  defp detach_from_parent(widgets, widget_id, parent_id) do
+    case Map.get(widgets, parent_id) do
+      nil -> widgets
+      parent_info ->
+        updated_children = List.delete(parent_info.children, widget_id)
+        Map.put(widgets, parent_id, %{parent_info | children: updated_children})
+    end
+  end
+
   @doc "Update widget with new props"
   @spec update_widget(t(), widget_id(), map()) :: t()
   @spec update_widget_parent(t(), widget_id(), widget_id() | nil) :: t()
   def update_widget_parent(hierarchy, widget_id, parent_id) do
-    case Map.get(hierarchy.widgets, widget_id) do
-      nil -> hierarchy
-      widget_info ->
-        updated = %{widget_info | parent: parent_id}
-        %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, updated)}
-    end
+    update_widget_info(hierarchy, widget_id, &%{&1 | parent: parent_id})
   end
 
   def update_widget(hierarchy, widget_id, new_props) do
@@ -238,22 +231,25 @@ defmodule Drafter.WidgetHierarchy do
         hierarchy
 
       widget_info ->
-        if widget_info.pid do
-          WidgetServer.update_props(widget_info.pid, new_props)
-          hierarchy
-        else
-          new_state =
-            if function_exported?(widget_info.module, :update, 2) do
-              apply(widget_info.module, :update, [new_props, widget_info.state])
-            else
-              Map.merge(widget_info.state, new_props)
-            end
-
-          updated_widget = %{widget_info | state: new_state}
-          new_widgets = Map.put(hierarchy.widgets, widget_id, updated_widget)
-          %{hierarchy | widgets: new_widgets}
-        end
+        apply_widget_update(hierarchy, widget_id, widget_info, new_props)
     end
+  end
+
+  defp apply_widget_update(hierarchy, _widget_id, %{pid: pid} = _widget_info, new_props) when is_pid(pid) do
+    WidgetServer.update_props(pid, new_props)
+    hierarchy
+  end
+
+  defp apply_widget_update(hierarchy, widget_id, widget_info, new_props) do
+    new_state =
+      if function_exported?(widget_info.module, :update, 2) do
+        widget_info.module.update(new_props, widget_info.state)
+      else
+        Map.merge(widget_info.state, new_props)
+      end
+
+    updated_widget = %{widget_info | state: new_state}
+    %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, updated_widget)}
   end
 
   @doc "Get widget info by ID"
@@ -284,15 +280,7 @@ defmodule Drafter.WidgetHierarchy do
   @doc "Update widget state directly"
   @spec update_widget_state(t(), widget_id(), map()) :: t()
   def update_widget_state(hierarchy, widget_id, new_state) do
-    case Map.get(hierarchy.widgets, widget_id) do
-      nil ->
-        hierarchy
-
-      widget_info ->
-        updated_widget = %{widget_info | state: new_state}
-        new_widgets = Map.put(hierarchy.widgets, widget_id, updated_widget)
-        %{hierarchy | widgets: new_widgets}
-    end
+    update_widget_info(hierarchy, widget_id, &%{&1 | state: new_state})
   end
 
   @doc "Update widget rectangle"
@@ -341,47 +329,50 @@ defmodule Drafter.WidgetHierarchy do
 
   defp scroll_widget_into_view(hierarchy, widget_id, _direction) do
     case Map.get(hierarchy.widget_scroll_parents, widget_id) do
-      nil ->
-        hierarchy
+      nil -> hierarchy
+      scroll_parent_id -> maybe_scroll_to_widget(hierarchy, widget_id, scroll_parent_id)
+    end
+  end
 
-      scroll_parent_id ->
-        scroll_info = Map.get(hierarchy.scroll_containers, scroll_parent_id)
-        widget_rect = Map.get(hierarchy.widget_rects, widget_id)
-        scroll_state = get_widget_state(hierarchy, scroll_parent_id)
+  defp maybe_scroll_to_widget(hierarchy, widget_id, scroll_parent_id) do
+    scroll_info = Map.get(hierarchy.scroll_containers, scroll_parent_id)
+    widget_rect = Map.get(hierarchy.widget_rects, widget_id)
+    scroll_state = get_widget_state(hierarchy, scroll_parent_id)
 
-        if scroll_info && widget_rect && scroll_state do
-          viewport = scroll_info.viewport_rect
-          scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
+    with true <- not is_nil(scroll_info),
+         true <- not is_nil(widget_rect),
+         true <- not is_nil(scroll_state) do
+      viewport = scroll_info.viewport_rect
+      scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
+      new_scroll_y = calculate_visible_scroll_y(widget_rect, viewport, scroll_y, scroll_info.content_height)
+      apply_scroll_y(hierarchy, scroll_parent_id, scroll_y, new_scroll_y)
+    else
+      _ -> hierarchy
+    end
+  end
 
-          widget_top = widget_rect.y
-          widget_bottom = widget_rect.y + widget_rect.height
-          viewport_top = viewport.y + scroll_y
-          viewport_bottom = viewport_top + viewport.height
+  defp calculate_visible_scroll_y(widget_rect, viewport, scroll_y, content_height) do
+    widget_top = widget_rect.y
+    widget_bottom = widget_rect.y + widget_rect.height
+    viewport_top = viewport.y + scroll_y
+    viewport_bottom = viewport_top + viewport.height
 
-          new_scroll_y =
-            cond do
-              widget_top < viewport_top ->
-                widget_top - viewport.y
+    raw =
+      cond do
+        widget_top < viewport_top -> widget_top - viewport.y
+        widget_bottom > viewport_bottom -> widget_bottom - viewport.y - viewport.height
+        true -> scroll_y
+      end
 
-              widget_bottom > viewport_bottom ->
-                widget_bottom - viewport.y - viewport.height
+    max_scroll = max(0, content_height - viewport.height)
+    raw |> max(0) |> min(max_scroll)
+  end
 
-              true ->
-                scroll_y
-            end
-
-          new_scroll_y = max(0, new_scroll_y)
-          max_scroll = max(0, scroll_info.content_height - viewport.height)
-          new_scroll_y = min(new_scroll_y, max_scroll)
-
-          if new_scroll_y != scroll_y do
-            update_widget(hierarchy, scroll_parent_id, %{scroll_offset_y: new_scroll_y})
-          else
-            hierarchy
-          end
-        else
-          hierarchy
-        end
+  defp apply_scroll_y(hierarchy, scroll_parent_id, scroll_y, new_scroll_y) do
+    if new_scroll_y != scroll_y do
+      update_widget(hierarchy, scroll_parent_id, %{scroll_offset_y: new_scroll_y})
+    else
+      hierarchy
     end
   end
 
@@ -483,37 +474,34 @@ defmodule Drafter.WidgetHierarchy do
 
   defp translate_rect_to_screen(hierarchy, widget_id, virtual_rect) do
     case Map.get(hierarchy.widget_scroll_parents, widget_id) do
-      nil ->
-        virtual_rect
+      nil -> virtual_rect
+      scroll_parent_id -> clip_rect_to_scroll_viewport(hierarchy, scroll_parent_id, virtual_rect)
+    end
+  end
 
-      scroll_parent_id ->
-        scroll_info = Map.get(hierarchy.scroll_containers, scroll_parent_id)
-        scroll_state = get_widget_state(hierarchy, scroll_parent_id)
+  defp clip_rect_to_scroll_viewport(hierarchy, scroll_parent_id, virtual_rect) do
+    scroll_info = Map.get(hierarchy.scroll_containers, scroll_parent_id)
+    scroll_state = get_widget_state(hierarchy, scroll_parent_id)
 
-        if scroll_info && scroll_state do
-          viewport = scroll_info.viewport_rect
-          scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
+    if scroll_info && scroll_state do
+      viewport = scroll_info.viewport_rect
+      scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
+      compute_visible_rect(virtual_rect, viewport, scroll_y)
+    else
+      virtual_rect
+    end
+  end
 
-          screen_y = virtual_rect.y - scroll_y
-          screen_bottom = screen_y + virtual_rect.height
+  defp compute_visible_rect(virtual_rect, viewport, scroll_y) do
+    screen_y = virtual_rect.y - scroll_y
+    screen_bottom = screen_y + virtual_rect.height
 
-          if screen_bottom <= viewport.y or screen_y >= viewport.y + viewport.height do
-            nil
-          else
-            visible_top = max(screen_y, viewport.y)
-            visible_bottom = min(screen_bottom, viewport.y + viewport.height)
-            visible_height = visible_bottom - visible_top
-
-            %{
-              x: virtual_rect.x,
-              y: visible_top,
-              width: virtual_rect.width,
-              height: visible_height
-            }
-          end
-        else
-          virtual_rect
-        end
+    if screen_bottom <= viewport.y or screen_y >= viewport.y + viewport.height do
+      nil
+    else
+      visible_top = max(screen_y, viewport.y)
+      visible_bottom = min(screen_bottom, viewport.y + viewport.height)
+      %{x: virtual_rect.x, y: visible_top, width: virtual_rect.width, height: visible_bottom - visible_top}
     end
   end
 
@@ -532,99 +520,31 @@ defmodule Drafter.WidgetHierarchy do
 
   @doc "Handle event with proper bubbling"
   @spec handle_event(t(), term()) :: {t(), [term()]}
-  def handle_event(hierarchy, event) do
-    should_log =
-      case event do
-        {:mouse, %{type: :move}} -> false
-        _ -> true
-      end
+  def handle_event(hierarchy, {:mouse, mouse_event}), do: handle_mouse_event(hierarchy, mouse_event)
+  def handle_event(hierarchy, event), do: handle_key_event(hierarchy, event)
 
-    if should_log do
-    end
+  defp handle_key_event(hierarchy, {:key, :tab}), do: {cycle_focus(hierarchy), []}
+  defp handle_key_event(hierarchy, {:key, :tab, _}), do: {cycle_focus_reverse(hierarchy), []}
+  defp handle_key_event(hierarchy, {:key, ?\t}), do: {cycle_focus(hierarchy), []}
 
-    result =
-      case event do
-        {:key, :tab} ->
-          cycle_focus(hierarchy)
-          |> then(&{&1, []})
-
-        {:key, :tab, [:shift]} ->
-          cycle_focus_reverse(hierarchy)
-          |> then(&{&1, []})
-
-        {:key, ?\t} ->
-          cycle_focus(hierarchy)
-          |> then(&{&1, []})
-
-        {:key, ?\t, mods} when is_list(mods) ->
-          if :shift in mods do
-            cycle_focus_reverse(hierarchy)
-            |> then(&{&1, []})
-          else
-            cycle_focus(hierarchy)
-            |> then(&{&1, []})
-          end
-
-        {:key, :enter} ->
-          dispatch_to_focused(hierarchy, event)
-
-        {:key, :" "} ->
-          dispatch_to_focused(hierarchy, event)
-
-        {:key, :left} ->
-          try_arrow_navigation(hierarchy, event, :left)
-
-        {:key, :left, [:shift]} ->
-          try_arrow_navigation(hierarchy, event, :left)
-
-        {:key, :right} ->
-          try_arrow_navigation(hierarchy, event, :right)
-
-        {:key, :right, [:shift]} ->
-          try_arrow_navigation(hierarchy, event, :right)
-
-        {:key, :up} ->
-          try_arrow_navigation(hierarchy, event, :up)
-
-        {:key, :up, [:shift]} ->
-          try_arrow_navigation(hierarchy, event, :up)
-
-        {:key, :down} ->
-          try_arrow_navigation(hierarchy, event, :down)
-
-        {:key, :down, [:shift]} ->
-          try_arrow_navigation(hierarchy, event, :down)
-
-        {:key, :home} ->
-          dispatch_to_focused(hierarchy, event)
-
-        {:key, :end} ->
-          dispatch_to_focused(hierarchy, event)
-
-        {:key, :page_up} ->
-          dispatch_to_focused(hierarchy, event)
-
-        {:key, :page_down} ->
-          dispatch_to_focused(hierarchy, event)
-
-        {:mouse, mouse_event} ->
-          handle_mouse_event(hierarchy, mouse_event)
-
-        {:key, _key} ->
-          dispatch_to_focused(hierarchy, event)
-
-        {:key, _key, _mods} ->
-          dispatch_to_focused(hierarchy, event)
-
-        _ ->
-          {hierarchy, []}
-      end
-
-    if should_log do
-    end
-
-    result
+  defp handle_key_event(hierarchy, {:key, ?\t, mods}) when is_list(mods) do
+    if :shift in mods, do: {cycle_focus_reverse(hierarchy), []}, else: {cycle_focus(hierarchy), []}
   end
+
+  defp handle_key_event(hierarchy, {:key, dir} = event) when dir in [:left, :right, :up, :down] do
+    try_arrow_navigation(hierarchy, event, dir)
+  end
+
+  defp handle_key_event(hierarchy, {:key, dir, _} = event) when dir in [:left, :right, :up, :down] do
+    try_arrow_navigation(hierarchy, event, dir)
+  end
+
+  defp handle_key_event(hierarchy, event), do: dispatch_to_focused_or_ignore(hierarchy, event)
+
+  defp dispatch_to_focused_or_ignore(hierarchy, {:key, _} = event), do: dispatch_to_focused(hierarchy, event)
+  defp dispatch_to_focused_or_ignore(hierarchy, {:key, _, _} = event), do: dispatch_to_focused(hierarchy, event)
+  defp dispatch_to_focused_or_ignore(hierarchy, {:char, _} = event), do: dispatch_to_focused(hierarchy, event)
+  defp dispatch_to_focused_or_ignore(hierarchy, _), do: {hierarchy, []}
 
   def handle_event_consumed(hierarchy, event) do
     hierarchy = sync_focused_pid_state(hierarchy)
@@ -638,13 +558,21 @@ defmodule Drafter.WidgetHierarchy do
   defp sync_focused_pid_state(hierarchy) do
     case hierarchy.focused_widget && Map.get(hierarchy.widgets, hierarchy.focused_widget) do
       %{pid: pid} = info when not is_nil(pid) ->
-        current_state = WidgetServer.get_state(pid)
-        updated_info = %{info | state: current_state}
-        updated_widgets = Map.put(hierarchy.widgets, hierarchy.focused_widget, updated_info)
-        %{hierarchy | widgets: updated_widgets}
+        put_widget(hierarchy, hierarchy.focused_widget, %{info | state: WidgetServer.get_state(pid)})
 
       _ ->
         hierarchy
+    end
+  end
+
+  defp put_widget(hierarchy, widget_id, widget_info) do
+    %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, widget_info)}
+  end
+
+  defp update_widget_info(hierarchy, widget_id, fun) do
+    case Map.get(hierarchy.widgets, widget_id) do
+      nil -> hierarchy
+      info -> put_widget(hierarchy, widget_id, fun.(info))
     end
   end
 
@@ -694,95 +622,72 @@ defmodule Drafter.WidgetHierarchy do
     if length(focusable_widgets) <= 1 do
       dispatch_to_focused(hierarchy, event)
     else
-      case hierarchy.focused_widget do
-        nil ->
-          first_widget = hd(focusable_widgets)
-          {focus_widget(hierarchy, first_widget, :down), []}
+      arrow_navigate_with_focus(hierarchy, event, direction, focusable_widgets)
+    end
+  end
 
-        focused_id ->
-          case dispatch_to_focused(hierarchy, event) do
-            {^hierarchy, []} ->
-              navigate_by_arrow(hierarchy, focused_id, focusable_widgets, direction)
+  defp arrow_navigate_with_focus(hierarchy, event, direction, focusable_widgets) do
+    case hierarchy.focused_widget do
+      nil ->
+        {focus_widget(hierarchy, hd(focusable_widgets), :down), []}
 
-            {_hierarchy, [_ | _]} = result ->
-              result
-
-            {_new_hierarchy, []} = result ->
-              result
-          end
-      end
+      focused_id ->
+        case dispatch_to_focused(hierarchy, event) do
+          {^hierarchy, []} -> navigate_by_arrow(hierarchy, focused_id, focusable_widgets, direction)
+          result -> result
+        end
     end
   end
 
   defp navigate_by_arrow(hierarchy, focused_id, focusable_widgets, direction) do
-    focused_rect = Map.get(hierarchy.widget_rects, focused_id)
-
-    if focused_rect == nil do
-      {hierarchy, []}
-    else
-      focused_point = %{x: focused_rect.x, y: focused_rect.y}
-
-      candidates =
-        focusable_widgets
-        |> Enum.reject(&(&1 == focused_id))
-        |> Enum.map(fn widget_id ->
-          rect = Map.get(hierarchy.widget_rects, widget_id)
-          if rect, do: {widget_id, rect, %{x: rect.x, y: rect.y}}, else: nil
-        end)
-        |> Enum.reject(&is_nil/1)
-
-      target =
-        case direction do
-          :up ->
-            candidates
-            |> Enum.filter(fn {_id, _rect, pt} -> pt.y < focused_point.y end)
-            |> Enum.min_by(
-              fn {_id, _rect, pt} ->
-                {focused_point.y - pt.y, abs(pt.x - focused_point.x)}
-              end,
-              fn -> nil end
-            )
-
-          :down ->
-            candidates
-            |> Enum.filter(fn {_id, _rect, pt} -> pt.y > focused_point.y end)
-            |> Enum.min_by(
-              fn {_id, _rect, pt} ->
-                {pt.y - focused_point.y, abs(pt.x - focused_point.x)}
-              end,
-              fn -> nil end
-            )
-
-          :left ->
-            candidates
-            |> Enum.filter(fn {_id, _rect, pt} -> pt.x < focused_point.x end)
-            |> Enum.min_by(
-              fn {_id, _rect, pt} ->
-                {focused_point.x - pt.x, abs(pt.y - focused_point.y)}
-              end,
-              fn -> nil end
-            )
-
-          :right ->
-            candidates
-            |> Enum.filter(fn {_id, _rect, pt} -> pt.x > focused_point.x end)
-            |> Enum.min_by(
-              fn {_id, _rect, pt} ->
-                {pt.x - focused_point.x, abs(pt.y - focused_point.y)}
-              end,
-              fn -> nil end
-            )
-        end
-
-      case target do
-        {widget_id, _rect, _pt} ->
-          {focus_widget(hierarchy, widget_id, :down), []}
-
-        nil ->
-          {hierarchy, []}
-      end
+    case Map.get(hierarchy.widget_rects, focused_id) do
+      nil -> {hierarchy, []}
+      focused_rect -> navigate_by_arrow_from_rect(hierarchy, focused_id, focusable_widgets, direction, focused_rect)
     end
   end
+
+  defp navigate_by_arrow_from_rect(hierarchy, focused_id, focusable_widgets, direction, focused_rect) do
+    focused_point = %{x: focused_rect.x, y: focused_rect.y}
+
+    candidates =
+      focusable_widgets
+      |> Enum.reject(&(&1 == focused_id))
+      |> Enum.map(fn widget_id ->
+        rect = Map.get(hierarchy.widget_rects, widget_id)
+        if rect, do: {widget_id, rect, %{x: rect.x, y: rect.y}}, else: nil
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    target = find_arrow_target(candidates, focused_point, direction)
+    focus_arrow_target(hierarchy, target)
+  end
+
+  defp find_arrow_target(candidates, focused_point, :up) do
+    candidates
+    |> Enum.filter(fn {_, _, pt} -> pt.y < focused_point.y end)
+    |> Enum.min_by(fn {_, _, pt} -> {focused_point.y - pt.y, abs(pt.x - focused_point.x)} end, fn -> nil end)
+  end
+
+  defp find_arrow_target(candidates, focused_point, :down) do
+    candidates
+    |> Enum.filter(fn {_, _, pt} -> pt.y > focused_point.y end)
+    |> Enum.min_by(fn {_, _, pt} -> {pt.y - focused_point.y, abs(pt.x - focused_point.x)} end, fn -> nil end)
+  end
+
+  defp find_arrow_target(candidates, focused_point, :left) do
+    candidates
+    |> Enum.filter(fn {_, _, pt} -> pt.x < focused_point.x end)
+    |> Enum.min_by(fn {_, _, pt} -> {focused_point.x - pt.x, abs(pt.y - focused_point.y)} end, fn -> nil end)
+  end
+
+  defp find_arrow_target(candidates, focused_point, :right) do
+    candidates
+    |> Enum.filter(fn {_, _, pt} -> pt.x > focused_point.x end)
+    |> Enum.min_by(fn {_, _, pt} -> {pt.x - focused_point.x, abs(pt.y - focused_point.y)} end, fn -> nil end)
+  end
+
+  defp focus_arrow_target(hierarchy, nil), do: {hierarchy, []}
+  defp focus_arrow_target(hierarchy, {widget_id, _rect, _pt}), do: {focus_widget(hierarchy, widget_id, :down), []}
 
   defp handle_mouse_event(hierarchy, mouse_event) do
     case {mouse_event.type, hierarchy.drag_capture_widget} do
@@ -810,10 +715,7 @@ defmodule Drafter.WidgetHierarchy do
 
     case {mouse_event.type, target_widget} do
       {:scroll, nil} ->
-        case find_scroll_container_at(hierarchy, mouse_event.x, mouse_event.y) do
-          nil -> {hierarchy, []}
-          scroll_id -> handle_event_with_phases(hierarchy, scroll_id, {:mouse, mouse_event})
-        end
+        dispatch_to_scroll_container(hierarchy, mouse_event)
 
       {_, nil} ->
         {hierarchy, []}
@@ -823,50 +725,54 @@ defmodule Drafter.WidgetHierarchy do
         handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
 
       {:mouse_up, widget_id} ->
-        if :ctrl in Map.get(mouse_event, :mods, []) do
-          hierarchy =
-            toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y)
-
-          {hierarchy, []}
-        else
-          hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
-          hierarchy = focus_widget(hierarchy, widget_id)
-          relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
-
-          handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
-        end
+        handle_mouse_up(hierarchy, widget_id, mouse_event)
 
       {:drag, widget_id} ->
         relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
-
-        {new_hierarchy, actions} =
-          handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
-
+        {new_hierarchy, actions} = handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
         widget_state = get_widget_state(new_hierarchy, widget_id)
-        new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
-        {new_hierarchy, actions}
+        {maybe_start_drag_capture(new_hierarchy, widget_id, widget_state), actions}
 
       {:scroll, widget_id} ->
         relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
         handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
 
       {:mouse_down, widget_id} ->
-        if :ctrl in Map.get(mouse_event, :mods, []) do
-          hierarchy = toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y)
-          {hierarchy, []}
-        else
-          hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
-          hierarchy = focus_widget(hierarchy, widget_id)
-          relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
-          {new_hierarchy, actions} =
-            handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
-          widget_state = get_widget_state(new_hierarchy, widget_id)
-          new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
-          {new_hierarchy, actions}
-        end
+        handle_mouse_down(hierarchy, widget_id, mouse_event)
 
       {_, _widget_id} ->
         {hierarchy, []}
+    end
+  end
+
+  defp dispatch_to_scroll_container(hierarchy, mouse_event) do
+    case find_scroll_container_at(hierarchy, mouse_event.x, mouse_event.y) do
+      nil -> {hierarchy, []}
+      scroll_id -> handle_event_with_phases(hierarchy, scroll_id, {:mouse, mouse_event})
+    end
+  end
+
+  defp handle_mouse_up(hierarchy, widget_id, mouse_event) do
+    if :ctrl in Map.get(mouse_event, :mods, []) do
+      {toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y), []}
+    else
+      hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
+      hierarchy = focus_widget(hierarchy, widget_id)
+      relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
+      handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+    end
+  end
+
+  defp handle_mouse_down(hierarchy, widget_id, mouse_event) do
+    if :ctrl in Map.get(mouse_event, :mods, []) do
+      {toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y), []}
+    else
+      hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
+      hierarchy = focus_widget(hierarchy, widget_id)
+      relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
+      {new_hierarchy, actions} = handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+      widget_state = get_widget_state(new_hierarchy, widget_id)
+      {maybe_start_drag_capture(new_hierarchy, widget_id, widget_state), actions}
     end
   end
 
@@ -887,47 +793,39 @@ defmodule Drafter.WidgetHierarchy do
       end, fn -> nil end)
 
     case innermost do
-      nil ->
-        hierarchy
+      nil -> hierarchy
+      {scroll_id, _info} -> toggle_scroll_lock(hierarchy, scroll_id)
+    end
+  end
 
-      {scroll_id, _info} ->
-        case get_widget_state(hierarchy, scroll_id) do
-          nil ->
-            hierarchy
-
-          state ->
-            new_state = %{state | scroll_locked: not state.scroll_locked}
-            update_widget_state_in_hierarchy(hierarchy, scroll_id, new_state)
-        end
+  defp toggle_scroll_lock(hierarchy, scroll_id) do
+    case get_widget_state(hierarchy, scroll_id) do
+      nil -> hierarchy
+      state -> update_widget_state_in_hierarchy(hierarchy, scroll_id, %{state | scroll_locked: not state.scroll_locked})
     end
   end
 
   defp clear_scroll_locks_outside(hierarchy, x, y) do
     Enum.reduce(hierarchy.scroll_containers, hierarchy, fn {scroll_id, info}, h ->
-      if info.click_to_scroll do
-        v = info.viewport_rect
-        outside = not (x >= v.x and x < v.x + v.width and y >= v.y and y < v.y + v.height)
-
-        if outside do
-          case get_widget_state(h, scroll_id) do
-            nil ->
-              h
-
-            state ->
-              if Map.get(state, :scroll_locked, false) do
-                new_state = %{state | scroll_locked: false}
-                update_widget_state_in_hierarchy(h, scroll_id, new_state)
-              else
-                h
-              end
-          end
-        else
-          h
-        end
-      else
-        h
-      end
+      maybe_clear_scroll_lock(h, scroll_id, info, x, y)
     end)
+  end
+
+  defp maybe_clear_scroll_lock(h, _scroll_id, %{click_to_scroll: false}, _x, _y), do: h
+
+  defp maybe_clear_scroll_lock(h, scroll_id, info, x, y) do
+    v = info.viewport_rect
+    outside = not (x >= v.x and x < v.x + v.width and y >= v.y and y < v.y + v.height)
+    clear_lock_if_outside(h, scroll_id, outside)
+  end
+
+  defp clear_lock_if_outside(h, _scroll_id, false), do: h
+
+  defp clear_lock_if_outside(h, scroll_id, true) do
+    case get_widget_state(h, scroll_id) do
+      %{scroll_locked: true} = state -> update_widget_state_in_hierarchy(h, scroll_id, %{state | scroll_locked: false})
+      _ -> h
+    end
   end
 
   defp update_widget_state_in_hierarchy(hierarchy, widget_id, new_state) do
@@ -964,30 +862,24 @@ defmodule Drafter.WidgetHierarchy do
         x >= v.x and x < v.x + v.width and y >= v.y and y < v.y + v.height
       end)
 
-    case candidates do
-      [] ->
-        nil
+    resolve_scroll_candidate(hierarchy, candidates)
+  end
 
-      [{id, info}] when not info.click_to_scroll ->
-        id
+  defp resolve_scroll_candidate(_hierarchy, []), do: nil
+  defp resolve_scroll_candidate(_hierarchy, [{id, %{click_to_scroll: false}}]), do: id
 
-      _ ->
-        sorted =
-          Enum.sort_by(candidates, fn {_id, info} ->
-            info.viewport_rect.width * info.viewport_rect.height
-          end)
+  defp resolve_scroll_candidate(hierarchy, candidates) do
+    sorted = Enum.sort_by(candidates, fn {_id, info} -> info.viewport_rect.width * info.viewport_rect.height end)
+    Enum.find_value(sorted, &pick_scroll_candidate(hierarchy, candidates, &1))
+  end
 
-        Enum.find_value(sorted, fn {id, info} ->
-          cond do
-            not info.click_to_scroll ->
-              if claimed_by_outer_click_to_scroll?(hierarchy, candidates, id), do: nil, else: id
+  defp pick_scroll_candidate(hierarchy, candidates, {id, %{click_to_scroll: false}}) do
+    if claimed_by_outer_click_to_scroll?(hierarchy, candidates, id), do: nil, else: id
+  end
 
-            info.click_to_scroll ->
-              state = get_widget_state(hierarchy, id)
-              if state && Map.get(state, :scroll_locked, false), do: id, else: nil
-          end
-        end)
-    end
+  defp pick_scroll_candidate(hierarchy, _candidates, {id, _info}) do
+    state = get_widget_state(hierarchy, id)
+    if state && Map.get(state, :scroll_locked, false), do: id, else: nil
   end
 
   defp claimed_by_outer_click_to_scroll?(hierarchy, candidates, inner_id) do
@@ -1030,14 +922,7 @@ defmodule Drafter.WidgetHierarchy do
 
       prev_hover != nil and target_widget != prev_hover ->
         {h1, _} = handle_widget_event(hierarchy, prev_hover, :unhover)
-        h2 = %{h1 | hover_widget: target_widget}
-
-        if target_widget do
-          {h3, _} = handle_widget_event(h2, target_widget, :hover)
-          h3
-        else
-          h2
-        end
+        send_hover_if_target(%{h1 | hover_widget: target_widget}, target_widget)
 
       prev_hover == nil and target_widget != nil ->
         {h1, _} = handle_widget_event(hierarchy, target_widget, :hover)
@@ -1046,6 +931,13 @@ defmodule Drafter.WidgetHierarchy do
       true ->
         hierarchy
     end
+  end
+
+  defp send_hover_if_target(hierarchy, nil), do: hierarchy
+
+  defp send_hover_if_target(hierarchy, target_widget) do
+    {h, _} = handle_widget_event(hierarchy, target_widget, :hover)
+    h
   end
 
   @doc "Get widget state"
@@ -1073,103 +965,47 @@ defmodule Drafter.WidgetHierarchy do
   end
 
   defp handle_widget_event(hierarchy, widget_id, event) do
-    widget_info = Map.get(hierarchy.widgets, widget_id)
+    case Map.get(hierarchy.widgets, widget_id) do
+      nil ->
+        {hierarchy, []}
 
-    if widget_info do
-      case try_handle_event(widget_info, event) do
-        {new_state, actions, :stop} ->
-          new_hierarchy = set_widget_state(hierarchy, widget_id, new_state)
-
-          if actions != [] do
-          end
-
-          {new_hierarchy, actions}
-
-        {new_state, actions, :bubble} ->
-          new_hierarchy = set_widget_state(hierarchy, widget_id, new_state)
-
-          case widget_info.parent do
-            nil ->
-              if actions != [] do
-              end
-
-              {new_hierarchy, actions}
-
-            parent_id ->
-              {final_hierarchy, parent_actions} =
-                handle_widget_event(new_hierarchy, parent_id, event)
-
-              if actions != [] or parent_actions != [] do
-              end
-
-              {final_hierarchy, actions ++ parent_actions}
-          end
-
-        :not_handled ->
-          case widget_info.parent do
-            nil -> {hierarchy, []}
-            parent_id -> handle_widget_event(hierarchy, parent_id, event)
-          end
-      end
-    else
-      {hierarchy, []}
+      widget_info ->
+        dispatch_widget_event(hierarchy, widget_id, widget_info, event)
     end
   end
 
+  defp dispatch_widget_event(hierarchy, widget_id, widget_info, event) do
+    case try_handle_event(widget_info, event) do
+      {new_state, actions, :stop} ->
+        {set_widget_state(hierarchy, widget_id, new_state), actions}
+
+      {new_state, actions, :bubble} ->
+        new_hierarchy = set_widget_state(hierarchy, widget_id, new_state)
+        bubble_to_parent(new_hierarchy, widget_info.parent, event, actions)
+
+      :not_handled ->
+        bubble_to_parent(hierarchy, widget_info.parent, event, [])
+    end
+  end
+
+  defp bubble_to_parent(hierarchy, nil, _event, actions), do: {hierarchy, actions}
+
+  defp bubble_to_parent(hierarchy, parent_id, event, actions) do
+    {final_hierarchy, parent_actions} = handle_widget_event(hierarchy, parent_id, event)
+    {final_hierarchy, actions ++ parent_actions}
+  end
+
+  defp try_handle_event(%{pid: pid} = widget_info, event) when is_pid(pid) do
+    WidgetServer.send_event_sync(pid, event)
+    |> Drafter.EventResult.parse(widget_info.state)
+  end
+
   defp try_handle_event(widget_info, event) do
-    if widget_info.pid do
-      result = WidgetServer.send_event_sync(widget_info.pid, event)
-
-      case result do
-        {:ok, new_state, actions} ->
-          {new_state, actions, :stop}
-
-        {:ok, new_state} ->
-          {new_state, [], :stop}
-
-        {:noreply, _new_state} ->
-          :not_handled
-
-        {:bubble, new_state, actions} ->
-          {new_state, actions, :bubble}
-
-        {:bubble, new_state} ->
-          {new_state, [], :bubble}
-
-        {:pop, _} = pop ->
-          {widget_info.state, [pop], :stop}
-
-        {:push, _, _} = push ->
-          {widget_info.state, [push], :stop}
-
-        {:replace, _, _} = replace ->
-          {widget_info.state, [replace], :stop}
-
-        {:app_callback, _, _} = app_callback ->
-          {widget_info.state, [app_callback], :stop}
-
-        _ ->
-          :not_handled
-      end
+    if function_exported?(widget_info.module, :handle_event, 2) do
+      widget_info.module.handle_event(event, widget_info.state)
+      |> Drafter.EventResult.parse(widget_info.state)
     else
-      if function_exported?(widget_info.module, :handle_event, 2) do
-        result = apply(widget_info.module, :handle_event, [event, widget_info.state])
-
-        case result do
-          {:ok, new_state, actions} -> {new_state, actions, :stop}
-          {:ok, new_state} -> {new_state, [], :stop}
-          {:noreply, _new_state} -> :not_handled
-          {:bubble, new_state, actions} -> {new_state, actions, :bubble}
-          {:bubble, new_state} -> {new_state, [], :bubble}
-          {:pop, _} = pop -> {widget_info.state, [pop], :stop}
-          {:push, _, _} = push -> {widget_info.state, [push], :stop}
-          {:replace, _, _} = replace -> {widget_info.state, [replace], :stop}
-          {:app_callback, _, _} = app_callback -> {widget_info.state, [app_callback], :stop}
-          _ -> :not_handled
-        end
-      else
-        :not_handled
-      end
+      :not_handled
     end
   end
 
@@ -1178,8 +1014,10 @@ defmodule Drafter.WidgetHierarchy do
 
     hierarchy.widgets
     |> Enum.filter(fn {widget_id, widget_info} ->
-      is_focusable_widget?(widget_info.module) and not is_disabled?(widget_info.state) and
-        not MapSet.member?(hidden, widget_id)
+      focusable_widget?(widget_info.module) and
+        not disabled?(widget_info.state) and
+        not MapSet.member?(hidden, widget_id) and
+        ancestors_expanded?(hierarchy, widget_info.parent)
     end)
     |> Enum.sort_by(fn {widget_id, _widget_info} ->
       rect = Map.get(hierarchy.widget_rects, widget_id, %{y: 0, x: 0})
@@ -1188,11 +1026,27 @@ defmodule Drafter.WidgetHierarchy do
     |> Enum.map(fn {widget_id, _widget_info} -> widget_id end)
   end
 
-  defp is_disabled?(state) do
+  defp ancestors_expanded?(_hierarchy, nil), do: true
+
+  defp ancestors_expanded?(hierarchy, ancestor_id) do
+    case Map.get(hierarchy.widgets, ancestor_id) do
+      nil ->
+        true
+
+      ancestor ->
+        if Map.get(ancestor.state, :expanded) == false do
+          false
+        else
+          ancestors_expanded?(hierarchy, ancestor.parent)
+        end
+    end
+  end
+
+  defp disabled?(state) do
     Map.get(state, :disabled, false)
   end
 
-  defp is_focusable_widget?(module) do
+  defp focusable_widget?(module) do
     function_exported?(module, :__widget_capabilities__, 0) and
       Map.get(module.__widget_capabilities__(), :focusable, false)
   end
@@ -1290,29 +1144,36 @@ defmodule Drafter.WidgetHierarchy do
 
     updated_containers =
       Enum.reduce(updated_containers, updated_containers, fn {existing_id, existing_info}, acc ->
-        cond do
-          existing_id == scroll_id ->
-            acc
-
-          existing_info.click_to_scroll and
-              viewport_rect_contains?(existing_info.viewport_rect, viewport_rect) ->
-            updated = Map.update!(acc, existing_id, fn info ->
-              %{info | scroll_exceptions: MapSet.put(info.scroll_exceptions, scroll_id)}
-            end)
-            updated
-
-          click_to_scroll and
-              viewport_rect_contains?(viewport_rect, existing_info.viewport_rect) ->
-            Map.update!(acc, scroll_id, fn info ->
-              %{info | scroll_exceptions: MapSet.put(info.scroll_exceptions, existing_id)}
-            end)
-
-          true ->
-            acc
-        end
+        update_scroll_exceptions(acc, scroll_id, viewport_rect, click_to_scroll, existing_id, existing_info)
       end)
 
     %{hierarchy | scroll_containers: updated_containers}
+  end
+
+  defp update_scroll_exceptions(acc, scroll_id, _viewport_rect, _click_to_scroll, scroll_id, _existing_info), do: acc
+
+  defp update_scroll_exceptions(acc, scroll_id, viewport_rect, _click_to_scroll, existing_id, %{click_to_scroll: true} = existing_info) do
+    if viewport_rect_contains?(existing_info.viewport_rect, viewport_rect) do
+      add_scroll_exception(acc, existing_id, scroll_id)
+    else
+      acc
+    end
+  end
+
+  defp update_scroll_exceptions(acc, scroll_id, viewport_rect, true, existing_id, existing_info) do
+    if viewport_rect_contains?(viewport_rect, existing_info.viewport_rect) do
+      add_scroll_exception(acc, scroll_id, existing_id)
+    else
+      acc
+    end
+  end
+
+  defp update_scroll_exceptions(acc, _scroll_id, _viewport_rect, _click_to_scroll, _existing_id, _existing_info), do: acc
+
+  defp add_scroll_exception(containers, container_id, exception_id) do
+    Map.update!(containers, container_id, fn info ->
+      %{info | scroll_exceptions: MapSet.put(info.scroll_exceptions, exception_id)}
+    end)
   end
 
   defp viewport_rect_contains?(outer, inner) do
@@ -1357,64 +1218,45 @@ defmodule Drafter.WidgetHierarchy do
 
   defp build_ancestor_path(hierarchy, widget_id, acc \\ []) do
     case Map.get(hierarchy.widgets, widget_id) do
-      nil ->
-        Enum.reverse(acc)
+      nil -> Enum.reverse(acc)
+      %{parent: nil} -> Enum.reverse([widget_id | acc])
+      %{parent: parent_id} -> build_ancestor_path(hierarchy, parent_id, [widget_id | acc])
+    end
+  end
 
-      widget_info ->
-        case widget_info.parent do
-          nil ->
-            Enum.reverse([widget_id | acc])
-
-          parent_id ->
-            build_ancestor_path(hierarchy, parent_id, [widget_id | acc])
-        end
+  defp try_handle_event_capture(%{pid: pid} = widget_info, event) when is_pid(pid) do
+    if function_exported?(widget_info.module, :handle_event_capture, 2) do
+      WidgetServer.call_capture_handler(pid, event)
+      |> classify_capture_result(event, widget_info.state)
+    else
+      {:continue, event, widget_info.state}
     end
   end
 
   defp try_handle_event_capture(widget_info, event) do
-    if widget_info.pid do
-      if function_exported?(widget_info.module, :handle_event_capture, 2) do
-        case WidgetServer.call_capture_handler(widget_info.pid, event) do
-          {:continue, updated_event, new_state} ->
-            {:continue, updated_event, new_state}
-
-          {:stop, updated_event, new_state, actions} ->
-            updated_event = Drafter.Event.Object.stop_propagation(updated_event)
-            {:stop, updated_event, new_state, actions}
-
-          {:prevent, updated_event, new_state} ->
-            updated_event = Drafter.Event.Object.prevent_default(updated_event)
-            updated_event = Drafter.Event.Object.stop_propagation(updated_event)
-            {:stop, updated_event, new_state, []}
-
-          _ ->
-            {:continue, event, widget_info.state}
-        end
-      else
-        {:continue, event, widget_info.state}
-      end
+    if function_exported?(widget_info.module, :handle_event_capture, 2) do
+      widget_info.module.handle_event_capture(event, widget_info.state)
+      |> classify_capture_result(event, widget_info.state)
     else
-      if function_exported?(widget_info.module, :handle_event_capture, 2) do
-        case apply(widget_info.module, :handle_event_capture, [event, widget_info.state]) do
-          {:continue, updated_event, new_state} ->
-            {:continue, updated_event, new_state}
-
-          {:stop, updated_event, new_state, actions} ->
-            updated_event = Drafter.Event.Object.stop_propagation(updated_event)
-            {:stop, updated_event, new_state, actions}
-
-          {:prevent, updated_event, new_state} ->
-            updated_event = Drafter.Event.Object.prevent_default(updated_event)
-            updated_event = Drafter.Event.Object.stop_propagation(updated_event)
-            {:stop, updated_event, new_state, []}
-
-          _ ->
-            {:continue, event, widget_info.state}
-        end
-      else
-        {:continue, event, widget_info.state}
-      end
+      {:continue, event, widget_info.state}
     end
+  end
+
+  defp classify_capture_result({:continue, updated_event, new_state}, _event, _fallback_state) do
+    {:continue, updated_event, new_state}
+  end
+
+  defp classify_capture_result({:stop, updated_event, new_state, actions}, _event, _fallback_state) do
+    {:stop, Drafter.Event.Object.stop_propagation(updated_event), new_state, actions}
+  end
+
+  defp classify_capture_result({:prevent, updated_event, new_state}, _event, _fallback_state) do
+    stopped = updated_event |> Drafter.Event.Object.prevent_default() |> Drafter.Event.Object.stop_propagation()
+    {:stop, stopped, new_state, []}
+  end
+
+  defp classify_capture_result(_, event, fallback_state) do
+    {:continue, event, fallback_state}
   end
 
   defp dispatch_capture_phase(hierarchy, event, path) do
@@ -1422,24 +1264,26 @@ defmodule Drafter.WidgetHierarchy do
       if evt.immediate_propagation_stopped do
         {:halt, {h, evt, actions}}
       else
-        widget_info = Map.get(h.widgets, widget_id)
-
-        if widget_info do
-          evt = %{evt | current_target: widget_id, phase: :capture}
-
-          case try_handle_event_capture(widget_info, evt) do
-            {:continue, updated_event, new_state} ->
-              new_h = set_widget_state(h, widget_id, new_state)
-              {:cont, {new_h, updated_event, actions}}
-
-            {:stop, updated_event, new_state, new_actions} ->
-              new_h = set_widget_state(h, widget_id, new_state)
-              {:halt, {new_h, updated_event, actions ++ new_actions}}
-          end
-        else
-          {:cont, {h, evt, actions}}
-        end
+        process_capture_widget(h, widget_id, evt, actions)
       end
     end)
+  end
+
+  defp process_capture_widget(h, widget_id, evt, actions) do
+    case Map.get(h.widgets, widget_id) do
+      nil ->
+        {:cont, {h, evt, actions}}
+
+      widget_info ->
+        evt = %{evt | current_target: widget_id, phase: :capture}
+
+        case try_handle_event_capture(widget_info, evt) do
+          {:continue, updated_event, new_state} ->
+            {:cont, {set_widget_state(h, widget_id, new_state), updated_event, actions}}
+
+          {:stop, updated_event, new_state, new_actions} ->
+            {:halt, {set_widget_state(h, widget_id, new_state), updated_event, actions ++ new_actions}}
+        end
+    end
   end
 end

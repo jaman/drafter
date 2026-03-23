@@ -1,8 +1,9 @@
 defmodule Drafter.ScreenRenderer do
   @moduledoc false
 
-  alias Drafter.{Screen, ScreenManager, ComponentRenderer, ThemeManager, LayerCompositor}
-  alias Drafter.Draw.{Strip, Segment}
+  alias Drafter.{ComponentRenderer, LayerCompositor, Screen, ScreenManager, ThemeManager}
+  alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.WidgetHierarchy
 
   def render_screens(base_strips, screen_rect, app_state) do
     screens = ScreenManager.get_all_screens()
@@ -439,19 +440,18 @@ defmodule Drafter.ScreenRenderer do
     base_strips
     |> Enum.with_index()
     |> Enum.map(fn {strip, y} ->
-      if y >= rect.y and y < rect.y + rect.height do
-        overlay_idx = y - rect.y
-
-        if overlay_idx >= 0 and overlay_idx < length(overlay_strips) do
-          overlay_strip = Enum.at(overlay_strips, overlay_idx)
-          merge_strip_at(strip, overlay_strip, rect.x)
-        else
-          strip
-        end
-      else
-        strip
-      end
+      composite_strip(strip, y, overlay_strips, rect)
     end)
+  end
+
+  defp composite_strip(strip, y, overlay_strips, rect) do
+    overlay_idx = y - rect.y
+
+    if y >= rect.y and y < rect.y + rect.height and overlay_idx < length(overlay_strips) do
+      merge_strip_at(strip, Enum.at(overlay_strips, overlay_idx), rect.x)
+    else
+      strip
+    end
   end
 
   defp merge_strip_at(base_strip, overlay_strip, x_offset) do
@@ -528,58 +528,60 @@ defmodule Drafter.ScreenRenderer do
 
   defp create_widget_layers(hierarchy, _rect) do
     hidden = Map.get(hierarchy, :hidden_widgets, MapSet.new())
-    widget_ids = Map.keys(hierarchy.widgets)
 
-    Enum.flat_map(widget_ids, fn widget_id ->
-      if MapSet.member?(hidden, widget_id) do
-        []
-      else
-        case Map.get(hierarchy.widgets, widget_id) do
-          nil ->
-            []
-
-          widget_info ->
-            widget_rect = Map.get(hierarchy.widget_rects, widget_id)
-
-            if widget_rect && widget_info do
-              scroll_parent_id = Drafter.WidgetHierarchy.get_widget_scroll_parent(hierarchy, widget_id)
-
-              if scroll_parent_id do
-                scroll_info = Drafter.WidgetHierarchy.get_scroll_container_info(hierarchy, scroll_parent_id)
-                scroll_state = Drafter.WidgetHierarchy.get_widget_state(hierarchy, scroll_parent_id)
-
-                if scroll_info && scroll_state do
-                  viewport = scroll_info.viewport_rect
-                  scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
-
-                  widget_bottom = widget_rect.y + widget_rect.height
-                  viewport_bottom = viewport.y + scroll_y + viewport.height
-
-                  if widget_bottom <= viewport.y + scroll_y or widget_rect.y >= viewport_bottom do
-                    []
-                  else
-                    render_widget_to_layer(hierarchy, widget_id, widget_info, widget_rect, scroll_parent_id, scroll_info, scroll_state)
-                  end
-                else
-                  render_widget_to_layer(hierarchy, widget_id, widget_info, widget_rect, nil, nil, nil)
-                end
-              else
-                render_widget_to_layer(hierarchy, widget_id, widget_info, widget_rect, nil, nil, nil)
-              end
-            else
-              []
-            end
-        end
-      end
+    hierarchy.widgets
+    |> Map.keys()
+    |> Enum.flat_map(fn widget_id ->
+      create_widget_layer(hierarchy, widget_id, hidden)
     end)
   end
 
-  defp render_widget_to_layer(_hierarchy, widget_id, widget_info, widget_rect, scroll_parent_id, scroll_info, scroll_state) do
+  defp create_widget_layer(hierarchy, widget_id, hidden) do
+    with false <- MapSet.member?(hidden, widget_id),
+         widget_info when not is_nil(widget_info) <- Map.get(hierarchy.widgets, widget_id),
+         widget_rect when not is_nil(widget_rect) <- Map.get(hierarchy.widget_rects, widget_id) do
+      build_widget_layer(hierarchy, widget_id, widget_info, widget_rect)
+    else
+      _ -> []
+    end
+  end
+
+  defp build_widget_layer(hierarchy, widget_id, widget_info, widget_rect) do
+    scroll_parent_id = WidgetHierarchy.get_widget_scroll_parent(hierarchy, widget_id)
+    scroll_info = scroll_parent_id && WidgetHierarchy.get_scroll_container_info(hierarchy, scroll_parent_id)
+    scroll_state = scroll_parent_id && WidgetHierarchy.get_widget_state(hierarchy, scroll_parent_id)
+
+    if scroll_info && scroll_state && widget_clipped?(widget_rect, scroll_info, scroll_state) do
+      []
+    else
+      render_widget_to_layer(
+        hierarchy, widget_id, widget_info, widget_rect, scroll_parent_id, scroll_info, scroll_state
+      )
+    end
+  end
+
+  defp widget_clipped?(widget_rect, scroll_info, scroll_state) do
+    viewport = scroll_info.viewport_rect
+    scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
+    widget_bottom = widget_rect.y + widget_rect.height
+    viewport_bottom = viewport.y + scroll_y + viewport.height
+    widget_bottom <= viewport.y + scroll_y or widget_rect.y >= viewport_bottom
+  end
+
+  defp render_widget_to_layer(
+         _hierarchy,
+         widget_id,
+         widget_info,
+         widget_rect,
+         scroll_parent_id,
+         scroll_info,
+         scroll_state
+       ) do
     {render_rect, widget_strips} =
       if widget_info.pid do
         Drafter.WidgetServer.get_render(widget_info.pid)
       else
-        strips = apply(widget_info.module, :render, [widget_info.state, widget_rect])
+        strips = widget_info.module.render(widget_info.state, widget_rect)
         {widget_rect, strips}
       end
 
@@ -599,7 +601,7 @@ defmodule Drafter.ScreenRenderer do
         {render_rect, widget_strips}
       end
 
-    if length(final_strips) > 0 do
+    if final_strips != [] do
       layer = LayerCompositor.widget_layer(widget_id, final_strips, final_rect)
       [layer]
     else
@@ -608,32 +610,31 @@ defmodule Drafter.ScreenRenderer do
   end
 
   defp wrap_text(text, max_width) do
-    words = String.split(text, ~r/\s+/)
-
     {lines, current_line} =
-      Enum.reduce(words, {[], ""}, fn word, {lines, current} ->
-        test_line =
-          if current == "" do
-            word
-          else
-            current <> " " <> word
-          end
-
-        if String.length(test_line) <= max_width do
-          {lines, test_line}
-        else
-          if current == "" do
-            {lines ++ [String.slice(word, 0, max_width)], ""}
-          else
-            {lines ++ [current], word}
-          end
-        end
+      text
+      |> String.split(~r/\s+/)
+      |> Enum.reduce({[], ""}, fn word, {lines, current} ->
+        accumulate_word(lines, current, word, max_width)
       end)
 
-    if current_line == "" do
-      lines
+    if current_line == "", do: lines, else: lines ++ [current_line]
+  end
+
+  defp accumulate_word(lines, current, word, max_width) do
+    test_line = if current == "", do: word, else: current <> " " <> word
+
+    if String.length(test_line) <= max_width do
+      {lines, test_line}
     else
-      lines ++ [current_line]
+      append_overflowing_word(lines, current, word, max_width)
     end
+  end
+
+  defp append_overflowing_word(lines, "", word, max_width) do
+    {lines ++ [String.slice(word, 0, max_width)], ""}
+  end
+
+  defp append_overflowing_word(lines, current, word, _max_width) do
+    {lines ++ [current], word}
   end
 end

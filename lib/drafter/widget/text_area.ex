@@ -170,13 +170,7 @@ defmodule Drafter.Widget.TextArea do
 
   @impl Drafter.Widget
   def render(state, rect) do
-    normalized_state =
-      if is_struct(state, __MODULE__) do
-        state
-      else
-        mount(state)
-      end
-
+    normalized_state = normalize_state(state)
     gutter_width = normalized_state.gutter_width
     content_width = max(1, rect.width - 2 - gutter_width)
     content_height = rect.height - 2
@@ -270,126 +264,104 @@ defmodule Drafter.Widget.TextArea do
   end
 
   @impl Drafter.Widget
-  def handle_event(event, state) do
-    case event do
-      {:key, :up} when state.focused ->
-        {:ok, state |> clear_selection() |> do_move_cursor_up() |> adjust_scroll()}
+  def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
+  def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
 
-      {:key, :down} when state.focused ->
-        {:ok, state |> clear_selection() |> do_move_cursor_down() |> adjust_scroll()}
+  def handle_event({:key, :up}, %{focused: true} = state),
+    do: {:ok, state |> clear_selection() |> do_move_cursor_up() |> adjust_scroll()}
 
-      {:key, :left} when state.focused ->
-        {:ok, state |> clear_selection() |> do_move_cursor_left() |> adjust_scroll()}
+  def handle_event({:key, :down}, %{focused: true} = state),
+    do: {:ok, state |> clear_selection() |> do_move_cursor_down() |> adjust_scroll()}
 
-      {:key, :right} when state.focused ->
-        {:ok, state |> clear_selection() |> do_move_cursor_right() |> adjust_scroll()}
+  def handle_event({:key, :left}, %{focused: true} = state),
+    do: {:ok, state |> clear_selection() |> do_move_cursor_left() |> adjust_scroll()}
 
-      {:key, :home} when state.focused ->
-        {:ok, %{state | cursor_col: 0, selection: nil}}
+  def handle_event({:key, :right}, %{focused: true} = state),
+    do: {:ok, state |> clear_selection() |> do_move_cursor_right() |> adjust_scroll()}
 
-      {:key, :end} when state.focused ->
-        current_line = Enum.at(state.lines, state.cursor_line, "")
-        {:ok, %{state | cursor_col: String.length(current_line), selection: nil}}
+  def handle_event({:key, :home}, %{focused: true} = state),
+    do: {:ok, %{state | cursor_col: 0, selection: nil}}
 
-      {:key, :page_up} when state.focused ->
-        viewport_height = max(1, state.height - 2)
-        new_line = max(0, state.cursor_line - viewport_height)
-        line_length = String.length(Enum.at(state.lines, new_line, ""))
-        new_col = min(state.cursor_col, line_length)
+  def handle_event({:key, :end}, %{focused: true} = state) do
+    current_line = Enum.at(state.lines, state.cursor_line, "")
+    {:ok, %{state | cursor_col: String.length(current_line), selection: nil}}
+  end
 
-        {:ok,
-         %{state | cursor_line: new_line, cursor_col: new_col, selection: nil}
-         |> adjust_scroll()}
+  def handle_event({:key, :page_up}, %{focused: true} = state) do
+    viewport_height = max(1, state.height - 2)
+    new_line = max(0, state.cursor_line - viewport_height)
+    new_col = min(state.cursor_col, String.length(Enum.at(state.lines, new_line, "")))
+    {:ok, %{state | cursor_line: new_line, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+  end
 
-      {:key, :page_down} when state.focused ->
-        viewport_height = max(1, state.height - 2)
-        new_line = min(length(state.lines) - 1, state.cursor_line + viewport_height)
-        line_length = String.length(Enum.at(state.lines, new_line, ""))
-        new_col = min(state.cursor_col, line_length)
+  def handle_event({:key, :page_down}, %{focused: true} = state) do
+    viewport_height = max(1, state.height - 2)
+    new_line = min(length(state.lines) - 1, state.cursor_line + viewport_height)
+    new_col = min(state.cursor_col, String.length(Enum.at(state.lines, new_line, "")))
+    {:ok, %{state | cursor_line: new_line, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+  end
 
-        {:ok,
-         %{state | cursor_line: new_line, cursor_col: new_col, selection: nil}
-         |> adjust_scroll()}
+  def handle_event({:key, {:shift, :up}}, %{focused: true} = state),
+    do: {:ok, extend_selection(state, :up)}
 
-      {:key, {:shift, :up}} when state.focused ->
-        {:ok, extend_selection(state, :up)}
+  def handle_event({:key, {:shift, :down}}, %{focused: true} = state),
+    do: {:ok, extend_selection(state, :down)}
 
-      {:key, {:shift, :down}} when state.focused ->
-        {:ok, extend_selection(state, :down)}
+  def handle_event({:key, {:shift, :left}}, %{focused: true} = state),
+    do: {:ok, extend_selection(state, :left)}
 
-      {:key, {:shift, :left}} when state.focused ->
-        {:ok, extend_selection(state, :left)}
+  def handle_event({:key, {:shift, :right}}, %{focused: true} = state),
+    do: {:ok, extend_selection(state, :right)}
 
-      {:key, {:shift, :right}} when state.focused ->
-        {:ok, extend_selection(state, :right)}
+  def handle_event({:key, 1}, %{focused: true} = state),
+    do: {:ok, select_all(state)}
 
-      {:key, 1} when state.focused ->
-        {:ok, select_all(state)}
+  def handle_event({:key, 3}, %{focused: true} = state) do
+    copy_selection(state)
+    {:ok, state}
+  end
 
-      {:key, 3} when state.focused ->
-        copy_selection(state)
-        {:ok, state}
+  def handle_event({:key, 24}, %{focused: true} = state), do: handle_cut(state)
 
-      {:key, 24} when state.focused ->
-        handle_cut(state)
+  def handle_event({:key, 22}, %{focused: true, read_only: false} = state),
+    do: handle_paste(state)
 
-      {:key, 22} when state.focused and not state.read_only ->
-        handle_paste(state)
+  def handle_event({:key, 26}, %{focused: true} = state), do: handle_undo(state)
+  def handle_event({:key, 25}, %{focused: true} = state), do: handle_redo(state)
 
-      {:key, 26} when state.focused ->
-        handle_undo(state)
+  def handle_event({:key, {:ctrl, :left}}, %{focused: true} = state) do
+    {new_row, new_col} = word_left(state.lines, state.cursor_line, state.cursor_col)
+    {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+  end
 
-      {:key, 25} when state.focused ->
-        handle_redo(state)
+  def handle_event({:key, {:ctrl, :right}}, %{focused: true} = state) do
+    {new_row, new_col} = word_right(state.lines, state.cursor_line, state.cursor_col)
+    {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+  end
 
-      {:key, {:ctrl, :left}} when state.focused ->
-        new_pos = word_left(state.lines, state.cursor_line, state.cursor_col)
-        {new_row, new_col} = new_pos
-        {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+  def handle_event({:key, :backspace}, %{focused: true} = state), do: handle_backspace(state)
+  def handle_event({:key, :delete}, %{focused: true} = state), do: handle_delete(state)
+  def handle_event({:key, :enter}, %{focused: true} = state), do: handle_enter(state)
 
-      {:key, {:ctrl, :right}} when state.focused ->
-        new_pos = word_right(state.lines, state.cursor_line, state.cursor_col)
-        {new_row, new_col} = new_pos
-        {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+  def handle_event({:key, :tab}, %{focused: true, tab_behavior: :indent} = state),
+    do: handle_tab_indent(state)
 
-      {:key, :backspace} when state.focused ->
-        handle_backspace(state)
+  def handle_event({:char, char}, %{focused: true} = state) when is_integer(char) do
+    char_str = <<char::utf8>>
+    handle_printable_char(state, char_str)
+  end
 
-      {:key, :delete} when state.focused ->
-        handle_delete(state)
+  def handle_event({:key, key}, %{focused: true} = state) when is_atom(key) do
+    handle_printable_char(state, Atom.to_string(key))
+  end
 
-      {:key, :enter} when state.focused ->
-        handle_enter(state)
+  def handle_event(_event, state), do: {:noreply, state}
 
-      {:key, :tab} when state.focused and state.tab_behavior == :indent ->
-        handle_tab_indent(state)
-
-      {:char, char} when state.focused and is_integer(char) ->
-        char_str = <<char::utf8>>
-
-        if printable_char?(char_str) and can_insert_char?(state) do
-          handle_char_input(state, char_str)
-        else
-          {:noreply, state}
-        end
-
-      {:key, key} when state.focused and is_atom(key) ->
-        char = Atom.to_string(key)
-
-        if printable_char?(char) and can_insert_char?(state) do
-          handle_char_input(state, char)
-        else
-          {:noreply, state}
-        end
-
-      {:focus} ->
-        {:ok, %{state | focused: true}}
-
-      {:blur} ->
-        {:ok, %{state | focused: false}}
-
-      _ ->
-        {:noreply, state}
+  defp handle_printable_char(state, char_str) do
+    if printable_char?(char_str) and can_insert_char?(state) do
+      handle_char_input(state, char_str)
+    else
+      {:noreply, state}
     end
   end
 
@@ -515,36 +487,7 @@ defmodule Drafter.Widget.TextArea do
         lines
         |> Enum.slice(state.scroll_offset, content_height)
         |> Enum.with_index(state.scroll_offset)
-        |> Enum.map(fn {line, line_index} ->
-          line_content = String.slice(line, 0, content_width)
-          is_cursor_line = focused and line_index == state.cursor_line
-
-          cursor_line_style =
-            if state.highlight_cursor_line and is_cursor_line do
-              tint_bg(effective_style, -15)
-            else
-              effective_style
-            end
-
-          segments =
-            build_line_segments(
-              state,
-              line_content,
-              line_index,
-              content_width,
-              cursor_line_style,
-              effective_style
-            )
-
-          display_line =
-            if is_cursor_line do
-              insert_cursor_in_line(line_content, state.cursor_col, content_width)
-            else
-              String.pad_trailing(line_content, content_width)
-            end
-
-          {display_line, segments}
-        end)
+        |> Enum.map(&render_visible_line(&1, state, content_width, effective_style))
 
       padding_needed = max(0, content_height - length(visible_lines))
 
@@ -552,6 +495,28 @@ defmodule Drafter.Widget.TextArea do
         List.duplicate({String.duplicate(" ", content_width), nil}, padding_needed)
     end
   end
+
+  defp render_visible_line({line, line_index}, state, content_width, effective_style) do
+    line_content = String.slice(line, 0, content_width)
+    is_cursor_line = state.focused and line_index == state.cursor_line
+
+    cursor_line_style =
+      if state.highlight_cursor_line and is_cursor_line do
+        tint_bg(effective_style, -15)
+      else
+        effective_style
+      end
+
+    segments = build_line_segments(state, line_content, line_index, content_width, cursor_line_style, effective_style)
+    display_line = line_display(is_cursor_line, line_content, state.cursor_col, content_width)
+    {display_line, segments}
+  end
+
+  defp line_display(true, line_content, cursor_col, content_width),
+    do: insert_cursor_in_line(line_content, cursor_col, content_width)
+
+  defp line_display(false, line_content, _cursor_col, content_width),
+    do: String.pad_trailing(line_content, content_width)
 
   defp build_line_segments(state, line_content, line_index, content_width, cursor_line_style, _effective_style) do
     focused = state.focused
@@ -602,80 +567,76 @@ defmodule Drafter.Widget.TextArea do
   defp build_selection_segments(state, line_content, line_index, content_width, base_style) do
     {sel_start_row, sel_start_col, sel_end_row, sel_end_col} = normalize_selection(state.selection)
     padded = String.pad_trailing(line_content, content_width)
-    line_len = String.length(padded)
 
-    cond do
-      line_index < sel_start_row or line_index > sel_end_row ->
-        if state.language != nil do
-          highlight_line(padded, state.language, base_style)
-        else
-          [Segment.new(padded, base_style)]
-        end
-
-      true ->
-        col_start =
-          if line_index == sel_start_row, do: sel_start_col, else: 0
-
-        col_end =
-          if line_index == sel_end_row, do: min(sel_end_col, line_len), else: line_len
-
-        before_text = String.slice(padded, 0, col_start)
-        selected_text = String.slice(padded, col_start, col_end - col_start)
-        after_text = String.slice(padded, col_end, line_len - col_end)
-
-        is_cursor_line = state.focused and line_index == state.cursor_line
-        cursor_col = state.cursor_col
-
-        cursor_style = %{fg: {0, 0, 0}, bg: {255, 255, 255}}
-        sel_style = state.selection_style
-
-        segments = []
-
-        segments =
-          if before_text != "" do
-            segments ++ [Segment.new(before_text, base_style)]
-          else
-            segments
-          end
-
-        segments =
-          if selected_text != "" and is_cursor_line do
-            build_selected_with_cursor(selected_text, col_start, cursor_col, sel_style, cursor_style, segments)
-          else
-            if selected_text != "" do
-              segments ++ [Segment.new(selected_text, sel_style)]
-            else
-              segments
-            end
-          end
-
-        segments =
-          if after_text != "" and is_cursor_line and cursor_col >= col_end do
-            after_cursor_pos = cursor_col - col_end
-            after_len = String.length(after_text)
-
-            if after_cursor_pos < after_len do
-              before_c = String.slice(after_text, 0, after_cursor_pos)
-              cursor_c = String.slice(after_text, after_cursor_pos, 1)
-              after_c = String.slice(after_text, after_cursor_pos + 1, after_len)
-
-              segs = if before_c != "", do: segments ++ [Segment.new(before_c, base_style)], else: segments
-              segs = segs ++ [Segment.new(cursor_c, cursor_style)]
-              if after_c != "", do: segs ++ [Segment.new(after_c, base_style)], else: segs
-            else
-              segments ++ [Segment.new(after_text, base_style)]
-            end
-          else
-            if after_text != "" do
-              segments ++ [Segment.new(after_text, base_style)]
-            else
-              segments
-            end
-          end
-
-        segments
+    if line_index < sel_start_row or line_index > sel_end_row do
+      render_unselected_line(padded, state.language, base_style)
+    else
+      sel_bounds = {sel_start_row, sel_start_col, sel_end_row, sel_end_col}
+      build_selected_line_segments(state, padded, line_index, sel_bounds, base_style)
     end
   end
+
+  defp render_unselected_line(padded, nil, base_style), do: [Segment.new(padded, base_style)]
+  defp render_unselected_line(padded, language, base_style), do: highlight_line(padded, language, base_style)
+
+  defp build_selected_line_segments(state, padded, line_index, {sel_start_row, sel_start_col, sel_end_row, sel_end_col}, base_style) do
+    line_len = String.length(padded)
+    col_start = if line_index == sel_start_row, do: sel_start_col, else: 0
+    col_end = if line_index == sel_end_row, do: min(sel_end_col, line_len), else: line_len
+
+    before_text = String.slice(padded, 0, col_start)
+    selected_text = String.slice(padded, col_start, col_end - col_start)
+    after_text = String.slice(padded, col_end, line_len - col_end)
+
+    is_cursor_line = state.focused and line_index == state.cursor_line
+    cursor_style = %{fg: {0, 0, 0}, bg: {255, 255, 255}}
+    sel_style = state.selection_style
+
+    []
+    |> append_segment(before_text, base_style)
+    |> append_selected_segment(selected_text, col_start, state.cursor_col, is_cursor_line, sel_style, cursor_style)
+    |> append_after_segment(after_text, col_end, state.cursor_col, is_cursor_line, base_style, cursor_style)
+  end
+
+  defp append_segment(segs, "", _style), do: segs
+  defp append_segment(segs, text, style), do: segs ++ [Segment.new(text, style)]
+
+  defp append_selected_segment(segs, "", _col_start, _cursor_col, _is_cursor_line, _sel_style, _cursor_style),
+    do: segs
+
+  defp append_selected_segment(segs, selected_text, col_start, cursor_col, true, sel_style, cursor_style),
+    do: build_selected_with_cursor(selected_text, col_start, cursor_col, sel_style, cursor_style, segs)
+
+  defp append_selected_segment(segs, selected_text, _col_start, _cursor_col, false, sel_style, _cursor_style),
+    do: segs ++ [Segment.new(selected_text, sel_style)]
+
+  defp append_after_segment(segs, "", _col_end, _cursor_col, _is_cursor_line, _base_style, _cursor_style),
+    do: segs
+
+  defp append_after_segment(segs, after_text, col_end, cursor_col, true, base_style, cursor_style)
+       when cursor_col >= col_end do
+    after_cursor_pos = cursor_col - col_end
+    after_len = String.length(after_text)
+    split_text_with_cursor(segs, after_text, after_cursor_pos, after_len, base_style, cursor_style)
+  end
+
+  defp append_after_segment(segs, after_text, _col_end, _cursor_col, _is_cursor_line, base_style, _cursor_style),
+    do: segs ++ [Segment.new(after_text, base_style)]
+
+  defp split_text_with_cursor(segs, text, cursor_pos, text_len, base_style, cursor_style)
+       when cursor_pos < text_len do
+    before_c = String.slice(text, 0, cursor_pos)
+    cursor_c = String.slice(text, cursor_pos, 1)
+    after_c = String.slice(text, cursor_pos + 1, text_len)
+
+    segs
+    |> append_segment(before_c, base_style)
+    |> then(&(&1 ++ [Segment.new(cursor_c, cursor_style)]))
+    |> append_segment(after_c, base_style)
+  end
+
+  defp split_text_with_cursor(segs, text, _cursor_pos, _text_len, base_style, _cursor_style),
+    do: segs ++ [Segment.new(text, base_style)]
 
   defp build_selected_with_cursor(selected_text, col_start, cursor_col, sel_style, cursor_style, acc) do
     sel_len = String.length(selected_text)
@@ -706,6 +667,9 @@ defmodule Drafter.Widget.TextArea do
       padded_line <> "█"
     end
   end
+
+  defp normalize_state(%__MODULE__{} = state), do: state
+  defp normalize_state(props), do: mount(props)
 
   defp tint_bg(style, delta) do
     case Map.get(style, :bg) do
@@ -1167,24 +1131,22 @@ defmodule Drafter.Widget.TextArea do
   end
 
   defp clipboard_paste do
-    try do
-      case :os.type() do
-        {:unix, :darwin} ->
-          {output, 0} = System.cmd("pbpaste", [])
-          output
+    case :os.type() do
+      {:unix, :darwin} ->
+        {output, 0} = System.cmd("pbpaste", [])
+        output
 
-        {:unix, _} ->
-          {output, 0} = System.cmd("xclip", ["-selection", "clipboard", "-o"], [])
-          output
+      {:unix, _} ->
+        {output, 0} = System.cmd("xclip", ["-selection", "clipboard", "-o"], [])
+        output
 
-        _ ->
-          ""
-      end
-    rescue
-      _ -> ""
-    catch
-      _, _ -> ""
+      _ ->
+        ""
     end
+  rescue
+    _ -> ""
+  catch
+    _, _ -> ""
   end
 
   defp snapshot(state), do: {state.lines, state.cursor_line, state.cursor_col}
@@ -1268,42 +1230,32 @@ defmodule Drafter.Widget.TextArea do
     String.length(char) == 1 and String.printable?(char) and char not in ["\t", "\r"]
   end
 
+  @highlight_colors %{
+    keyword: {200, 120, 220},
+    string: {180, 200, 100},
+    comment: {100, 120, 100},
+    number: {180, 150, 100},
+    function: {100, 180, 220}
+  }
+
   defp highlight_line(line, language, base_style) do
     keywords = get_keywords(language)
     bg = base_style[:bg] || {40, 40, 40}
+    default_fg = base_style[:fg] || {200, 200, 200}
 
-    keyword_color = {200, 120, 220}
-    string_color = {180, 200, 100}
-    comment_color = {100, 120, 100}
-    number_color = {180, 150, 100}
-    function_color = {100, 180, 220}
-
-    tokens = tokenize_line(line, language)
-
-    Enum.map(tokens, fn {type, text} ->
-      color =
-        case type do
-          :keyword ->
-            if text in keywords, do: keyword_color, else: base_style[:fg] || {200, 200, 200}
-
-          :string ->
-            string_color
-
-          :comment ->
-            comment_color
-
-          :number ->
-            number_color
-
-          :function ->
-            function_color
-
-          _ ->
-            base_style[:fg] || {200, 200, 200}
-        end
-
+    tokenize_line(line, language)
+    |> Enum.map(fn {type, text} ->
+      color = token_color(type, text, keywords, default_fg)
       Segment.new(text, %{fg: color, bg: bg})
     end)
+  end
+
+  defp token_color(:keyword, text, keywords, default_fg) do
+    if text in keywords, do: @highlight_colors.keyword, else: default_fg
+  end
+
+  defp token_color(type, _text, _keywords, default_fg) do
+    Map.get(@highlight_colors, type, default_fg)
   end
 
   defp get_keywords(:python), do: @python_keywords

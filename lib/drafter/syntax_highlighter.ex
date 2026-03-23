@@ -64,12 +64,10 @@ defmodule Drafter.SyntaxHighlighter do
   end
 
   defp highlight_line(line, :erlang) do
-    cond do
-      String.trim_leading(line) |> String.starts_with?("%") ->
-        "\e[90m#{line}\e[0m"
-
-      true ->
-        line
+    if String.trim_leading(line) |> String.starts_with?("%") do
+      "\e[90m#{line}\e[0m"
+    else
+      line
     end
   end
 

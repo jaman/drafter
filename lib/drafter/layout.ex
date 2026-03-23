@@ -6,8 +6,8 @@ defmodule Drafter.Layout do
   return geometry (rects or size lists), and have no side effects.
   """
 
-  alias Drafter.Widget.Registry
   alias Drafter.CharacterSet
+  alias Drafter.Widget.Registry
 
   @type rect :: %{x: integer(), y: integer(), width: pos_integer(), height: pos_integer()}
   @type component :: tuple()
@@ -17,177 +17,121 @@ defmodule Drafter.Layout do
   def rect(x, y, width, height), do: %{x: x, y: y, width: width, height: height}
 
   @spec get_preferred_height(component(), hierarchy() | nil) :: pos_integer() | :auto
-  def get_preferred_height(component, hierarchy \\ nil) do
-    case component do
-      {:layout, :horizontal, children, _opts} ->
-        children |> Enum.map(&get_preferred_height/1) |> Enum.max(fn -> 1 end)
+  def get_preferred_height(component, hierarchy \\ nil)
 
-      {:layout, :vertical, children, _opts} ->
-        children |> Enum.map(&get_preferred_height/1) |> Enum.sum()
+  def get_preferred_height({:layout, :horizontal, children, _opts}, _hierarchy) do
+    children |> Enum.map(&get_preferred_height(&1, nil)) |> Enum.max(fn -> 1 end)
+  end
 
-      {:scrollable, children, opts} ->
-        Keyword.get(opts, :height, children |> Enum.map(&get_preferred_height/1) |> Enum.sum())
+  def get_preferred_height({:layout, :vertical, children, _opts}, _hierarchy) do
+    children |> Enum.map(&get_preferred_height(&1, nil)) |> Enum.sum()
+  end
 
-      {:box, children, opts} ->
-        border = Keyword.get(opts, :border, CharacterSet.style(:border) || :rounded)
-        padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
-        border_height = if border == :none, do: 0, else: 2
-        content_height = children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
-        Keyword.get(opts, :height, border_height + padding * 2 + content_height)
+  def get_preferred_height({:scrollable, children, opts}, _hierarchy) do
+    Keyword.get(opts, :height, children |> Enum.map(&get_preferred_height(&1, nil)) |> Enum.sum())
+  end
 
-      {:card, children, opts} ->
-        padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
-        content_height = children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
-        Keyword.get(opts, :height, padding * 2 + content_height)
+  def get_preferred_height({:box, children, opts}, hierarchy) do
+    border = Keyword.get(opts, :border, CharacterSet.style(:border) || :rounded)
+    padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
+    border_height = if border == :none, do: 0, else: 2
+    content_height = children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
+    Keyword.get(opts, :height, border_height + padding * 2 + content_height)
+  end
 
-      {:collapsible, title, content, opts} ->
-        if hierarchy do
-          collapsible_state = find_collapsible_state(hierarchy, title)
+  def get_preferred_height({:card, children, opts}, hierarchy) do
+    padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
+    content_height = children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
+    Keyword.get(opts, :height, padding * 2 + content_height)
+  end
 
-          case collapsible_state do
-            %{expanded: true} ->
-              estimate_collapsible_height(collapsible_state)
+  def get_preferred_height({:collapsible, title, content, opts}, hierarchy) do
+    collapsible_height(hierarchy, title, content, opts)
+  end
 
-            nil ->
-              if Keyword.get(opts, :expanded, false) do
-                estimate_collapsible_height(%{content: content, content_height: Keyword.get(opts, :content_height)})
-              else
-                1
-              end
+  def get_preferred_height({:split_pane, _children, opts}, _hierarchy) do
+    Keyword.get(opts, :height, 1)
+  end
 
-            _ ->
-              1
-          end
-        else
-          1
-        end
+  def get_preferred_height({:theme_selector, _opts}, _hierarchy), do: 10
 
-      {:split_pane, _children, opts} ->
-        Keyword.get(opts, :height, 1)
-
-      {:theme_selector, _opts} ->
-        10
-
-      {tag, opts} when is_atom(tag) and is_list(opts) ->
-        case Registry.lookup(tag) do
-          nil -> 1
-          module -> module.preferred_height(nil, opts)
-        end
-
-      {tag, args, opts} when is_atom(tag) and is_list(opts) ->
-        case Registry.lookup(tag) do
-          nil -> 1
-          module -> module.preferred_height(args, opts)
-        end
-
-      _ ->
-        1
+  def get_preferred_height({tag, opts}, _hierarchy) when is_atom(tag) and is_list(opts) do
+    case Registry.lookup(tag) do
+      nil -> 1
+      module -> module.preferred_height(nil, opts)
     end
   end
 
+  def get_preferred_height({tag, args, opts}, _hierarchy) when is_atom(tag) and is_list(opts) do
+    case Registry.lookup(tag) do
+      nil -> 1
+      module -> module.preferred_height(args, opts)
+    end
+  end
+
+  def get_preferred_height(_component, _hierarchy), do: 1
+
   @spec get_child_vertical_spec(component(), hierarchy() | nil) ::
           {pos_integer() | :auto, non_neg_integer(), boolean()}
+  def get_child_vertical_spec({:layout, _direction, _children, opts} = child, hierarchy) do
+    flex_spec(opts, fn -> get_preferred_height(child, hierarchy) end)
+  end
+
+  def get_child_vertical_spec({:scrollable, _children, opts} = child, hierarchy) do
+    flex_spec(opts, fn -> get_preferred_height(child, hierarchy) end)
+  end
+
+  def get_child_vertical_spec({:split_pane, _children, opts}, _hierarchy) do
+    flex_spec(opts, fn -> 1 end)
+  end
+
+  def get_child_vertical_spec({:box, children, opts}, hierarchy) do
+    flex_spec(opts, fn -> get_preferred_height({:box, children, opts}, hierarchy) end)
+  end
+
+  def get_child_vertical_spec({:card, children, opts}, hierarchy) do
+    flex_spec(opts, fn -> get_preferred_height({:card, children, opts}, hierarchy) end)
+  end
+
+  def get_child_vertical_spec({:collapsible, title, content, opts}, hierarchy) do
+    preferred = collapsible_height(hierarchy, title, content, opts)
+    {preferred, 0, false}
+  end
+
   def get_child_vertical_spec(child, hierarchy) do
-    case child do
-      {:layout, _direction, _children, opts} ->
-        flex = Keyword.get(opts, :flex, 0)
-        height = Keyword.get(opts, :height)
-        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
+    preferred = get_preferred_height(child, hierarchy)
+    if preferred == :auto, do: {1, 1, true}, else: {preferred, 0, false}
+  end
 
-        preferred =
-          cond do
-            height -> height
-            has_flex -> 1
-            true -> get_preferred_height(child, hierarchy)
-          end
+  defp collapsible_height(nil, _title, _content, _opts), do: 1
 
-        {preferred, max(flex, 1), has_flex}
-
-      {:scrollable, _children, opts} ->
-        flex = Keyword.get(opts, :flex, 0)
-        height = Keyword.get(opts, :height)
-        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
-
-        preferred =
-          cond do
-            height -> height
-            has_flex -> 1
-            true -> get_preferred_height(child, hierarchy)
-          end
-
-        {preferred, max(flex, 1), has_flex}
-
-      {:split_pane, _children, opts} ->
-        flex = Keyword.get(opts, :flex, 0)
-        height = Keyword.get(opts, :height)
-        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
-
-        preferred =
-          cond do
-            height -> height
-            has_flex -> 1
-            true -> 1
-          end
-
-        {preferred, max(flex, 1), has_flex}
-
-      {:box, children, opts} ->
-        flex = Keyword.get(opts, :flex, 0)
-        height = Keyword.get(opts, :height)
-        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
-
-        preferred =
-          cond do
-            height -> height
-            has_flex -> 1
-            true -> get_preferred_height({:box, children, opts}, hierarchy)
-          end
-
-        {preferred, max(flex, 1), has_flex}
-
-      {:card, children, opts} ->
-        flex = Keyword.get(opts, :flex, 0)
-        has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
-        preferred = if has_flex, do: 1, else: get_preferred_height({:card, children, opts}, hierarchy)
-        {preferred, max(flex, 1), has_flex}
-
-      {:collapsible, title, content, opts} ->
-        preferred =
-          if hierarchy do
-            collapsible_state = find_collapsible_state(hierarchy, title)
-
-            case collapsible_state do
-              %{expanded: true} ->
-                estimate_collapsible_height(collapsible_state)
-
-              nil ->
-                if Keyword.get(opts, :expanded, false) do
-                  estimate_collapsible_height(%{
-                    content: content,
-                    content_height: Keyword.get(opts, :content_height)
-                  })
-                else
-                  1
-                end
-
-              _ ->
-                1
-            end
-          else
-            1
-          end
-
-        {preferred, 0, false}
-
-      _ ->
-        preferred = get_preferred_height(child, hierarchy)
-
-        if preferred == :auto do
-          {1, 1, true}
-        else
-          {preferred, 0, false}
-        end
+  defp collapsible_height(hierarchy, title, content, opts) do
+    case find_collapsible_state(hierarchy, title) do
+      %{expanded: true} = state -> estimate_collapsible_height(state)
+      nil -> collapsible_height_from_opts(content, opts)
+      _ -> 1
     end
+  end
+
+  defp collapsible_height_from_opts(content, opts) do
+    if Keyword.get(opts, :expanded, false) do
+      estimate_collapsible_height(%{content: content, content_height: Keyword.get(opts, :content_height)})
+    else
+      1
+    end
+  end
+
+  defp flex_spec(opts, preferred_fn) do
+    flex = Keyword.get(opts, :flex, 0)
+    has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
+
+    preferred =
+      case Keyword.get(opts, :height) do
+        nil -> if has_flex, do: 1, else: preferred_fn.()
+        height -> height
+      end
+
+    {preferred, max(flex, 1), has_flex}
   end
 
   @spec calculate_vertical_layout(
@@ -315,26 +259,31 @@ defmodule Drafter.Layout do
     end
   end
 
+  defp apply_width_spec({:fixed, w}, {acc, remaining_pixels}, _base_flex_width) do
+    {acc ++ [w], remaining_pixels}
+  end
+
+  defp apply_width_spec({:flex, _}, {acc, remaining_pixels}, base_flex_width) do
+    extra = if remaining_pixels > 0, do: 1, else: 0
+    {acc ++ [base_flex_width + extra], remaining_pixels - extra}
+  end
+
+  defp accumulate_width_spec({_child_item, child_opts}, {fixed_sum, flex_count, acc_specs}) do
+    width = Keyword.get(child_opts, :width)
+    flex = Keyword.get(child_opts, :flex, 0)
+
+    cond do
+      width -> {fixed_sum + width, flex_count, acc_specs ++ [{:fixed, width}]}
+      flex > 0 -> {fixed_sum, flex_count + 1, acc_specs ++ [{:flex, flex}]}
+      true -> {fixed_sum, flex_count + 1, acc_specs ++ [{:flex, 1}]}
+    end
+  end
+
   defp calculate_horizontal_layout_with_opts(children, rect, children_opts) do
     child_specs = Enum.zip(children, children_opts)
 
     {fixed_total, flexible_count, width_specs} =
-      Enum.reduce(child_specs, {0, 0, []}, fn {_child_item, child_opts},
-                                              {fixed_sum, flex_count, acc_specs} ->
-        width = Keyword.get(child_opts, :width)
-        flex = Keyword.get(child_opts, :flex, 0)
-
-        cond do
-          width ->
-            {fixed_sum + width, flex_count, acc_specs ++ [{:fixed, width}]}
-
-          flex > 0 ->
-            {fixed_sum, flex_count + 1, acc_specs ++ [{:flex, flex}]}
-
-          true ->
-            {fixed_sum, flex_count + 1, acc_specs ++ [{:flex, 1}]}
-        end
-      end)
+      Enum.reduce(child_specs, {0, 0, []}, &accumulate_width_spec/2)
 
     available_for_flex = max(0, rect.width - fixed_total)
 
@@ -346,15 +295,8 @@ defmodule Drafter.Layout do
       end
 
     {final_widths, _} =
-      Enum.reduce(width_specs, {[], remainder}, fn spec, {acc, remaining_pixels} ->
-        case spec do
-          {:fixed, w} ->
-            {acc ++ [w], remaining_pixels}
-
-          {:flex, _} ->
-            extra = if remaining_pixels > 0, do: 1, else: 0
-            {acc ++ [base_flex_width + extra], remaining_pixels - extra}
-        end
+      Enum.reduce(width_specs, {[], remainder}, fn spec, acc ->
+        apply_width_spec(spec, acc, base_flex_width)
       end)
 
     {sizes, _} =
@@ -366,6 +308,22 @@ defmodule Drafter.Layout do
     sizes
   end
 
+  defp accumulate_colspan({colspan, idx}, {acc, current_x, remaining_pixels}, gap, num_children, base_col_width) do
+    extra = min(colspan, remaining_pixels)
+    cell_width = base_col_width * colspan + extra
+    internal_gaps = gap * (colspan - 1)
+    w = cell_width + internal_gaps
+    next_x = current_x + w + if idx < num_children - 1, do: gap, else: 0
+    {[%{x: current_x, width: w} | acc], next_x, remaining_pixels - extra}
+  end
+
+  defp accumulate_equal({_child, idx}, {acc, current_x, remaining_pixels}, gap, num_children, base_width) do
+    extra = if remaining_pixels > 0, do: 1, else: 0
+    w = base_width + extra
+    next_x = current_x + w + if idx < num_children - 1, do: gap, else: 0
+    {[%{x: current_x, width: w} | acc], next_x, remaining_pixels - extra}
+  end
+
   defp calculate_horizontal_layout_no_opts(children, rect, gap) do
     child_colspans = Enum.map(children, &get_colspan/1)
     has_colspan = Enum.any?(child_colspans, &(&1 > 1))
@@ -373,22 +331,14 @@ defmodule Drafter.Layout do
 
     if has_colspan do
       total_cols = Enum.sum(child_colspans)
-      total_virtual_gaps = total_cols - 1
-      total_gap_space = gap * total_virtual_gaps
+      total_gap_space = gap * (total_cols - 1)
       available_width = rect.width - total_gap_space
       base_col_width = div(available_width, total_cols)
       remainder = rem(available_width, total_cols)
 
       {sizes, _, _} =
-        Enum.reduce(Enum.with_index(child_colspans), {[], rect.x, remainder}, fn {colspan, idx},
-                                                                                 {acc, current_x,
-                                                                                  remaining_pixels} ->
-          extra = min(colspan, remaining_pixels)
-          cell_width = base_col_width * colspan + extra
-          internal_gaps = gap * (colspan - 1)
-          w = cell_width + internal_gaps
-          next_x = current_x + w + if idx < num_children - 1, do: gap, else: 0
-          {[%{x: current_x, width: w} | acc], next_x, remaining_pixels - extra}
+        Enum.reduce(Enum.with_index(child_colspans), {[], rect.x, remainder}, fn item, acc ->
+          accumulate_colspan(item, acc, gap, num_children, base_col_width)
         end)
 
       Enum.reverse(sizes)
@@ -399,13 +349,8 @@ defmodule Drafter.Layout do
       remainder = rem(available_width, num_children)
 
       {sizes, _, _} =
-        Enum.reduce(Enum.with_index(children), {[], rect.x, remainder}, fn {_child, idx},
-                                                                           {acc, current_x,
-                                                                            remaining_pixels} ->
-          extra = if remaining_pixels > 0, do: 1, else: 0
-          w = base_width + extra
-          next_x = current_x + w + if idx < num_children - 1, do: gap, else: 0
-          {[%{x: current_x, width: w} | acc], next_x, remaining_pixels - extra}
+        Enum.reduce(Enum.with_index(children), {[], rect.x, remainder}, fn item, acc ->
+          accumulate_equal(item, acc, gap, num_children, base_width)
         end)
 
       Enum.reverse(sizes)

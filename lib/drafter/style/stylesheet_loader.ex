@@ -87,30 +87,8 @@ defmodule Drafter.Style.StylesheetLoader do
     stylesheet =
       cond do
         function_exported?(app_module, :__css_path__, 0) ->
-          css_path = app_module.__css_path__()
-
-          file_stylesheet =
-            if css_path do
-              case Map.fetch(cache, {:file, css_path}) do
-                {:ok, cached} ->
-                  cached
-
-                :error ->
-                  case CSSParser.parse_file(css_path) do
-                    {:ok, parsed} -> parsed
-                    {:error, _} -> Stylesheet.new()
-                  end
-              end
-            else
-              Stylesheet.new()
-            end
-
-          inline_styles =
-            if function_exported?(app_module, :__inline_styles__, 0) do
-              app_module.__inline_styles__()
-            else
-              %{}
-            end
+          file_stylesheet = load_file_stylesheet(app_module.__css_path__(), cache)
+          inline_styles = get_inline_styles(app_module)
 
           base
           |> Stylesheet.merge(file_stylesheet)
@@ -125,6 +103,30 @@ defmodule Drafter.Style.StylesheetLoader do
       end
 
     %{stylesheet: stylesheet}
+  end
+
+  defp load_file_stylesheet(nil, _cache), do: Stylesheet.new()
+
+  defp load_file_stylesheet(css_path, cache) do
+    case Map.fetch(cache, {:file, css_path}) do
+      {:ok, cached} -> cached
+      :error -> parse_css_file(css_path)
+    end
+  end
+
+  defp parse_css_file(css_path) do
+    case CSSParser.parse_file(css_path) do
+      {:ok, parsed} -> parsed
+      {:error, _} -> Stylesheet.new()
+    end
+  end
+
+  defp get_inline_styles(app_module) do
+    if function_exported?(app_module, :__inline_styles__, 0) do
+      app_module.__inline_styles__()
+    else
+      %{}
+    end
   end
 
   defp merge_inline(base, inline) when is_map(inline) do

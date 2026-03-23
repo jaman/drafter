@@ -54,41 +54,14 @@ defmodule Drafter.Draw.Segment do
     end
   end
 
+  defp char_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
+
   defp display_width(str) do
-    str
-    |> strip_ansi()
-    |> String.graphemes()
-    |> Enum.reduce(0, fn grapheme, acc ->
-      acc + char_width(grapheme)
-    end)
+    str |> strip_ansi() |> Drafter.CharacterWidth.string()
   end
 
   defp strip_ansi(text) do
     String.replace(text, ~r/\e\[[0-9;]*m/, "")
-  end
-
-  defp char_width(grapheme) do
-    case String.to_charlist(grapheme) do
-      [codepoint | _] ->
-        cond do
-          codepoint >= 0x1F300 and codepoint <= 0x1F9FF -> 2
-          codepoint >= 0x2600 and codepoint <= 0x26FF -> 2
-          codepoint >= 0x2700 and codepoint <= 0x27BF -> 2
-          codepoint >= 0x1F600 and codepoint <= 0x1F64F -> 2
-          codepoint >= 0x1F680 and codepoint <= 0x1F6FF -> 2
-          codepoint >= 0x1100 and codepoint <= 0x11FF -> 2
-          codepoint >= 0x2E80 and codepoint <= 0x9FFF -> 2
-          codepoint >= 0xAC00 and codepoint <= 0xD7AF -> 2
-          codepoint >= 0xFE10 and codepoint <= 0xFE1F -> 2
-          codepoint >= 0xFE30 and codepoint <= 0xFE6F -> 2
-          codepoint >= 0xFF00 and codepoint <= 0xFF60 -> 2
-          codepoint >= 0xFFE0 and codepoint <= 0xFFE6 -> 2
-          true -> 1
-        end
-
-      [] ->
-        0
-    end
   end
 
   @doc "Create a segment with plain text (no styling)"
@@ -126,32 +99,38 @@ defmodule Drafter.Draw.Segment do
 
     {result, _width} =
       Enum.reduce_while(parts, {"", 0}, fn part, {acc, width} ->
-        if Regex.match?(ansi_pattern, part) do
-          {:cont, {acc <> part, width}}
-        else
-          {chunk, new_width} =
-            part
-            |> String.graphemes()
-            |> Enum.reduce_while({"", width}, fn grapheme, {chunk_acc, w} ->
-              grapheme_w = char_width(grapheme)
-              new_w = w + grapheme_w
-
-              if new_w <= target_width do
-                {:cont, {chunk_acc <> grapheme, new_w}}
-              else
-                {:halt, {chunk_acc, w}}
-              end
-            end)
-
-          if new_width >= target_width and new_width > width do
-            {:halt, {acc <> chunk, new_width}}
-          else
-            {:cont, {acc <> chunk, new_width}}
-          end
-        end
+        truncate_part(part, acc, width, target_width, ansi_pattern)
       end)
 
     result
+  end
+
+  defp truncate_part(part, acc, width, target_width, ansi_pattern) do
+    if Regex.match?(ansi_pattern, part) do
+      {:cont, {acc <> part, width}}
+    else
+      {chunk, new_width} = truncate_graphemes_to_width(part, width, target_width)
+
+      if new_width >= target_width and new_width > width do
+        {:halt, {acc <> chunk, new_width}}
+      else
+        {:cont, {acc <> chunk, new_width}}
+      end
+    end
+  end
+
+  defp truncate_graphemes_to_width(text, starting_width, target_width) do
+    text
+    |> String.graphemes()
+    |> Enum.reduce_while({"", starting_width}, fn grapheme, {chunk_acc, w} ->
+      new_w = w + char_width(grapheme)
+
+      if new_w <= target_width do
+        {:cont, {chunk_acc <> grapheme, new_w}}
+      else
+        {:halt, {chunk_acc, w}}
+      end
+    end)
   end
 
   @doc "Pad segment to specified width with spaces"
@@ -182,28 +161,24 @@ defmodule Drafter.Draw.Segment do
   @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{text: text}), do: text == ""
 
+  @style_flag_codes [
+    {:bold, "1"},
+    {:dim, "2"},
+    {:italic, "3"},
+    {:underline, "4"},
+    {:reverse, "7"}
+  ]
+
   defp build_style_codes(style) when style == %{}, do: ""
 
   defp build_style_codes(style) do
-    codes = []
-
-    codes = if style[:bold], do: ["1" | codes], else: codes
-    codes = if style[:dim], do: ["2" | codes], else: codes
-    codes = if style[:italic], do: ["3" | codes], else: codes
-    codes = if style[:underline], do: ["4" | codes], else: codes
-    codes = if style[:reverse], do: ["7" | codes], else: codes
-
     codes =
-      case style[:fg] do
-        {r, g, b} -> ["38;2;#{r};#{g};#{b}" | codes]
-        nil -> codes
-      end
+      Enum.reduce(@style_flag_codes, [], fn {key, code}, acc ->
+        if style[key], do: [code | acc], else: acc
+      end)
 
-    codes =
-      case style[:bg] do
-        {r, g, b} -> ["48;2;#{r};#{g};#{b}" | codes]
-        nil -> codes
-      end
+    codes = add_color_code(codes, "38", style[:fg])
+    codes = add_color_code(codes, "48", style[:bg])
 
     if codes == [] do
       ""
@@ -211,4 +186,7 @@ defmodule Drafter.Draw.Segment do
       "\e[" <> Enum.join(Enum.reverse(codes), ";") <> "m"
     end
   end
+
+  defp add_color_code(codes, _prefix, nil), do: codes
+  defp add_color_code(codes, prefix, {r, g, b}), do: ["#{prefix};2;#{r};#{g};#{b}" | codes]
 end

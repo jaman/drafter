@@ -67,54 +67,36 @@ defmodule Drafter.Widget.Grid do
       rows_needed = div(children_count + cols - 1, cols)
       row_height = if rows_needed > 0, do: div(rect.height, rows_needed), else: rect.height
 
-      # Create a grid of strips
-      0..(rect.height - 1)
-      |> Enum.map(fn y ->
-        # Determine which row this y belongs to
+      grid_ctx = %{children: state.children, children_count: children_count, cols: cols, col_width: col_width, row_height: row_height}
+
+      Enum.map(0..(rect.height - 1), fn y ->
         row = div(y, row_height)
-
-        # Build the horizontal line for this y position
-        segments =
-          0..(cols - 1)
-          |> Enum.map(fn col ->
-            child_index = row * cols + col
-
-            if child_index < children_count do
-              {module, props} = Enum.at(state.children, child_index)
-
-              # Calculate position within this cell
-              _cell_x = col * col_width
-              cell_y = rem(y, row_height)
-
-              child_rect = %{
-                x: 0,
-                y: 0,
-                width: col_width,
-                height: row_height
-              }
-
-              child_strips = render_child({module, props}, child_rect)
-
-              # Get the appropriate strip for this y position
-              if cell_y < length(child_strips) do
-                strip = Enum.at(child_strips, cell_y)
-                # Take only the portion that fits in this column
-                strip.segments
-                |> Enum.take_while(fn segment ->
-                  String.length(segment.text) <= col_width
-                end)
-              else
-                [Segment.new(String.duplicate(" ", col_width))]
-              end
-            else
-              # Empty cell
-              [Segment.new(String.duplicate(" ", col_width))]
-            end
-          end)
-          |> List.flatten()
-
+        cell_y = rem(y, row_height)
+        segments = Enum.flat_map(0..(cols - 1), &render_grid_cell(grid_ctx, row, &1, cell_y))
         Strip.new(segments)
       end)
+    end
+  end
+
+  defp render_grid_cell(ctx, row, col, cell_y) do
+    child_index = row * ctx.cols + col
+
+    if child_index < ctx.children_count do
+      {module, props} = Enum.at(ctx.children, child_index)
+      child_rect = %{x: 0, y: 0, width: ctx.col_width, height: ctx.row_height}
+      child_strips = render_child({module, props}, child_rect)
+      extract_cell_segments(child_strips, cell_y, ctx.col_width)
+    else
+      [Segment.new(String.duplicate(" ", ctx.col_width))]
+    end
+  end
+
+  defp extract_cell_segments(child_strips, cell_y, col_width) do
+    if cell_y < length(child_strips) do
+      Enum.at(child_strips, cell_y).segments
+      |> Enum.take_while(fn segment -> String.length(segment.text) <= col_width end)
+    else
+      [Segment.new(String.duplicate(" ", col_width))]
     end
   end
 

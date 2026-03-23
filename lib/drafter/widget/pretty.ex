@@ -126,21 +126,8 @@ defmodule Drafter.Widget.Pretty do
   end
 
   def parse_color_spec("{" <> spec) do
-    spec = String.slice(spec, 0..-2//1)
-    case spec do
-      "nil" -> @syntax_colors.nil
-      "boolean" -> @syntax_colors.boolean
-      "atom" -> @syntax_colors.atom
-      "integer" -> @syntax_colors.integer
-      "float" -> @syntax_colors.float
-      "string" -> @syntax_colors.string
-      "keyword_key" -> @syntax_colors.keyword_key
-      "map_key" -> @syntax_colors.map_key
-      "struct_name" -> @syntax_colors.struct_name
-      "separator" -> @syntax_colors.separator
-      "default" -> @syntax_colors.default
-      _ -> @syntax_colors.default
-    end
+    key = spec |> String.slice(0..-2//1) |> String.to_atom()
+    Map.get(@syntax_colors, key, @syntax_colors.default)
   end
 
   defp pad_and_truncate(segments, width, bg) do
@@ -161,23 +148,27 @@ defmodule Drafter.Widget.Pretty do
 
   defp truncate_segments(segments, max_width) do
     Enum.reduce_while(segments, {[], 0}, fn segment, {acc, current_width} ->
-      segment_width = String.length(segment.text)
-      new_width = current_width + segment_width
-
-      if new_width <= max_width do
-        {:cont, {[segment | acc], new_width}}
-      else
-        remaining = max_width - current_width
-        if remaining > 0 do
-          truncated = String.slice(segment.text, 0, remaining)
-          {:halt, {[Segment.new(truncated, segment.style) | acc], max_width}}
-        else
-          {:halt, {acc, current_width}}
-        end
-      end
+      truncate_single_segment(segment, acc, current_width, max_width)
     end)
     |> elem(0)
     |> Enum.reverse()
+  end
+
+  defp truncate_single_segment(segment, acc, current_width, max_width) do
+    segment_width = String.length(segment.text)
+    new_width = current_width + segment_width
+
+    cond do
+      new_width <= max_width ->
+        {:cont, {[segment | acc], new_width}}
+
+      max_width - current_width > 0 ->
+        truncated = String.slice(segment.text, 0, max_width - current_width)
+        {:halt, {[Segment.new(truncated, segment.style) | acc], max_width}}
+
+      true ->
+        {:halt, {acc, current_width}}
+    end
   end
 
   @impl Drafter.Widget

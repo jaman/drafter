@@ -1,4 +1,5 @@
 defmodule Drafter.Examples.Calculator do
+  @moduledoc false
   use Drafter.App
 
   @key_mappings %{

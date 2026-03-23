@@ -48,6 +48,7 @@ defmodule Drafter.Widget.OptionList do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.Widget.Callback
 
   defstruct [
     :options,
@@ -238,22 +239,37 @@ defmodule Drafter.Widget.OptionList do
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
     selected = Keyword.get(opts, :selected)
-    raw_items = if is_list(items) and items != [], do: items, else: Keyword.get(opts, :options, [])
-    options = Enum.map(raw_items, fn
-      {label, id} -> %{id: id, label: to_string(label), selected: id == selected, disabled: false}
-      label when is_binary(label) -> %{id: label, label: label, selected: label == selected, disabled: false}
-      %{id: id} = item -> Map.merge(%{selected: id == selected, disabled: false}, item)
-    end)
-    highlighted_index = if selected do
-      Enum.find_index(options, fn opt -> opt.id == selected end) || 0
-    else
-      0
-    end
+
+    raw_items =
+      if is_list(items) and items != [], do: items, else: Keyword.get(opts, :options, [])
+
+    options =
+      Enum.map(raw_items, fn
+        {label, id} ->
+          %{id: id, label: to_string(label), selected: id == selected, disabled: false}
+
+        label when is_binary(label) ->
+          %{id: label, label: label, selected: label == selected, disabled: false}
+
+        %{id: id} = item ->
+          Map.merge(%{selected: id == selected, disabled: false}, item)
+      end)
+
+    highlighted_index =
+      if selected do
+        Enum.find_index(options, fn opt -> opt.id == selected end) || 0
+      else
+        0
+      end
+
     %{
       options: options,
       highlighted_index: highlighted_index,
@@ -290,8 +306,9 @@ defmodule Drafter.Widget.OptionList do
 
   defp wrap_id_callback(nil), do: nil
   defp wrap_id_callback(cb) when is_function(cb), do: cb
+
   defp wrap_id_callback(name) when is_atom(name) do
-    wrapped = Drafter.Widget.Callback.wrap_1(name)
+    wrapped = Callback.wrap_1(name)
     fn option -> wrapped.(option.id) end
   end
 
@@ -423,20 +440,8 @@ defmodule Drafter.Widget.OptionList do
   # Scroll management
 
   defp ensure_visible(state, target_index) do
-    cond do
-      # Target is above visible area
-      target_index < state.scroll_offset ->
-        %{state | scroll_offset: target_index}
-
-      # Target is below visible area
-      target_index >= state.scroll_offset + state.visible_height ->
-        new_offset = target_index - state.visible_height + 1
-        %{state | scroll_offset: max(0, new_offset)}
-
-      # Target is already visible
-      true ->
-        state
-    end
+    new_offset = Drafter.ScrollMath.ensure_visible(state.scroll_offset, target_index, state.visible_height)
+    %{state | scroll_offset: new_offset}
   end
 
   defp find_first_enabled(options) do
@@ -483,90 +488,76 @@ defmodule Drafter.Widget.OptionList do
 
   defp handle_scroll_event(state, direction) do
     current_time = System.system_time(:millisecond)
-    time_since_last = current_time - state.last_scroll_time
 
-    if state.last_scroll_time == 0 or time_since_last >= state.scroll_throttle_ms do
-      # Apply inversion if enabled
-      actual_direction =
-        if state.inverted_scroll do
-          case direction do
-            :up -> :down
-            :down -> :up
-          end
-        else
-          direction
-        end
-
-      # Execute scroll action
-      scroll_action =
-        case actual_direction do
-          :up ->
-            action_cursor_up(state)
-
-          :down ->
-            action_cursor_down(state)
-        end
-
-      # Update last scroll time
-      case scroll_action do
-        {:ok, new_state, actions} ->
-          {:ok, %{new_state | last_scroll_time: current_time}, actions}
-
-        {:noreply, new_state} ->
-          {:noreply, %{new_state | last_scroll_time: current_time}}
-
-        other ->
-          other
-      end
-    else
-      # Throttled - ignore this scroll event
+    if scroll_throttled?(state, current_time) do
       {:noreply, state}
+    else
+      actual_direction = resolve_direction(state.inverted_scroll, direction)
+      scroll_result = execute_scroll_action(state, actual_direction)
+      stamp_scroll_time(scroll_result, current_time)
     end
   end
+
+  defp scroll_throttled?(%{last_scroll_time: 0}, _current_time), do: false
+
+  defp scroll_throttled?(state, current_time) do
+    current_time - state.last_scroll_time < state.scroll_throttle_ms
+  end
+
+  defp resolve_direction(true, :up), do: :down
+  defp resolve_direction(true, :down), do: :up
+  defp resolve_direction(false, direction), do: direction
+
+  defp execute_scroll_action(state, :up), do: action_cursor_up(state)
+  defp execute_scroll_action(state, :down), do: action_cursor_down(state)
+
+  defp stamp_scroll_time({:ok, new_state, actions}, current_time),
+    do: {:ok, %{new_state | last_scroll_time: current_time}, actions}
+
+  defp stamp_scroll_time({:noreply, new_state}, current_time),
+    do: {:noreply, %{new_state | last_scroll_time: current_time}}
+
+  defp stamp_scroll_time(other, _current_time), do: other
 
   defp change_selection(state, target_index, trigger_select) do
-    if target_index >= 0 and target_index < length(state.options) do
-      option = Enum.at(state.options, target_index)
+    option = Enum.at(state.options, target_index)
 
-      if option && !option.disabled do
-        new_state =
-          %{state | highlighted_index: target_index}
-          |> ensure_visible(target_index)
-
-        new_state =
-          if trigger_select do
-            %{new_state | selected_index: target_index}
-          else
-            new_state
-          end
-
-        # Trigger callbacks
-        actions = []
-
-        actions =
-          if state.on_highlight && target_index != state.highlighted_index do
-            [state.on_highlight.(option) | actions]
-          else
-            actions
-          end
-
-        actions =
-          if trigger_select && state.on_select do
-            [state.on_select.(option) | actions]
-          else
-            actions
-          end
-
-        if length(actions) > 0 do
-          {:ok, new_state, actions}
-        else
-          {:ok, new_state}
-        end
-      else
-        {:noreply, state}
-      end
-    else
-      {:noreply, state}
+    cond do
+      target_index < 0 or target_index >= length(state.options) -> {:noreply, state}
+      is_nil(option) or option.disabled -> {:noreply, state}
+      true -> apply_option_selection(state, option, target_index, trigger_select)
     end
   end
+
+  defp apply_option_selection(state, option, target_index, trigger_select) do
+    new_state =
+      state
+      |> Map.put(:highlighted_index, target_index)
+      |> ensure_visible(target_index)
+      |> maybe_set_selected(target_index, trigger_select)
+
+    actions =
+      []
+      |> maybe_add_highlight(state, option, target_index)
+      |> maybe_add_on_select(state, option, trigger_select)
+
+    if actions != [], do: {:ok, new_state, actions}, else: {:ok, new_state}
+  end
+
+  defp maybe_set_selected(state, target_index, true), do: %{state | selected_index: target_index}
+  defp maybe_set_selected(state, _index, false), do: state
+
+  defp maybe_add_highlight(actions, state, option, target_index) do
+    if state.on_highlight && target_index != state.highlighted_index do
+      [state.on_highlight.(option) | actions]
+    else
+      actions
+    end
+  end
+
+  defp maybe_add_on_select(actions, state, option, true) when not is_nil(state.on_select) do
+    [state.on_select.(option) | actions]
+  end
+
+  defp maybe_add_on_select(actions, _state, _option, _trigger), do: actions
 end

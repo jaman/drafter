@@ -47,20 +47,10 @@ defmodule Drafter.Widget.RadioSet do
     options = Map.get(props, :options, [])
     selected = Map.get(props, :selected)
 
-    selected_index =
-      if selected do
-        Enum.find_index(options, fn opt ->
-          case opt do
-            %{id: id} -> id == selected
-            {_label, id} -> id == selected
-            label when is_binary(label) -> label == selected
-          end
-        end) || 0
-      else
-        0
-      end
+    selected_index = find_selected_index(options, selected)
 
     normalized = normalize_options(options)
+
     %__MODULE__{
       options: normalized,
       selected_index: selected_index,
@@ -83,6 +73,7 @@ defmodule Drafter.Widget.RadioSet do
         render_columns(state, rect, computed)
       else
         visible = Enum.take(state.options, rect.height)
+
         visible
         |> Enum.with_index()
         |> Enum.map(fn {option, index} -> render_option(state, option, index, rect.width) end)
@@ -100,23 +91,22 @@ defmodule Drafter.Widget.RadioSet do
   defp render_columns(state, rect, computed) do
     cols = state.cols
     col_width = div(rect.width, cols)
-    options = state.options
-    row_count = ceil(length(options) / cols)
+    row_count = ceil(length(state.options) / cols)
     bg_style = Computed.to_segment_style(computed)
 
     Enum.map(0..(row_count - 1), fn row ->
-      segments =
-        Enum.flat_map(0..(cols - 1), fn col ->
-          index = col * row_count + row
-          option = Enum.at(options, index)
-          if option do
-            render_option(state, option, index, col_width).segments
-          else
-            [Segment.new(String.duplicate(" ", col_width), bg_style)]
-          end
-        end)
+      segments = Enum.flat_map(0..(cols - 1), &render_column_cell(state, &1, row, row_count, col_width, bg_style))
       Strip.new(segments)
     end)
+  end
+
+  defp render_column_cell(state, col, row, row_count, col_width, bg_style) do
+    index = col * row_count + row
+
+    case Enum.at(state.options, index) do
+      nil -> [Segment.new(String.duplicate(" ", col_width), bg_style)]
+      option -> render_option(state, option, index, col_width).segments
+    end
   end
 
   def update(props, state) do
@@ -153,42 +143,23 @@ defmodule Drafter.Widget.RadioSet do
     }
   end
 
-  def handle_event(event, state) do
-    case event do
-      {:key, :up} ->
-        new_index = max(0, state.highlighted_index - 1)
-        {:ok, %{state | highlighted_index: new_index}}
+  def handle_event({:key, :up}, state), do: {:ok, %{state | highlighted_index: max(0, state.highlighted_index - 1)}}
+  def handle_event({:key, :down}, state), do: {:ok, %{state | highlighted_index: min(length(state.options) - 1, state.highlighted_index + 1)}}
+  def handle_event({:key, key}, state) when key in [:enter, :" "], do: select_current(state)
 
-      {:key, :down} ->
-        max_index = length(state.options) - 1
-        new_index = min(max_index, state.highlighted_index + 1)
-        {:ok, %{state | highlighted_index: new_index}}
-
-      {:key, :enter} ->
-        select_current(state)
-
-      {:key, :" "} ->
-        select_current(state)
-
-      {:mouse, %{type: :mouse_up, y: y}} ->
-        if y >= 0 and y < length(state.options) do
-          new_state = %{state | selected_index: y, highlighted_index: y}
-          trigger_change(new_state)
-          {:ok, new_state}
-        else
-          {:noreply, state}
-        end
-
-      {:focus} ->
-        {:ok, %{state | focused: true}}
-
-      {:blur} ->
-        {:ok, %{state | focused: false}}
-
-      _ ->
-        {:noreply, state}
+  def handle_event({:mouse, %{type: :mouse_up, y: y}}, state) do
+    if y >= 0 and y < length(state.options) do
+      new_state = %{state | selected_index: y, highlighted_index: y}
+      trigger_change(new_state)
+      {:ok, new_state}
+    else
+      {:noreply, state}
     end
   end
+
+  def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
+  def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
+  def handle_event(_, state), do: {:noreply, state}
 
   def preferred_height(args, opts), do: Keyword.get(opts, :height, length(args || []))
 
@@ -199,12 +170,18 @@ defmodule Drafter.Widget.RadioSet do
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
-    all_options = if is_list(options) and length(options) > 0, do: options, else: Keyword.get(opts, :options, [])
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
+    all_options =
+      if is_list(options) and options != [], do: options, else: Keyword.get(opts, :options, [])
+
     selected = Drafter.Binding.get_bound_value(opts, app_state, Keyword.get(opts, :selected))
+
     %{
       options: all_options,
       selected: selected,
@@ -221,6 +198,7 @@ defmodule Drafter.Widget.RadioSet do
       on_change: mount_props.on_change,
       classes: mount_props.classes
     }
+
     if Drafter.Binding.has_binding?(opts) do
       Map.put(base, :selected, mount_props.selected)
     else
@@ -232,6 +210,16 @@ defmodule Drafter.Widget.RadioSet do
     new_state = %{state | selected_index: state.highlighted_index}
     trigger_change(new_state)
     {:ok, new_state}
+  end
+
+  defp find_selected_index(_options, nil), do: 0
+
+  defp find_selected_index(options, selected) do
+    Enum.find_index(options, fn
+      %{id: id} -> id == selected
+      {_label, id} -> id == selected
+      label when is_binary(label) -> label == selected
+    end) || 0
   end
 
   defp normalize_options(options) do
@@ -246,7 +234,10 @@ defmodule Drafter.Widget.RadioSet do
     is_selected = index == state.selected_index
     is_highlighted = index == state.highlighted_index && state.focused
 
-    radio_char = if is_selected, do: CharacterSet.indicator(:radio_on), else: CharacterSet.indicator(:radio_off)
+    radio_char =
+      if is_selected,
+        do: CharacterSet.indicator(:radio_on),
+        else: CharacterSet.indicator(:radio_off)
 
     option_state = %{
       selected: is_selected,

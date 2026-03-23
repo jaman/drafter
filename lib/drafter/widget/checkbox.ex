@@ -23,8 +23,6 @@ defmodule Drafter.Widget.Checkbox do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.Theme
-
   defstruct [
     :label,
     :checked,
@@ -57,22 +55,26 @@ defmodule Drafter.Widget.Checkbox do
 
   @impl Drafter.Widget
   def render(state, rect) do
-    normalized_state = if is_struct(state, __MODULE__), do: state, else: mount(state)
-
-    computed = Computed.for_widget(:checkbox, normalized_state, style: normalized_state.style)
-
+    ns = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    computed = Computed.for_widget(:checkbox, ns, style: ns.style)
     fg = computed[:color]
     bg = computed[:background]
 
-    app_module = normalized_state.style[:app_module]
+    app_module = ns.style[:app_module]
     theme = if app_module, do: app_module.__theme__(:get), else: Drafter.Theme.dark_theme()
 
+    checkbox_segments = render_checkbox_indicator(ns, fg, bg, theme)
+    label_segment = render_checkbox_label(ns, fg, bg, rect.width, theme)
+    strip = Strip.new(checkbox_segments ++ [label_segment])
+
+    pad_strips([strip], rect.height, rect.width, fg || Map.get(theme, :text_primary, {200, 200, 200}), bg)
+  end
+
+  defp render_checkbox_indicator(ns, fg, bg, theme) do
     checkbox_bg = Map.get(theme, :panel, {60, 60, 70})
-    checkbox_bg_dimmed = Theme.mute_color(checkbox_bg)
 
-    checkbox_fg = if normalized_state.checked, do: fg || Map.get(theme, :primary, {100, 200, 100}), else: checkbox_bg_dimmed
-
-    checkbox_colored = if normalized_state.checked do
+    if ns.checked do
+      checkbox_fg = fg || Map.get(theme, :primary, {100, 200, 100})
       [
         Segment.new(" ", %{fg: checkbox_bg, bg: bg}),
         Segment.new("X", %{fg: checkbox_fg, bg: checkbox_bg, bold: true}),
@@ -85,66 +87,38 @@ defmodule Drafter.Widget.Checkbox do
         Segment.new(" ", %{fg: checkbox_bg, bg: bg})
       ]
     end
+  end
 
-    segments = if normalized_state.label && normalized_state.label != "" do
-      label_text = " " <> normalized_state.label
-      remaining_width = max(0, rect.width - 4)
-      label_padded = String.pad_trailing(label_text, remaining_width)
-      label_fg = fg || Map.get(theme, :text_primary, {200, 200, 200})
-      checkbox_colored ++ [Segment.new(label_padded, %{fg: label_fg, bg: bg})]
+  defp render_checkbox_label(ns, fg, bg, width, theme) do
+    text_fg = fg || Map.get(theme, :text_primary, {200, 200, 200})
+    remaining_width = max(0, width - 4)
+
+    if ns.label && ns.label != "" do
+      Segment.new(String.pad_trailing(" " <> ns.label, remaining_width), %{fg: text_fg, bg: bg})
     else
-      padding_width = max(0, rect.width - 4)
-      padding = String.duplicate(" ", padding_width)
-      text_fg = fg || Map.get(theme, :text_primary, {200, 200, 200})
-      checkbox_colored ++ [Segment.new(padding, %{fg: text_fg, bg: bg})]
+      Segment.new(String.duplicate(" ", remaining_width), %{fg: text_fg, bg: bg})
     end
+  end
 
-    strip = Strip.new(segments)
-
-    target_height = rect.height
-
+  defp pad_strips(strips, target_height, width, fg, bg) do
     if target_height > 1 do
-      text_fg = fg || Map.get(theme, :text_primary, {200, 200, 200})
-      empty_segment = Segment.new(String.duplicate(" ", rect.width), %{fg: text_fg, bg: bg})
-      empty_strip = Strip.new([empty_segment])
-      padding_lines = List.duplicate(empty_strip, target_height - 1)
-      [strip] ++ padding_lines
+      empty_strip = Strip.new([Segment.new(String.duplicate(" ", width), %{fg: fg, bg: bg})])
+      strips ++ List.duplicate(empty_strip, target_height - 1)
     else
-      [strip]
+      strips
     end
   end
 
   @impl Drafter.Widget
-  def handle_event(event, state) do
-    case event do
-      :activate ->
-        toggle_checkbox(state)
-
-      {:key, :enter} ->
-        toggle_checkbox(state)
-
-      {:key, :" "} ->
-        toggle_checkbox(state)
-
-      {:mouse, %{type: :mouse_up}} ->
-        toggle_checkbox(state)
-
-      :hover ->
-        {:ok, %{state | hovered: true}}
-
-      :unhover ->
-        {:ok, %{state | hovered: false}}
-
-      {:focus} ->
-        {:ok, %{state | focused: true, hovered: true}}
-
-      {:blur} ->
-        {:ok, %{state | focused: false, hovered: false}}
-
-      _ ->
-        {:noreply, state}
-    end
-  end
+  def handle_event(:activate, state), do: toggle_checkbox(state)
+  def handle_event({:key, :enter}, state), do: toggle_checkbox(state)
+  def handle_event({:key, :" "}, state), do: toggle_checkbox(state)
+  def handle_event({:mouse, %{type: :mouse_up}}, state), do: toggle_checkbox(state)
+  def handle_event(:hover, state), do: {:ok, %{state | hovered: true}}
+  def handle_event(:unhover, state), do: {:ok, %{state | hovered: false}}
+  def handle_event({:focus}, state), do: {:ok, %{state | focused: true, hovered: true}}
+  def handle_event({:blur}, state), do: {:ok, %{state | focused: false, hovered: false}}
+  def handle_event(_, state), do: {:noreply, state}
 
   @impl Drafter.Widget
   def update(props, state) do

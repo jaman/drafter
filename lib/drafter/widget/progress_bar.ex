@@ -142,31 +142,8 @@ defmodule Drafter.Widget.ProgressBar do
   end
 
   defp render_determinate(state, rect, bar_color, empty_color, text_color, bg_color) do
-    percentage =
-      if state.max_value > 0 do
-        min(1.0, state.progress / state.max_value)
-      else
-        0.0
-      end
-
-    status_text =
-      cond do
-        state.show_percentage and state.show_eta ->
-          pct = round(percentage * 100)
-          eta_text = calculate_eta(state, percentage)
-          " #{pct}% #{eta_text}"
-
-        state.show_percentage ->
-          pct = round(percentage * 100)
-          " #{pct}%"
-
-        state.show_eta ->
-          eta_text = calculate_eta(state, percentage)
-          " #{eta_text}"
-
-        true ->
-          ""
-      end
+    percentage = if state.max_value > 0, do: min(1.0, state.progress / state.max_value), else: 0.0
+    status_text = build_status_text(state, percentage)
 
     status_width = String.length(status_text)
     bar_width = max(0, rect.width - status_width)
@@ -237,27 +214,28 @@ defmodule Drafter.Widget.ProgressBar do
     segments
   end
 
-  defp calculate_eta(state, percentage) do
-    if percentage > 0.001 and state.progress > 0 do
-      current_time = System.monotonic_time(:millisecond)
-      elapsed = current_time - state.start_time
+  defp build_status_text(%{show_percentage: true, show_eta: true} = state, percentage) do
+    " #{round(percentage * 100)}% #{calculate_eta(state, percentage)}"
+  end
 
-      if elapsed > 1000 do
-        rate = state.progress / elapsed
-        remaining = state.max_value - state.progress
+  defp build_status_text(%{show_percentage: true}, percentage), do: " #{round(percentage * 100)}%"
 
-        if rate > 0 do
-          eta_ms = round(remaining / rate)
-          format_eta(eta_ms)
-        else
-          "∞"
-        end
-      else
-        "..."
-      end
-    else
-      "..."
-    end
+  defp build_status_text(%{show_eta: true} = state, percentage), do: " #{calculate_eta(state, percentage)}"
+
+  defp build_status_text(_, _percentage), do: ""
+
+  defp calculate_eta(state, percentage) when percentage > 0.001 and state.progress > 0 do
+    elapsed = System.monotonic_time(:millisecond) - state.start_time
+    compute_eta(state, elapsed)
+  end
+
+  defp calculate_eta(_state, _percentage), do: "..."
+
+  defp compute_eta(_state, elapsed) when elapsed <= 1000, do: "..."
+
+  defp compute_eta(state, elapsed) do
+    rate = state.progress / elapsed
+    if rate > 0, do: format_eta(round((state.max_value - state.progress) / rate)), else: "∞"
   end
 
   defp format_eta(milliseconds) do

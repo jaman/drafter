@@ -38,10 +38,8 @@ defmodule Drafter.Theme do
     :warning_muted,
     :error_muted,
     :success_muted,
-    :block_cursor,
-    :block_cursor_foreground,
-    :block_cursor_blurred,
     :block_hover,
+    cursor: %{},
     syntax: %{}
   ]
 
@@ -93,10 +91,12 @@ defmodule Drafter.Theme do
           warning_muted: rgb(),
           error_muted: rgb(),
           success_muted: rgb(),
-          block_cursor: rgb(),
-          block_cursor_foreground: rgb(),
-          block_cursor_blurred: rgb(),
           block_hover: rgb(),
+          cursor: %{
+            block_cursor: rgb(),
+            block_cursor_foreground: rgb(),
+            block_cursor_blurred: rgb()
+          },
           syntax: %{atom() => rgb()}
         }
 
@@ -164,9 +164,9 @@ defmodule Drafter.Theme do
       warning_muted: {128, 83, 22},
       error_muted: {93, 30, 46},
       success_muted: {39, 96, 57},
-      block_cursor: {1, 120, 212},
-      block_cursor_foreground: {224, 224, 224},
-      block_cursor_blurred: {1, 60, 106},
+      cursor: %{block_cursor: {1, 120, 212},
+        block_cursor_foreground: {224, 224, 224},
+        block_cursor_blurred: {1, 60, 106}},
       block_hover: {38, 38, 38}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -201,9 +201,9 @@ defmodule Drafter.Theme do
       warning_muted: {255, 220, 179},
       error_muted: {230, 179, 190},
       success_muted: {190, 230, 200},
-      block_cursor: {0, 69, 120},
-      block_cursor_foreground: {224, 224, 224},
-      block_cursor_blurred: {179, 197, 210},
+      cursor: %{block_cursor: {0, 69, 120},
+        block_cursor_foreground: {224, 224, 224},
+        block_cursor_blurred: {179, 197, 210}},
       block_hover: {200, 200, 200}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -256,9 +256,9 @@ defmodule Drafter.Theme do
       warning_muted: {188, 162, 111},
       error_muted: {153, 78, 85},
       success_muted: {130, 152, 112},
-      block_cursor: {136, 192, 208},
-      block_cursor_foreground: {46, 52, 64},
-      block_cursor_blurred: {94, 129, 172},
+      cursor: %{block_cursor: {136, 192, 208},
+        block_cursor_foreground: {46, 52, 64},
+        block_cursor_blurred: {94, 129, 172}},
       block_hover: {67, 76, 94}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -293,9 +293,9 @@ defmodule Drafter.Theme do
       warning_muted: {121, 125, 70},
       error_muted: {128, 43, 43},
       success_muted: {40, 125, 62},
-      block_cursor: {189, 147, 249},
-      block_cursor_foreground: {40, 42, 54},
-      block_cursor_blurred: {95, 74, 125},
+      cursor: %{block_cursor: {189, 147, 249},
+        block_cursor_foreground: {40, 42, 54},
+        block_cursor_blurred: {95, 74, 125}},
       block_hover: {68, 71, 90}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -330,9 +330,9 @@ defmodule Drafter.Theme do
       warning_muted: {102, 38, 11},
       error_muted: {110, 25, 24},
       success_muted: {67, 77, 0},
-      block_cursor: {38, 139, 210},
-      block_cursor_foreground: {253, 246, 227},
-      block_cursor_blurred: {19, 70, 105},
+      cursor: %{block_cursor: {38, 139, 210},
+        block_cursor_foreground: {253, 246, 227},
+        block_cursor_blurred: {19, 70, 105}},
       block_hover: {7, 54, 66}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -367,9 +367,9 @@ defmodule Drafter.Theme do
       warning_muted: {240, 195, 180},
       error_muted: {245, 190, 188},
       success_muted: {218, 225, 179},
-      block_cursor: {38, 139, 210},
-      block_cursor_foreground: {253, 246, 227},
-      block_cursor_blurred: {198, 220, 235},
+      cursor: %{block_cursor: {38, 139, 210},
+        block_cursor_foreground: {253, 246, 227},
+        block_cursor_blurred: {198, 220, 235}},
       block_hover: {238, 232, 213}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -404,9 +404,9 @@ defmodule Drafter.Theme do
       warning_muted: {127, 76, 16},
       error_muted: {125, 19, 57},
       success_muted: {83, 113, 23},
-      block_cursor: {174, 129, 255},
-      block_cursor_foreground: {39, 40, 34},
-      block_cursor_blurred: {87, 65, 128},
+      cursor: %{block_cursor: {174, 129, 255},
+        block_cursor_foreground: {39, 40, 34},
+        block_cursor_blurred: {87, 65, 128}},
       block_hover: {50, 50, 44}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -441,9 +441,9 @@ defmodule Drafter.Theme do
       warning_muted: {127, 64, 13},
       error_muted: {126, 37, 26},
       success_muted: {92, 94, 19},
-      block_cursor: {131, 165, 152},
-      block_cursor_foreground: {40, 40, 40},
-      block_cursor_blurred: {66, 83, 76},
+      cursor: %{block_cursor: {131, 165, 152},
+        block_cursor_foreground: {40, 40, 40},
+        block_cursor_blurred: {66, 83, 76}},
       block_hover: {60, 56, 54}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -478,9 +478,9 @@ defmodule Drafter.Theme do
       warning_muted: {235, 198, 180},
       error_muted: {230, 179, 180},
       success_muted: {218, 217, 186},
-      block_cursor: {7, 102, 120},
-      block_cursor_foreground: {251, 241, 199},
-      block_cursor_blurred: {198, 226, 231},
+      cursor: %{block_cursor: {7, 102, 120},
+        block_cursor_foreground: {251, 241, 199},
+        block_cursor_blurred: {198, 226, 231}},
       block_hover: {235, 219, 178}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -515,9 +515,9 @@ defmodule Drafter.Theme do
       warning_muted: {112, 88, 52},
       error_muted: {124, 59, 71},
       success_muted: {79, 103, 53},
-      block_cursor: {187, 154, 247},
-      block_cursor_foreground: {26, 27, 38},
-      block_cursor_blurred: {94, 77, 124},
+      cursor: %{block_cursor: {187, 154, 247},
+        block_cursor_foreground: {26, 27, 38},
+        block_cursor_blurred: {94, 77, 124}},
       block_hover: {41, 46, 66}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -552,9 +552,9 @@ defmodule Drafter.Theme do
       warning_muted: {125, 113, 88},
       error_muted: {122, 70, 84},
       success_muted: {83, 114, 81},
-      block_cursor: {245, 194, 231},
-      block_cursor_foreground: {24, 24, 37},
-      block_cursor_blurred: {123, 97, 116},
+      cursor: %{block_cursor: {245, 194, 231},
+        block_cursor_foreground: {24, 24, 37},
+        block_cursor_blurred: {123, 97, 116}},
       block_hover: {49, 50, 68}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -589,9 +589,9 @@ defmodule Drafter.Theme do
       warning_muted: {135, 68, 0},
       error_muted: {135, 0, 0},
       success_muted: {0, 95, 0},
-      block_cursor: {0, 175, 215},
-      block_cursor_foreground: {8, 8, 8},
-      block_cursor_blurred: {0, 95, 135},
+      cursor: %{block_cursor: {0, 175, 215},
+        block_cursor_foreground: {8, 8, 8},
+        block_cursor_blurred: {0, 95, 135}},
       block_hover: {28, 28, 48}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -626,9 +626,9 @@ defmodule Drafter.Theme do
       warning_muted: {135, 68, 0},
       error_muted: {135, 40, 0},
       success_muted: {0, 135, 60},
-      block_cursor: {255, 176, 0},
-      block_cursor_foreground: {10, 6, 0},
-      block_cursor_blurred: {135, 95, 0},
+      cursor: %{block_cursor: {255, 176, 0},
+        block_cursor_foreground: {10, 6, 0},
+        block_cursor_blurred: {135, 95, 0}},
       block_hover: {30, 20, 0}
     }
     %{base | syntax: default_syntax_colors(base)}
@@ -643,6 +643,9 @@ defmodule Drafter.Theme do
   end
 
   def get_color(theme, color_name) do
-    Map.get(theme, color_name)
+    case Map.get(theme, color_name) do
+      nil -> theme |> Map.get(:cursor, %{}) |> Map.get(color_name)
+      value -> value
+    end
   end
 end

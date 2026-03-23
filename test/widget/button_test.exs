@@ -178,7 +178,7 @@ defmodule Drafter.Widget.ButtonTest do
       rect = %{width: 20, height: 3}
 
       strips = Button.render(state, rect)
-      assert length(strips) > 0
+      assert strips != ""
     end
 
     test "success variant uses success color" do
@@ -186,7 +186,7 @@ defmodule Drafter.Widget.ButtonTest do
       rect = %{width: 20, height: 3}
 
       strips = Button.render(state, rect)
-      assert length(strips) > 0
+      assert strips != ""
     end
 
     test "warning variant uses warning color" do
@@ -194,7 +194,7 @@ defmodule Drafter.Widget.ButtonTest do
       rect = %{width: 20, height: 3}
 
       strips = Button.render(state, rect)
-      assert length(strips) > 0
+      assert strips != ""
     end
 
     test "error variant uses error color" do
@@ -202,7 +202,7 @@ defmodule Drafter.Widget.ButtonTest do
       rect = %{width: 20, height: 3}
 
       strips = Button.render(state, rect)
-      assert length(strips) > 0
+      assert strips != ""
     end
   end
 end

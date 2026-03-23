@@ -124,68 +124,43 @@ defmodule Drafter.Widget.SelectionList do
     end)
   end
 
-  def handle_event(event, state) do
-    case event do
-      {:key, :up} ->
-        new_index = max(0, state.highlighted_index - 1)
-        new_state = %{state | highlighted_index: new_index} |> ensure_visible()
-        {:ok, new_state}
+  def handle_event({:key, :up}, state) do
+    {:ok, %{state | highlighted_index: max(0, state.highlighted_index - 1)} |> ensure_visible()}
+  end
 
-      {:key, :down} ->
-        max_index = length(state.options) - 1
-        new_index = min(max_index, state.highlighted_index + 1)
-        new_state = %{state | highlighted_index: new_index} |> ensure_visible()
-        {:ok, new_state}
+  def handle_event({:key, :down}, state) do
+    {:ok, %{state | highlighted_index: min(length(state.options) - 1, state.highlighted_index + 1)} |> ensure_visible()}
+  end
 
-      {:key, :home} ->
-        new_state = %{state | highlighted_index: 0, scroll_offset: 0}
-        {:ok, new_state}
+  def handle_event({:key, :home}, state), do: {:ok, %{state | highlighted_index: 0, scroll_offset: 0}}
 
-      {:key, :end} ->
-        max_index = length(state.options) - 1
-        new_state = %{state | highlighted_index: max_index} |> ensure_visible()
-        {:ok, new_state}
+  def handle_event({:key, :end}, state) do
+    {:ok, %{state | highlighted_index: length(state.options) - 1} |> ensure_visible()}
+  end
 
-      {:char, 1} when state.selection_mode == :multiple ->
-        all_indices = MapSet.new(0..(length(state.options) - 1))
+  def handle_event({:char, 1}, %{selection_mode: :multiple} = state) do
+    all_indices = MapSet.new(0..(length(state.options) - 1))
+    new_selected = if MapSet.equal?(state.selected_indices, all_indices), do: MapSet.new(), else: all_indices
+    new_state = %{state | selected_indices: new_selected}
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
 
-        new_selected =
-          if MapSet.equal?(state.selected_indices, all_indices) do
-            MapSet.new()
-          else
-            all_indices
-          end
+  def handle_event({:key, key}, state) when key in [:enter, :" "], do: select_at(state, state.highlighted_index)
 
-        new_state = %{state | selected_indices: new_selected}
-        trigger_change(new_state)
-        {:ok, new_state}
+  def handle_event({:mouse, %{type: :mouse_up, y: y}}, state) do
+    actual_index = state.scroll_offset + y
 
-      {:key, :enter} ->
-        select_at(state, state.highlighted_index)
-
-      {:key, :" "} ->
-        select_at(state, state.highlighted_index)
-
-      {:mouse, %{type: :mouse_up, y: y}} ->
-        actual_index = state.scroll_offset + y
-
-        if actual_index >= 0 and actual_index < length(state.options) do
-          new_state = %{state | highlighted_index: actual_index}
-          select_at(new_state, actual_index)
-        else
-          {:noreply, state}
-        end
-
-      {:focus} ->
-        {:ok, %{state | focused: true}}
-
-      {:blur} ->
-        {:ok, %{state | focused: false}}
-
-      _ ->
-        {:noreply, state}
+    if actual_index >= 0 and actual_index < length(state.options) do
+      select_at(%{state | highlighted_index: actual_index}, actual_index)
+    else
+      {:noreply, state}
     end
   end
+
+  def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
+  def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
+  def handle_event(_, state), do: {:noreply, state}
 
   def preferred_height(args, opts), do: Keyword.get(opts, :height, min(length(args || []), 5))
 
@@ -195,11 +170,16 @@ defmodule Drafter.Widget.SelectionList do
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
-    all_options = if is_list(options) and length(options) > 0, do: options, else: Keyword.get(opts, :options, [])
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
+    all_options =
+      if is_list(options) and options != [], do: options, else: Keyword.get(opts, :options, [])
+
     %{
       options: all_options,
       selected: Keyword.get(opts, :selected, []),

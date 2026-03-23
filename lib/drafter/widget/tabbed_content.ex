@@ -40,6 +40,7 @@ defmodule Drafter.Widget.TabbedContent do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.Widget.Callback
 
   defstruct [
     :tabs,
@@ -170,130 +171,63 @@ defmodule Drafter.Widget.TabbedContent do
     }
   end
 
-  def handle_event(event, state) do
-    case event do
-      {:key, :left} ->
-        if state.active_tab > 0 do
-          change_tab(state, state.active_tab - 1)
-        else
-          {:noreply, state}
-        end
+  def handle_event({:key, :left}, state) when state.active_tab > 0,
+    do: change_tab(state, state.active_tab - 1)
 
-      {:key, :right} ->
-        max_tab = length(state.tabs) - 1
+  def handle_event({:key, :left}, state), do: {:noreply, state}
 
-        if state.active_tab < max_tab do
-          change_tab(state, state.active_tab + 1)
-        else
-          {:noreply, state}
-        end
+  def handle_event({:key, :right}, state) do
+    max_tab = length(state.tabs) - 1
 
-      {:key, :up} ->
-        active_child = Enum.at(state.child_widgets, state.active_tab)
-
-        if active_child do
-          dispatch_event_to_child(state, active_child, {:key, :up}, state.active_tab)
-        else
-          new_item = max(0, state.highlighted_item - 1)
-          {:ok, %{state | highlighted_item: new_item}}
-        end
-
-      {:key, :down} ->
-        active_child = Enum.at(state.child_widgets, state.active_tab)
-
-        if active_child do
-          dispatch_event_to_child(state, active_child, {:key, :down}, state.active_tab)
-        else
-          active_tab = Enum.at(state.tabs, state.active_tab)
-          max_item = if active_tab, do: max(0, length(active_tab.content) - 1), else: 0
-          new_item = min(max_item, state.highlighted_item + 1)
-          {:ok, %{state | highlighted_item: new_item}}
-        end
-
-      {:key, :enter} ->
-        active_child = Enum.at(state.child_widgets, state.active_tab)
-
-        if active_child do
-          dispatch_event_to_child(state, active_child, {:key, :enter}, state.active_tab)
-        else
-          if state.on_item_select do
-            active_tab = Enum.at(state.tabs, state.active_tab)
-
-            item =
-              if active_tab, do: Enum.at(active_tab.content, state.highlighted_item), else: nil
-
-            if item do
-              try do
-                state.on_item_select.(item)
-              rescue
-                _ -> :ok
-              end
-            end
-          end
-
-          {:ok, state}
-        end
-
-      {:key, :tab} ->
-        {:noreply, state}
-
-      {:mouse, %{type: :mouse_up, y: y, x: x}} ->
-        cond do
-          y <= 1 ->
-            clicked_tab = find_tab_at_x(state, x)
-
-            if clicked_tab != nil do
-              change_tab(%{state | focused: true}, clicked_tab)
-            else
-              {:ok, %{state | focused: true}}
-            end
-
-          y >= 3 ->
-            active_child = Enum.at(state.child_widgets, state.active_tab)
-
-            if active_child do
-              click_y = y - 3
-
-              dispatch_event_to_child(
-                state,
-                active_child,
-                {:mouse, %{type: :mouse_up, y: click_y, x: x}},
-                state.active_tab
-              )
-            else
-              item_index = y - 3
-              active_tab = Enum.at(state.tabs, state.active_tab)
-              max_item = if active_tab, do: length(active_tab.content) - 1, else: 0
-
-              if item_index >= 0 and item_index <= max_item do
-                {:ok, %{state | highlighted_item: item_index, focused: true}}
-              else
-                {:ok, %{state | focused: true}}
-              end
-            end
-
-          true ->
-            {:ok, %{state | focused: true}}
-        end
-
-      {:mouse, %{type: :move, y: y, x: x}} ->
-        if y <= 1 do
-          hovered = find_tab_at_x(state, x)
-          {:ok, %{state | hovered_tab: hovered}}
-        else
-          {:ok, %{state | hovered_tab: nil}}
-        end
-
-      {:focus} ->
-        {:ok, %{state | focused: true}}
-
-      {:blur} ->
-        {:ok, %{state | focused: false, hovered_tab: nil}}
-
-      _ ->
-        {:noreply, state}
+    if state.active_tab < max_tab do
+      change_tab(state, state.active_tab + 1)
+    else
+      {:noreply, state}
     end
   end
+
+  def handle_event({:key, :up}, state) do
+    active_child = Enum.at(state.child_widgets, state.active_tab)
+    handle_vertical_key(state, active_child, {:key, :up}, :up)
+  end
+
+  def handle_event({:key, :down}, state) do
+    active_child = Enum.at(state.child_widgets, state.active_tab)
+    handle_vertical_key(state, active_child, {:key, :down}, :down)
+  end
+
+  def handle_event({:key, :enter}, state) do
+    active_child = Enum.at(state.child_widgets, state.active_tab)
+    handle_enter_key(state, active_child)
+  end
+
+  def handle_event({:key, :tab}, state), do: {:noreply, state}
+
+  def handle_event({:mouse, %{type: :mouse_up, y: y, x: x}}, state) when y <= 1 do
+    case find_tab_at_x(state, x) do
+      nil -> {:ok, %{state | focused: true}}
+      clicked_tab -> change_tab(%{state | focused: true}, clicked_tab)
+    end
+  end
+
+  def handle_event({:mouse, %{type: :mouse_up, y: y, x: x}}, state) when y >= 3 do
+    active_child = Enum.at(state.child_widgets, state.active_tab)
+    handle_content_click(state, active_child, y, x)
+  end
+
+  def handle_event({:mouse, %{type: :mouse_up}}, state), do: {:ok, %{state | focused: true}}
+
+  def handle_event({:mouse, %{type: :move, y: y, x: x}}, state) when y <= 1 do
+    {:ok, %{state | hovered_tab: find_tab_at_x(state, x)}}
+  end
+
+  def handle_event({:mouse, %{type: :move}}, state), do: {:ok, %{state | hovered_tab: nil}}
+
+  def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
+
+  def handle_event({:blur}, state), do: {:ok, %{state | focused: false, hovered_tab: nil}}
+
+  def handle_event(_event, state), do: {:noreply, state}
 
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 8)
 
@@ -303,17 +237,21 @@ defmodule Drafter.Widget.TabbedContent do
     rect = Keyword.get(opts, :__rect__, %{width: 80})
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
-    all_tabs = if is_list(tabs) and length(tabs) > 0, do: tabs, else: Keyword.get(opts, :tabs, [])
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
+    all_tabs = if is_list(tabs) and tabs != [], do: tabs, else: Keyword.get(opts, :tabs, [])
+
     %{
       tabs: all_tabs,
       active_tab: Keyword.get(opts, :active_tab, 0),
       title: Keyword.get(opts, :title),
       title_align: Keyword.get(opts, :title_align, :left),
-      on_tab_change: Drafter.Widget.Callback.wrap_1(Keyword.get(opts, :on_tab_change)),
+      on_tab_change: Callback.wrap_1(Keyword.get(opts, :on_tab_change)),
       width: Keyword.get(opts, :width, rect.width),
       classes: classes
     }
@@ -328,6 +266,65 @@ defmodule Drafter.Widget.TabbedContent do
     }
   end
 
+  defp handle_vertical_key(state, nil, _event, :up) do
+    {:ok, %{state | highlighted_item: max(0, state.highlighted_item - 1)}}
+  end
+
+  defp handle_vertical_key(state, nil, _event, :down) do
+    active_tab = Enum.at(state.tabs, state.active_tab)
+    max_item = if active_tab, do: max(0, length(active_tab.content) - 1), else: 0
+    {:ok, %{state | highlighted_item: min(max_item, state.highlighted_item + 1)}}
+  end
+
+  defp handle_vertical_key(state, active_child, event, _dir) do
+    dispatch_event_to_child(state, active_child, event, state.active_tab)
+  end
+
+  defp handle_enter_key(state, nil) do
+    maybe_invoke_item_select(state)
+    {:ok, state}
+  end
+
+  defp handle_enter_key(state, active_child) do
+    dispatch_event_to_child(state, active_child, {:key, :enter}, state.active_tab)
+  end
+
+  defp maybe_invoke_item_select(%{on_item_select: nil}), do: :ok
+
+  defp maybe_invoke_item_select(state) do
+    active_tab = Enum.at(state.tabs, state.active_tab)
+    item = if active_tab, do: Enum.at(active_tab.content, state.highlighted_item), else: nil
+
+    if item do
+      try do
+        state.on_item_select.(item)
+      rescue
+        _ -> :ok
+      end
+    end
+  end
+
+  defp handle_content_click(state, nil, y, _x) do
+    item_index = y - 3
+    active_tab = Enum.at(state.tabs, state.active_tab)
+    max_item = if active_tab, do: length(active_tab.content) - 1, else: 0
+
+    if item_index >= 0 and item_index <= max_item do
+      {:ok, %{state | highlighted_item: item_index, focused: true}}
+    else
+      {:ok, %{state | focused: true}}
+    end
+  end
+
+  defp handle_content_click(state, active_child, y, x) do
+    dispatch_event_to_child(
+      state,
+      active_child,
+      {:mouse, %{type: :mouse_up, y: y - 3, x: x}},
+      state.active_tab
+    )
+  end
+
   defp change_tab(state, new_tab) do
     new_state = %{state | active_tab: new_tab, highlighted_item: 0}
 
@@ -337,7 +334,7 @@ defmodule Drafter.Widget.TabbedContent do
       try do
         case Drafter.ScreenManager.get_active_screen() do
           nil ->
-            Drafter.AppRegistry.send_to_loop( {:app_event, state.on_tab_change, tab.id})
+            Drafter.AppRegistry.send_to_loop({:app_event, state.on_tab_change, tab.id})
 
           _screen ->
             send(self(), {:tui_event, {:app_callback, state.on_tab_change, tab.id}})
@@ -537,33 +534,31 @@ defmodule Drafter.Widget.TabbedContent do
          active_tab
        ) do
     active_child = Enum.at(child_widgets, active_tab)
+    render_active_child(active_child, content_lines, width, content_height, border_style, bg_style)
+  end
 
-    if active_child do
-      render_widget_with_state(active_child, width, content_height, border_style)
-    else
-      label_content = extract_label_content(content_lines)
-
-      if label_content do
-        render_label_content(label_content, width, content_height, border_style, bg_style)
-      else
-        content_rect = %{x: 0, y: 0, width: width - 4, height: content_height}
-
-        content_strips =
-          Drafter.ContentRenderer.render_vertical_layout(
-            content_lines,
-            content_rect.width,
-            content_rect.height
-          )
-
-        Enum.map(content_strips, fn strip ->
-          border_left = Segment.new("│ ", border_style)
-          border_right = Segment.new(" │", border_style)
-
-          segments = [border_left] ++ strip.segments ++ [border_right]
-          Strip.new(segments)
-        end)
-      end
+  defp render_active_child(nil, content_lines, width, content_height, border_style, bg_style) do
+    case extract_label_content(content_lines) do
+      nil -> render_layout_content(content_lines, width, content_height, border_style)
+      label -> render_label_content(label, width, content_height, border_style, bg_style)
     end
+  end
+
+  defp render_active_child(active_child, _lines, width, content_height, border_style, _bg_style) do
+    render_widget_with_state(active_child, width, content_height, border_style)
+  end
+
+  defp render_layout_content(content_lines, width, content_height, border_style) do
+    content_strips =
+      Drafter.ContentRenderer.render_vertical_layout(
+        content_lines,
+        width - 4,
+        content_height
+      )
+
+    Enum.map(content_strips, fn strip ->
+      Strip.new([Segment.new("│ ", border_style)] ++ strip.segments ++ [Segment.new(" │", border_style)])
+    end)
   end
 
   defp extract_label_content(content_lines) do
@@ -608,23 +603,20 @@ defmodule Drafter.Widget.TabbedContent do
 
   defp wrap_text(text, max_width) do
     words = String.split(text)
-
-    {lines, current_line} =
-      Enum.reduce(words, {[], ""}, fn word, {lines, current} ->
-        if current == "" do
-          {lines, word}
-        else
-          test_line = current <> " " <> word
-
-          if String.length(test_line) <= max_width do
-            {lines, test_line}
-          else
-            {lines ++ [current], word}
-          end
-        end
-      end)
-
+    {lines, current_line} = Enum.reduce(words, {[], ""}, &wrap_word(&1, &2, max_width))
     if current_line != "", do: lines ++ [current_line], else: lines
+  end
+
+  defp wrap_word(word, {lines, ""}, _max_width), do: {lines, word}
+
+  defp wrap_word(word, {lines, current}, max_width) do
+    test_line = current <> " " <> word
+
+    if String.length(test_line) <= max_width do
+      {lines, test_line}
+    else
+      {lines ++ [current], word}
+    end
   end
 
   defp render_string_content(
@@ -667,54 +659,44 @@ defmodule Drafter.Widget.TabbedContent do
     on_highlight = Keyword.get(opts, :on_highlight)
     selected = Keyword.get(opts, :selected)
 
-    options =
-      Enum.map(items, fn
-        {label, id} ->
-          %{id: id, label: to_string(label), selected: id == selected, disabled: false}
-
-        label when is_binary(label) ->
-          %{id: label, label: label, selected: label == selected, disabled: false}
-
-        %{id: id} = item ->
-          Map.merge(%{selected: id == selected, disabled: false}, item)
-      end)
-
-    on_select_wrapper =
-      if on_select do
-        fn option ->
-          case Drafter.ScreenManager.get_active_screen() do
-            nil -> Drafter.AppRegistry.send_to_loop( {:app_event, on_select, option.id})
-            _screen -> send(self(), {:tui_event, {:app_callback, on_select, option.id}})
-          end
-        end
-      else
-        nil
-      end
-
-    on_highlight_wrapper =
-      if on_highlight do
-        fn option ->
-          case Drafter.ScreenManager.get_active_screen() do
-            nil -> Drafter.AppRegistry.send_to_loop( {:app_event, on_highlight, option.id})
-            _screen -> send(self(), {:tui_event, {:app_callback, on_highlight, option.id}})
-          end
-        end
-      else
-        nil
-      end
+    options = Enum.map(items, &normalize_option(&1, selected))
 
     mount_props = %{
       options: options,
       visible_height: 10,
       expand_height: :fill,
-      on_select: on_select_wrapper,
-      on_highlight: on_highlight_wrapper
+      on_select: build_callback_wrapper(on_select),
+      on_highlight: build_callback_wrapper(on_highlight)
     }
 
     {:option_list, OptionList.mount(mount_props)}
   end
 
   defp mount_widget_from_tuple(_widget_tuple), do: nil
+
+  defp normalize_option({label, id}, selected),
+    do: %{id: id, label: to_string(label), selected: id == selected, disabled: false}
+
+  defp normalize_option(label, selected) when is_binary(label),
+    do: %{id: label, label: label, selected: label == selected, disabled: false}
+
+  defp normalize_option(%{id: id} = item, selected),
+    do: Map.merge(%{selected: id == selected, disabled: false}, item)
+
+  defp build_callback_wrapper(nil), do: nil
+
+  defp build_callback_wrapper(callback) do
+    fn option ->
+      dispatch_app_callback(callback, option.id)
+    end
+  end
+
+  defp dispatch_app_callback(callback, value) do
+    case Drafter.ScreenManager.get_active_screen() do
+      nil -> Drafter.AppRegistry.send_to_loop({:app_event, callback, value})
+      _screen -> send(self(), {:tui_event, {:app_callback, callback, value}})
+    end
+  end
 
   defp render_widget_with_state({:option_list, widget_state}, width, height, border_style) do
     alias Drafter.Widget.OptionList

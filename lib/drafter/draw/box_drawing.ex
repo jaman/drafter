@@ -1,7 +1,7 @@
 defmodule Drafter.Draw.BoxDrawing do
   @moduledoc """
   Unicode box drawing characters and logical combination.
-  
+
   Provides comprehensive support for drawing boxes, lines, and borders
   using Unicode box drawing characters with proper character combination logic.
   """
@@ -14,22 +14,21 @@ defmodule Drafter.Draw.BoxDrawing do
       horizontal: "─",
       vertical: "│",
       top_left: "┌",
-      top_right: "┐", 
+      top_right: "┐",
       bottom_left: "└",
       bottom_right: "┘",
       cross: "┼",
       tee_up: "┴",
       tee_down: "┬",
-      tee_left: "┤", 
+      tee_left: "┤",
       tee_right: "├"
     },
-    
     heavy: %{
       horizontal: "━",
       vertical: "┃",
       top_left: "┏",
       top_right: "┓",
-      bottom_left: "┗", 
+      bottom_left: "┗",
       bottom_right: "┛",
       cross: "╋",
       tee_up: "┻",
@@ -37,31 +36,29 @@ defmodule Drafter.Draw.BoxDrawing do
       tee_left: "┫",
       tee_right: "┣"
     },
-    
     double: %{
       horizontal: "═",
       vertical: "║",
       top_left: "╔",
       top_right: "╗",
       bottom_left: "╚",
-      bottom_right: "╝", 
+      bottom_right: "╝",
       cross: "╬",
       tee_up: "╩",
       tee_down: "╦",
       tee_left: "╣",
       tee_right: "╠"
     },
-
     rounded: %{
       horizontal: "─",
-      vertical: "│", 
+      vertical: "│",
       top_left: "╭",
       top_right: "╮",
       bottom_left: "╰",
       bottom_right: "╯",
       cross: "┼",
       tee_up: "┴",
-      tee_down: "┬", 
+      tee_down: "┬",
       tee_left: "┤",
       tee_right: "├"
     }
@@ -98,20 +95,24 @@ defmodule Drafter.Draw.BoxDrawing do
   @spec draw_box(non_neg_integer(), non_neg_integer(), line_type()) :: [String.t()]
   def draw_box(width, height, style \\ :light) when width >= 2 and height >= 2 do
     chars = get_chars(style)
-    
-    top_line = chars.top_left <> 
-               String.duplicate(chars.horizontal, width - 2) <> 
-               chars.top_right
-    
-    middle_line = chars.vertical <> 
-                  String.duplicate(" ", width - 2) <> 
-                  chars.vertical
+
+    top_line =
+      chars.top_left <>
+        String.duplicate(chars.horizontal, width - 2) <>
+        chars.top_right
+
+    middle_line =
+      chars.vertical <>
+        String.duplicate(" ", width - 2) <>
+        chars.vertical
+
     middle_lines = List.duplicate(middle_line, height - 2)
-    
-    bottom_line = chars.bottom_left <> 
-                  String.duplicate(chars.horizontal, width - 2) <> 
-                  chars.bottom_right
-    
+
+    bottom_line =
+      chars.bottom_left <>
+        String.duplicate(chars.horizontal, width - 2) <>
+        chars.bottom_right
+
     [top_line] ++ middle_lines ++ [bottom_line]
   end
 
@@ -123,20 +124,23 @@ defmodule Drafter.Draw.BoxDrawing do
     else
       max_width = content_lines |> Enum.map(&String.length/1) |> Enum.max()
       chars = get_chars(style)
-      
-      top_line = chars.top_left <> 
-                 String.duplicate(chars.horizontal, max_width) <> 
-                 chars.top_right
-      
-      padded_content = Enum.map(content_lines, fn line ->
-        padding = max_width - String.length(line)
-        chars.vertical <> line <> String.duplicate(" ", padding) <> chars.vertical
-      end)
-      
-      bottom_line = chars.bottom_left <> 
-                    String.duplicate(chars.horizontal, max_width) <> 
-                    chars.bottom_right
-      
+
+      top_line =
+        chars.top_left <>
+          String.duplicate(chars.horizontal, max_width) <>
+          chars.top_right
+
+      padded_content =
+        Enum.map(content_lines, fn line ->
+          padding = max_width - String.length(line)
+          chars.vertical <> line <> String.duplicate(" ", padding) <> chars.vertical
+        end)
+
+      bottom_line =
+        chars.bottom_left <>
+          String.duplicate(chars.horizontal, max_width) <>
+          chars.bottom_right
+
       [top_line] ++ padded_content ++ [bottom_line]
     end
   end
@@ -162,47 +166,51 @@ defmodule Drafter.Draw.BoxDrawing do
 
   @doc "Draw border around content with title"
   @spec draw_border_with_title([String.t()], String.t(), border_style()) :: [String.t()]
-  def draw_border_with_title(content_lines, title, style \\ :solid) do
-    if style == :none do
-      content_lines
-    else
-      chars = border_style_chars(style)
-      max_width = if Enum.empty?(content_lines) do
-        0
-      else
-        content_lines |> Enum.map(&String.length/1) |> Enum.max()
-      end
-      title_width = String.length(title)
-      
-      box_content_width = max(max_width, title_width + 2)
-      
-      title_padding = max(0, box_content_width - title_width - 2)
-      left_title_pad = div(title_padding, 2)
-      right_title_pad = title_padding - left_title_pad
-      
-      top_line = chars.top_left <> 
-                 String.duplicate(chars.horizontal, left_title_pad + 1) <>
-                 title <>
-                 String.duplicate(chars.horizontal, right_title_pad + 1) <>
-                 chars.top_right
-      
-      padded_content = Enum.map(content_lines, fn line ->
-        padding = box_content_width - String.length(line)
-        chars.vertical <> line <> String.duplicate(" ", padding) <> chars.vertical
-      end)
-      
-      padded_content = if Enum.empty?(padded_content) do
-        empty_line = chars.vertical <> String.duplicate(" ", box_content_width) <> chars.vertical
-        [empty_line]
-      else
-        padded_content
-      end
-      
-      bottom_line = chars.bottom_left <> 
-                    String.duplicate(chars.horizontal, box_content_width) <> 
-                    chars.bottom_right
-      
-      [top_line] ++ padded_content ++ [bottom_line]
-    end
+  def draw_border_with_title(content_lines, _title, :none), do: content_lines
+
+  def draw_border_with_title(content_lines, title, style) do
+    chars = border_style_chars(style)
+    max_width = content_max_width(content_lines)
+    title_width = String.length(title)
+    box_content_width = max(max_width, title_width + 2)
+
+    top_line = build_title_top_line(chars, title, box_content_width, title_width)
+    padded_content = pad_content_lines(content_lines, chars, box_content_width)
+
+    bottom_line =
+      chars.bottom_left <>
+        String.duplicate(chars.horizontal, box_content_width) <>
+        chars.bottom_right
+
+    [top_line] ++ padded_content ++ [bottom_line]
+  end
+
+  defp content_max_width([]), do: 0
+
+  defp content_max_width(content_lines) do
+    content_lines |> Enum.map(&String.length/1) |> Enum.max()
+  end
+
+  defp build_title_top_line(chars, title, box_content_width, title_width) do
+    title_padding = max(0, box_content_width - title_width - 2)
+    left_title_pad = div(title_padding, 2)
+    right_title_pad = title_padding - left_title_pad
+
+    chars.top_left <>
+      String.duplicate(chars.horizontal, left_title_pad + 1) <>
+      title <>
+      String.duplicate(chars.horizontal, right_title_pad + 1) <>
+      chars.top_right
+  end
+
+  defp pad_content_lines([], chars, box_content_width) do
+    [chars.vertical <> String.duplicate(" ", box_content_width) <> chars.vertical]
+  end
+
+  defp pad_content_lines(content_lines, chars, box_content_width) do
+    Enum.map(content_lines, fn line ->
+      padding = box_content_width - String.length(line)
+      chars.vertical <> line <> String.duplicate(" ", padding) <> chars.vertical
+    end)
   end
 end

@@ -76,52 +76,34 @@ defmodule Drafter.Widget.LoadingIndicator do
   def render(state, _rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
-    classes = state.classes
-    computed_opts = [classes: classes, style: state.style]
+    computed_opts = [classes: state.classes, style: state.style]
     computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
     computed = Computed.for_widget(:loading_indicator, state, computed_opts)
 
+    spinner_char = current_spinner_char(state)
+    fg = resolve_fg_color(state, computed)
+    bg = computed[:background] || {30, 30, 30}
+
+    label_text = if state.text, do: " #{spinner_char} #{state.text} ", else: " #{spinner_char} "
+    [Strip.new([Segment.new(label_text, %{fg: fg, bg: bg})])]
+  end
+
+  defp current_spinner_char(state) do
     spinner_chars =
       case Map.fetch(@fallback_spinner_sets, state.spinner_type) do
         {:ok, frames} -> frames
         :error -> CharacterSet.spinner(spinner_type_to_skin_key(state.spinner_type))
       end
 
-    frame = if state.running do
-      System.monotonic_time(:millisecond) |> div(@spinner_speed)
-    else
-      0
-    end
+    frame = if state.running, do: System.monotonic_time(:millisecond) |> div(@spinner_speed), else: 0
+    Enum.at(spinner_chars, rem(frame, length(spinner_chars)))
+  end
 
-    spinner_char = Enum.at(spinner_chars, rem(frame, length(spinner_chars)))
+  defp resolve_fg_color(%{gradient_colors: nil}, computed), do: computed[:color] || {200, 200, 200}
 
-    fg = if state.gradient_colors do
-      gradient_frame = if state.running do
-        System.monotonic_time(:millisecond) |> div(state.gradient_speed)
-      else
-        0
-      end
-
-      interpolate_gradient(state.gradient_colors, gradient_frame)
-    else
-      computed[:color] || {200, 200, 200}
-    end
-
-    bg = computed[:background] || {30, 30, 30}
-
-    label_style = %{fg: fg, bg: bg}
-
-    label_text = if state.text do
-      " #{spinner_char} #{state.text} "
-    else
-      " #{spinner_char} "
-    end
-
-    label_strip = Strip.new([
-      Segment.new(label_text, label_style)
-    ])
-
-    [label_strip]
+  defp resolve_fg_color(state, _computed) do
+    gradient_frame = if state.running, do: System.monotonic_time(:millisecond) |> div(state.gradient_speed), else: 0
+    interpolate_gradient(state.gradient_colors, gradient_frame)
   end
 
   @impl Drafter.Widget

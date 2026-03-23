@@ -139,37 +139,14 @@ defmodule Drafter.Widget.Collapsible do
     |> Map.put(:content_height, new_content_height)
   end
 
-  def handle_event(event, state) do
-
-    case event do
-      {:key, :enter} ->
-        toggle(state)
-
-      {:key, :" "} ->
-        toggle(state)
-
-      {:mouse, %{type: :mouse_up, y: 0} = _mouse_data} ->
-        toggle(state)
-
-      {:mouse, %{type: :mouse_up} = _mouse_data} ->
-        {:noreply, state}
-
-      {:focus} ->
-        {:ok, %{state | focused: true, hovered: true}}
-
-      {:blur} ->
-        {:ok, %{state | focused: false, hovered: false}}
-
-      :hover ->
-        {:ok, %{state | hovered: true}}
-
-      :unhover ->
-        {:ok, %{state | hovered: false}}
-
-      _ ->
-        {:noreply, state}
-    end
-  end
+  def handle_event({:key, key}, state) when key in [:enter, :" "], do: toggle(state)
+  def handle_event({:mouse, %{type: :mouse_up, y: 0}}, state), do: toggle(state)
+  def handle_event({:mouse, %{type: :mouse_up}}, state), do: {:noreply, state}
+  def handle_event({:focus}, state), do: {:ok, %{state | focused: true, hovered: true}}
+  def handle_event({:blur}, state), do: {:ok, %{state | focused: false, hovered: false}}
+  def handle_event(:hover, state), do: {:ok, %{state | hovered: true}}
+  def handle_event(:unhover, state), do: {:ok, %{state | hovered: false}}
+  def handle_event(_, state), do: {:noreply, state}
 
   defp render_content(content, _content_height, rect, bg_style) when is_binary(content) do
     content_lines = Text.wrap(content, rect.width - 2, :word)

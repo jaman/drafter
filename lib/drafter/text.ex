@@ -224,19 +224,5 @@ defmodule Drafter.Text do
     end
   end
 
-  defp grapheme_width(grapheme) do
-    case String.to_charlist(grapheme) do
-      [cp | _] when cp >= 0x1100 and cp <= 0x115F -> 2
-      [cp | _] when cp >= 0x2E80 and cp <= 0x9FFF -> 2
-      [cp | _] when cp >= 0xAC00 and cp <= 0xD7AF -> 2
-      [cp | _] when cp >= 0xF900 and cp <= 0xFAFF -> 2
-      [cp | _] when cp >= 0xFE10 and cp <= 0xFE1F -> 2
-      [cp | _] when cp >= 0xFE30 and cp <= 0xFE6F -> 2
-      [cp | _] when cp >= 0xFF00 and cp <= 0xFF60 -> 2
-      [cp | _] when cp >= 0xFFE0 and cp <= 0xFFE6 -> 2
-      [cp | _] when cp >= 0x20000 and cp <= 0x2FFFD -> 2
-      [cp | _] when cp >= 0x30000 and cp <= 0x3FFFD -> 2
-      _ -> 1
-    end
-  end
+  defp grapheme_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
 end

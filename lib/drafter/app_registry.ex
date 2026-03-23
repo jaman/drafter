@@ -39,19 +39,23 @@ defmodule Drafter.AppRegistry do
 
   @spec whereis() :: pid() | nil
   def whereis do
-    case :ets.whereis(@table) do
-      :undefined ->
-        nil
+    @table
+    |> :ets.whereis()
+    |> lookup_app_pid()
+  end
 
-      _ ->
-        case :ets.lookup(@table, :app_loop) do
-          [{:app_loop, pid}] when is_pid(pid) ->
-            if Process.alive?(pid), do: pid, else: nil
+  defp lookup_app_pid(:undefined), do: nil
+  defp lookup_app_pid(_) do
+    @table
+    |> :ets.lookup(:app_loop)
+    |> resolve_pid()
+  end
 
-          _ ->
-            nil
-        end
-    end
+  defp resolve_pid([{:app_loop, pid}]) when is_pid(pid), do: alive_or_nil(pid)
+  defp resolve_pid(_), do: nil
+
+  defp alive_or_nil(pid) do
+    if Process.alive?(pid), do: pid, else: nil
   end
 
   @spec send_to_loop(term()) :: term()

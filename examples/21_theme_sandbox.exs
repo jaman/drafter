@@ -220,7 +220,10 @@ defmodule ThemeSandbox do
                           {"Connor MacLeod", "option2"},
                           {"Duncan MacLeod", "option3"},
                           {"Heather", "option4"}
-                        ], selected: "option1", height: 4)
+                        ],
+                        selected: "option1",
+                        height: 4
+                      )
                     ],
                     width: 22
                   ),
@@ -232,8 +235,11 @@ defmodule ThemeSandbox do
                           {"Falken's Maze", "item1"},
                           {"Black Jack", "item2"},
                           {"Gin Rummy", "item3"},
-                          {"Hearts", "item4"}
-                        ], selected: ["item2"], height: 4)
+                          {"かるた", "item4"}
+                        ],
+                        selected: ["item2"],
+                        height: 4
+                      )
                     ],
                     width: 22
                   )

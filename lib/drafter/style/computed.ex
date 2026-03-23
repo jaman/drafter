@@ -78,20 +78,17 @@ defmodule Drafter.Style.Computed do
 
   defp get_stylesheet(opts) do
     case Keyword.get(opts, :stylesheet) do
-      nil ->
-        case Keyword.get(opts, :app_module) do
-          nil ->
-            WidgetStyles.default_stylesheet()
+      nil -> load_app_stylesheet(Keyword.get(opts, :app_module))
+      stylesheet -> stylesheet
+    end
+  end
 
-          app_module ->
-            case StylesheetLoader.load_stylesheet(app_module) do
-              {:ok, stylesheet} -> stylesheet
-              {:error, _} -> WidgetStyles.default_stylesheet()
-            end
-        end
+  defp load_app_stylesheet(nil), do: WidgetStyles.default_stylesheet()
 
-      stylesheet ->
-        stylesheet
+  defp load_app_stylesheet(app_module) do
+    case StylesheetLoader.load_stylesheet(app_module) do
+      {:ok, stylesheet} -> stylesheet
+      {:error, _} -> WidgetStyles.default_stylesheet()
     end
   end
 

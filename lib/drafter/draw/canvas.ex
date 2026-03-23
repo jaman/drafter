@@ -175,26 +175,29 @@ defmodule Drafter.Draw.Canvas do
   end
 
   defp line_points(x1, y1, x2, y2) do
-    dx = abs(x2 - x1)
-    dy = abs(y2 - y1)
-    sx = if x1 < x2, do: 1, else: -1
-    sy = if y1 < y2, do: 1, else: -1
-    err = dx - dy
+    ctx = %{
+      x2: x2,
+      y2: y2,
+      dx: abs(x2 - x1),
+      dy: abs(y2 - y1),
+      sx: if(x1 < x2, do: 1, else: -1),
+      sy: if(y1 < y2, do: 1, else: -1)
+    }
 
-    trace_line(x1, y1, x2, y2, dx, dy, sx, sy, err, [])
+    trace_line({x1, y1, ctx.dx - ctx.dy}, ctx, [])
   end
 
-  defp trace_line(x, y, x2, y2, dx, dy, sx, sy, err, points) do
+  defp trace_line({x, y, err}, ctx, points) do
     points = [{x, y} | points]
-    
-    if x == x2 and y == y2 do
+
+    if x == ctx.x2 and y == ctx.y2 do
       Enum.reverse(points)
     else
       e2 = 2 * err
-      {new_x, new_err} = if e2 > -dy, do: {x + sx, err - dy}, else: {x, err}
-      {new_y, final_err} = if e2 < dx, do: {y + sy, new_err + dx}, else: {y, new_err}
-      
-      trace_line(new_x, new_y, x2, y2, dx, dy, sx, sy, final_err, points)
+      {new_x, new_err} = if e2 > -ctx.dy, do: {x + ctx.sx, err - ctx.dy}, else: {x, err}
+      {new_y, final_err} = if e2 < ctx.dx, do: {y + ctx.sy, new_err + ctx.dx}, else: {y, new_err}
+
+      trace_line({new_x, new_y, final_err}, ctx, points)
     end
   end
 

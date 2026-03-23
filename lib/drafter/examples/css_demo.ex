@@ -1,4 +1,5 @@
 defmodule Drafter.Examples.CSSDemo do
+  @moduledoc false
   use Drafter.App, css_path: "examples/styles.tcss"
 
   def mount(_props) do

@@ -62,10 +62,6 @@ defmodule Drafter.Format do
     end
   end
 
-  defp smart_round(value) do
-    cond do
-      abs(value) >= 10 -> Float.round(value, 0)
-      true -> Float.round(value, 1)
-    end
-  end
+  defp smart_round(value) when abs(value) >= 10, do: Float.round(value, 0)
+  defp smart_round(value), do: Float.round(value, 1)
 end

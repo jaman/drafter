@@ -115,11 +115,11 @@ defmodule Drafter.Compositor do
   end
 
   def handle_info(:render_frame, state) do
-    if not Enum.empty?(state.dirty_regions) do
+    if Enum.empty?(state.dirty_regions) do
+      {:noreply, %{state | rendering: false}}
+    else
       new_rendered = render_to_terminal(state)
       {:noreply, %{state | rendered_buffer: new_rendered, dirty_regions: [], rendering: false}}
-    else
-      {:noreply, %{state | rendering: false}}
     end
   end
 
@@ -165,15 +165,17 @@ defmodule Drafter.Compositor do
     strips
     |> Enum.with_index()
     |> Enum.reduce(buffer, fn {strip, strip_index}, acc_buffer ->
-      line_y = y + strip_index
+      update_buffer_row(acc_buffer, strip, x, y + strip_index, buffer_width, buffer_height)
+    end)
+  end
 
-      if line_y >= 0 and line_y < buffer_height do
-        List.update_at(acc_buffer, line_y, fn existing_strip ->
-          merge_strips(existing_strip, strip, x, buffer_width)
-        end)
-      else
-        acc_buffer
-      end
+  defp update_buffer_row(buffer, _strip, _x, line_y, _buffer_width, buffer_height)
+       when line_y < 0 or line_y >= buffer_height,
+       do: buffer
+
+  defp update_buffer_row(buffer, strip, x, line_y, buffer_width, _buffer_height) do
+    List.update_at(buffer, line_y, fn existing_strip ->
+      merge_strips(existing_strip, strip, x, buffer_width)
     end)
   end
 
@@ -199,11 +201,11 @@ defmodule Drafter.Compositor do
   end
 
   defp schedule_render(state) do
-    if not state.rendering do
+    if state.rendering do
+      {:noreply, state}
+    else
       send(self(), :render_frame)
       {:noreply, %{state | rendering: true}}
-    else
-      {:noreply, state}
     end
   end
 

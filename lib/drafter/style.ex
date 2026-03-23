@@ -1,4 +1,12 @@
 defmodule Drafter.Style do
+  @moduledoc """
+  Color and style utilities for widget rendering.
+
+  Provides RGB color manipulation (lighten, darken, blend, interpolate),
+  type definitions shared across the rendering pipeline, and ANSI escape
+  sequence helpers.
+  """
+
   @type rgb :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   @type rgba :: {:rgba, rgb(), float()}
   @type color :: rgb() | rgba() | String.t() | atom()
@@ -156,11 +164,16 @@ defmodule Drafter.Style do
   end
 
   def resolve_color(name, theme) when is_atom(name) do
-    if theme do
-      Map.get(theme, name)
-    else
-      theme = Drafter.ThemeManager.get_current_theme()
-      Map.get(theme, name)
+    resolved_theme =
+      if theme do
+        theme
+      else
+        Drafter.ThemeManager.get_current_theme()
+      end
+
+    case Map.get(resolved_theme, name) do
+      nil -> resolved_theme |> Map.get(:cursor, %{}) |> Map.get(name)
+      value -> value
     end
   end
 

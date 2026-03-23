@@ -117,10 +117,13 @@ defmodule Drafter.Widget.Log do
   def from_component_opts(_args, opts) do
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
     %{
       lines: Keyword.get(opts, :lines, []),
       file_path: Keyword.get(opts, :file_path),
@@ -143,38 +146,39 @@ defmodule Drafter.Widget.Log do
     }
   end
 
+  defp ensure_mounted(state) do
+    if is_struct(state, __MODULE__), do: state, else: mount(state)
+  end
+
+  defp wrap_line(line, width, wrap) do
+    if wrap, do: Text.wrap(line, width), else: [Text.truncate(line, width)]
+  end
+
+  defp line_to_strip(wrapped_line, width, highlight, line_style) do
+    segments =
+      if highlight do
+        highlight_line(wrapped_line, width, line_style)
+      else
+        padded = String.pad_trailing(wrapped_line, width, " ")
+        [Segment.new(padded, line_style)]
+      end
+
+    Strip.new(segments)
+  end
+
   defp render_plain(state, rect, line_style) do
     visible_lines = get_visible_lines(state, rect.height)
 
-    all_strips =
+    strips =
       Enum.flat_map(visible_lines, fn line ->
-        wrapped =
-          if state.wrap do
-            Text.wrap(line, rect.width)
-          else
-            [Text.truncate(line, rect.width)]
-          end
-
-        Enum.map(wrapped, fn wrapped_line ->
-          segments =
-            if state.highlight do
-              highlight_line(wrapped_line, rect.width, line_style)
-            else
-              padded = String.pad_trailing(wrapped_line, rect.width, " ")
-              [Segment.new(padded, line_style)]
-            end
-
-          Strip.new(segments)
-        end)
+        line
+        |> wrap_line(rect.width, state.wrap)
+        |> Enum.map(fn wrapped_line -> line_to_strip(wrapped_line, rect.width, state.highlight, line_style) end)
       end)
-
-    strips = if length(all_strips) > 0, do: all_strips, else: []
 
     padding_needed = max(0, rect.height - length(strips))
     empty_line = String.duplicate(" ", rect.width)
-
-    padding_strips =
-      List.duplicate(Strip.new([Segment.new(empty_line, line_style)]), padding_needed)
+    padding_strips = List.duplicate(Strip.new([Segment.new(empty_line, line_style)]), padding_needed)
 
     Enum.take(strips ++ padding_strips, rect.height)
   end
@@ -203,25 +207,11 @@ defmodule Drafter.Widget.Log do
 
     content_strips =
       Enum.flat_map(visible_lines, fn line ->
-        wrapped =
-          if state.wrap do
-            Text.wrap(line, inner_width)
-          else
-            [Text.truncate(line, inner_width)]
-          end
-
-        Enum.map(wrapped, fn wrapped_line ->
-          segments =
-            if state.highlight do
-              highlight_line(wrapped_line, inner_width, line_style)
-            else
-              padded = String.pad_trailing(wrapped_line, inner_width, " ")
-              [Segment.new(padded, line_style)]
-            end
-
-          Strip.new(
-            [Segment.new("│", border_style)] ++ segments ++ [Segment.new("│", border_style)]
-          )
+        line
+        |> wrap_line(inner_width, state.wrap)
+        |> Enum.map(fn wrapped_line ->
+          segments = line_to_strip(wrapped_line, inner_width, state.highlight, line_style)
+          Strip.new([Segment.new("│", border_style)] ++ segments.segments ++ [Segment.new("│", border_style)])
         end)
       end)
 
@@ -265,71 +255,75 @@ defmodule Drafter.Widget.Log do
     end
   end
 
+  defp find_part_color(part, patterns, default_fg) do
+    Enum.find_value(patterns, default_fg, fn {regex, color} ->
+      if Regex.match?(regex, part), do: color, else: nil
+    end)
+  end
+
   defp parse_with_highlights(text, patterns, base_style) do
-    combined_pattern =
-      patterns
-      |> Enum.map(fn {regex, _} -> Regex.source(regex) end)
-      |> Enum.join("|")
-
+    combined_pattern = Enum.map_join(patterns, "|", fn {regex, _} -> Regex.source(regex) end)
     combined_regex = Regex.compile!("(#{combined_pattern})")
-
     parts = Regex.split(combined_regex, text, include_captures: true)
 
     Enum.map(parts, fn part ->
-      color =
-        Enum.find_value(patterns, base_style.fg, fn {regex, color} ->
-          if Regex.match?(regex, part), do: color, else: nil
-        end)
-
+      color = find_part_color(part, patterns, base_style.fg)
       Segment.new(part, %{base_style | fg: color})
     end)
   end
 
   @impl Drafter.Widget
-  def handle_event(event, state) do
-    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+  def handle_event({:write, line}, state) when is_binary(line) do
+    state = ensure_mounted(state)
+    new_lines = add_line(state, line)
+    new_state = %{state | lines: new_lines}
+    new_state = if state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state
+    {:ok, new_state}
+  end
 
-    case event do
-      {:write, line} when is_binary(line) ->
-        new_lines = add_line(state, line)
-        new_state = %{state | lines: new_lines}
-        new_state = if state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state
-        {:ok, new_state}
+  def handle_event({:write_lines, lines}, state) when is_list(lines) do
+    state = ensure_mounted(state)
 
-      {:write_lines, lines} when is_list(lines) ->
-        new_lines =
-          Enum.reduce(lines, state.lines, fn line, acc ->
-            add_line(%{state | lines: acc}, line)
-          end)
+    new_lines =
+      Enum.reduce(lines, state.lines, fn line, acc ->
+        add_line(%{state | lines: acc}, line)
+      end)
 
-        new_state = %{state | lines: new_lines}
-        new_state = if state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state
-        {:ok, new_state}
+    new_state = %{state | lines: new_lines}
+    new_state = if state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state
+    {:ok, new_state}
+  end
 
-      :clear ->
-        {:ok, %{state | lines: [], scroll_offset: 0}}
+  def handle_event(:clear, state) do
+    {:ok, %{ensure_mounted(state) | lines: [], scroll_offset: 0}}
+  end
 
-      {:key, :end} ->
-        {:ok, scroll_to_bottom(state)}
+  def handle_event({:key, :end}, state) do
+    {:ok, scroll_to_bottom(ensure_mounted(state))}
+  end
 
-      {:key, :home} ->
-        {:ok, %{state | scroll_offset: 0}}
+  def handle_event({:key, :home}, state) do
+    {:ok, %{ensure_mounted(state) | scroll_offset: 0}}
+  end
 
-      {:key, :page_down} ->
-        {:ok, scroll_down(state, 10)}
+  def handle_event({:key, :page_down}, state) do
+    {:ok, scroll_down(ensure_mounted(state), 10)}
+  end
 
-      {:key, :page_up} ->
-        {:ok, scroll_up(state, 10)}
+  def handle_event({:key, :page_up}, state) do
+    {:ok, scroll_up(ensure_mounted(state), 10)}
+  end
 
-      {:key, :down} ->
-        {:ok, scroll_down(state, 1)}
+  def handle_event({:key, :down}, state) do
+    {:ok, scroll_down(ensure_mounted(state), 1)}
+  end
 
-      {:key, :up} ->
-        {:ok, scroll_up(state, 1)}
+  def handle_event({:key, :up}, state) do
+    {:ok, scroll_up(ensure_mounted(state), 1)}
+  end
 
-      _ ->
-        {:noreply, state}
-    end
+  def handle_event(_event, state) do
+    {:noreply, ensure_mounted(state)}
   end
 
   @impl Drafter.Widget
@@ -392,6 +386,14 @@ defmodule Drafter.Widget.Log do
     read_lines_from_file(state.file_path, state.line_offsets, start_line, end_line)
   end
 
+  defp read_byte_range(file_path, start_byte, actual_end, line_count) do
+    File.open!(file_path, [:read, :binary], fn file ->
+      :file.position(file, start_byte)
+      {:ok, data} = :file.read(file, actual_end - start_byte)
+      data |> String.split("\n") |> Enum.take(line_count)
+    end)
+  end
+
   defp read_lines_from_file(file_path, line_offsets, start_line, end_line) do
     if File.exists?(file_path) do
       start_offset = Enum.at(line_offsets, start_line, 0)
@@ -404,14 +406,7 @@ defmodule Drafter.Widget.Log do
       actual_end = if end_byte == :eof, do: file_size, else: min(end_byte, file_size)
 
       if actual_end > start_byte do
-        File.open!(file_path, [:read, :binary], fn file ->
-          :file.position(file, start_byte)
-          {:ok, data} = :file.read(file, actual_end - start_byte)
-
-          data
-          |> String.split("\n")
-          |> Enum.take(end_line - start_line)
-        end)
+        read_byte_range(file_path, start_byte, actual_end, end_line - start_line)
       else
         []
       end
@@ -420,30 +415,30 @@ defmodule Drafter.Widget.Log do
     end
   end
 
+  defp accumulate_offsets(chunk, {offsets, current_offset}) do
+    lines = String.split(chunk, "\n")
+    num_newlines = length(lines) - 1
+
+    new_offsets =
+      if num_newlines > 0 do
+        {new_lines_in_chunk, _} = Enum.split(lines, num_newlines)
+        chunk_without_last = Enum.join(new_lines_in_chunk, "\n") <> "\n"
+        offsets ++ [current_offset + byte_size(chunk_without_last)]
+      else
+        offsets
+      end
+
+    {new_offsets, current_offset + byte_size(chunk)}
+  end
+
   defp build_file_index(state, file_path) do
     if File.exists?(file_path) do
       line_offsets =
         File.stream!(file_path, [], 1024 * 8)
-        |> Enum.reduce({[0], 0}, fn chunk, {offsets, current_offset} ->
-          lines = String.split(chunk, "\n")
-          num_newlines = length(lines) - 1
-
-          new_offsets =
-            if num_newlines > 0 do
-              {new_lines_in_chunk, _} = Enum.split(lines, num_newlines)
-              chunk_without_last = Enum.join(new_lines_in_chunk, "\n") <> "\n"
-              chunk_size = byte_size(chunk_without_last)
-              offsets ++ [current_offset + chunk_size]
-            else
-              offsets
-            end
-
-          {new_offsets, current_offset + byte_size(chunk)}
-        end)
+        |> Enum.reduce({[0], 0}, &accumulate_offsets/2)
         |> elem(0)
 
       total_lines = length(line_offsets) - 1
-
       %{state | line_offsets: line_offsets, total_lines: total_lines, scroll_offset: 0}
     else
       state

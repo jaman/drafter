@@ -210,7 +210,8 @@ defmodule Drafter.Terminal.Driver do
             ANSI.enter_alt_screen(),
             ANSI.hide_cursor(),
             ANSI.clear_screen(),
-            ANSI.enable_mouse()
+            ANSI.enable_mouse(),
+            "\e[?2004h"
           ])
 
           new_state = %{
@@ -240,7 +241,7 @@ defmodule Drafter.Terminal.Driver do
     case :os.type() do
       {:unix, _} ->
         case nif_enter_raw_mode() do
-          :ok -> {:ok, :nif}
+          {:ok, _} -> {:ok, :nif}
           _ -> enter_terminal_mode_with_stty()
         end
 
@@ -265,8 +266,11 @@ defmodule Drafter.Terminal.Driver do
 
   defp cleanup_terminal(state) do
     Drafter.Terminal.TermiosNif.set_tui_inactive()
+
     if state.raw_mode do
       cleanup_sequences = []
+
+      cleanup_sequences = cleanup_sequences ++ ["\e[?2004l"]
 
       cleanup_sequences =
         if state.mouse_enabled do
@@ -282,7 +286,7 @@ defmodule Drafter.Terminal.Driver do
           cleanup_sequences
         end
 
-      if length(cleanup_sequences) > 0 do
+      if cleanup_sequences != 0 do
         IO.write(cleanup_sequences)
         Process.sleep(50)
       end
@@ -330,18 +334,18 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp nif_enter_raw_mode do
-    apply(Drafter.Terminal.TermiosNif, :enter_raw_mode, [])
+    {:ok, Drafter.Terminal.TermiosNif.enter_raw_mode()}
   catch
     :error, :undef -> :nif_not_loaded
   end
 
   defp nif_exit_raw_mode do
-    apply(Drafter.Terminal.TermiosNif, :exit_raw_mode, [])
+    Drafter.Terminal.TermiosNif.exit_raw_mode()
   catch
     :error, :undef -> :ok
   end
 
-  defp setup_stdin() do
+  defp setup_stdin do
     :io.setopts(:stdio, [:binary, {:encoding, :unicode}])
     spawn_link(fn -> stdin_reader() end)
   end
@@ -365,19 +369,19 @@ defmodule Drafter.Terminal.Driver do
     case :os.type() do
       {:unix, _} ->
         try do
-          apply(Drafter.Terminal.TermiosNif, :flush_stdin, [])
-        rescue
-          _ -> :ok
+          Drafter.Terminal.TermiosNif.flush_stdin()
         catch
           :error, :undef -> :ok
+          _, _ -> :ok
         end
+
       _ ->
         :ok
     end
   end
 
-  defp stdin_reader() do
-    case IO.binread(:stdio, 1) do
+  defp stdin_reader do
+    case IO.read(:stdio, 1) do
       :eof ->
         :ok
 
@@ -397,11 +401,10 @@ defmodule Drafter.Terminal.Driver do
     drain_stale_escape_timeouts()
     timer_ref = Process.send_after(self(), :escape_timeout, 100)
 
-    case IO.binread(:stdio, 1) do
+    case IO.read(:stdio, 1) do
       :eof ->
         cancel_escape_timer(timer_ref)
         send(__MODULE__, {:stdin, buffer})
-        :ok
 
       {:error, _} ->
         cancel_escape_timer(timer_ref)
@@ -414,8 +417,7 @@ defmodule Drafter.Terminal.Driver do
 
       char when is_binary(char) ->
         cancel_escape_timer(timer_ref)
-        complete_sequence = buffer <> char
-        send(__MODULE__, {:stdin, complete_sequence})
+        send(__MODULE__, {:stdin, buffer <> char})
         stdin_reader()
     end
   end
@@ -439,51 +441,44 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp read_csi_sequence(buffer) do
-    case IO.binread(:stdio, 1) do
+    case IO.read(:stdio, 1) do
       :eof ->
         send(__MODULE__, {:stdin, buffer})
-        :ok
 
       {:error, _} ->
         send(__MODULE__, {:stdin, buffer})
         stdin_reader()
 
+      "<" ->
+        read_sgr_mouse_sequence(buffer <> "<")
+
       char when is_binary(char) ->
-        new_buffer = buffer <> char
-
-        cond do
-          String.match?(char, ~r/[a-zA-Z~]/) ->
-            send(__MODULE__, {:stdin, new_buffer})
-            stdin_reader()
-
-          char == "<" ->
-            read_sgr_mouse_sequence(new_buffer)
-
-          true ->
-            read_csi_sequence(new_buffer)
-        end
+        dispatch_csi_char(buffer <> char, char)
     end
   end
 
+  defp dispatch_csi_char(buffer, <<byte>> ) when byte in ?a..?z or byte in ?A..?Z or byte == ?~ do
+    send(__MODULE__, {:stdin, buffer})
+    stdin_reader()
+  end
+
+  defp dispatch_csi_char(buffer, _char), do: read_csi_sequence(buffer)
+
   defp read_sgr_mouse_sequence(buffer) do
-    case IO.binread(:stdio, 1) do
+    case IO.read(:stdio, 1) do
       :eof ->
         send(__MODULE__, {:stdin, buffer})
-        :ok
 
       {:error, _} ->
         send(__MODULE__, {:stdin, buffer})
         stdin_reader()
 
-      char when is_binary(char) ->
-        new_buffer = buffer <> char
+      char when char == "M" or char == "m" ->
+        send(__MODULE__, {:stdin, buffer <> char})
+        stdin_reader()
 
-        if char == "M" or char == "m" do
-          send(__MODULE__, {:stdin, new_buffer})
-          stdin_reader()
-        else
-          read_sgr_mouse_sequence(new_buffer)
-        end
+      char when is_binary(char) ->
+        read_sgr_mouse_sequence(buffer <> char)
     end
   end
 

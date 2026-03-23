@@ -164,73 +164,32 @@ defmodule Drafter.Screen do
   end
 
   def handle_screen_event(%__MODULE__{} = screen, {:app_callback, name, data}) do
-    result = if function_exported?(screen.module, :handle_event, 3) do
-      screen.module.handle_event(name, data, screen.state)
-    else
-      screen.module.handle_event(name, screen.state)
-    end
+    result =
+      if function_exported?(screen.module, :handle_event, 3) do
+        screen.module.handle_event(name, data, screen.state)
+      else
+        screen.module.handle_event(name, screen.state)
+      end
 
-    case result do
-      {:ok, new_state} -> {:ok, %{screen | state: new_state}}
-      {:noreply, new_state} -> {:noreply, %{screen | state: new_state}}
-      other -> other
-    end
+    normalize_screen_result(result, screen)
   end
 
   def handle_screen_event(%__MODULE__{} = screen, event) do
-    result = if function_exported?(screen.module, :handle_event, 3) do
-      screen.module.handle_event(event, nil, screen.state)
+    result = dispatch_event(screen, event, nil)
+    normalize_screen_result(result, screen)
+  end
+
+  defp dispatch_event(screen, event, extra_arg) do
+    if function_exported?(screen.module, :handle_event, 3) do
+      screen.module.handle_event(event, extra_arg, screen.state)
     else
       screen.module.handle_event(event, screen.state)
     end
-
-    case result do
-      {:ok, new_state} ->
-        {:ok, %{screen | state: new_state}}
-
-      {:noreply, new_state} ->
-        {:noreply, %{screen | state: new_state}}
-
-      {:pop, result} ->
-        {:pop, result}
-
-      {:push, module, props} ->
-        {:push, module, props}
-
-      {:push, module, props, opts} ->
-        {:push, module, props, opts}
-
-      {:replace, module, props} ->
-        {:replace, module, props}
-
-      {:replace, module, props, opts} ->
-        {:replace, module, props, opts}
-
-      {:show_modal, module, props} ->
-        {:show_modal, module, props}
-
-      {:show_modal, module, props, opts} ->
-        {:show_modal, module, props, opts}
-
-      {:show_popover, module, props} ->
-        {:show_popover, module, props}
-
-      {:show_popover, module, props, opts} ->
-        {:show_popover, module, props, opts}
-
-      {:show_panel, module, props} ->
-        {:show_panel, module, props}
-
-      {:show_panel, module, props, opts} ->
-        {:show_panel, module, props, opts}
-
-      {:show_toast, message, opts} ->
-        {:show_toast, message, opts}
-
-      other ->
-        other
-    end
   end
+
+  defp normalize_screen_result({:ok, new_state}, screen), do: {:ok, %{screen | state: new_state}}
+  defp normalize_screen_result({:noreply, new_state}, screen), do: {:noreply, %{screen | state: new_state}}
+  defp normalize_screen_result(other, _screen), do: other
 
   def resume_screen(%__MODULE__{} = screen, result) do
     if function_exported?(screen.module, :on_resume, 2) do

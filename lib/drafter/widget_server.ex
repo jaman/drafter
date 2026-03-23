@@ -71,7 +71,7 @@ defmodule Drafter.WidgetServer do
       rect: rect
     }
 
-    strips = apply(module, :render, [widget_state, rect])
+    strips = module.render(widget_state, rect)
     WidgetStripCache.put(id, rect, strips)
 
     {:ok, state}
@@ -82,7 +82,7 @@ defmodule Drafter.WidgetServer do
     priority = event_priority(event)
 
     if should_render_event?(priority, state.last_event_render_at) do
-      case apply(state.module, :handle_event, [event, state.state]) do
+      case state.module.handle_event(event, state.state) do
         {:ok, new_widget_state} ->
           now = System.monotonic_time(:millisecond)
           new_state = %{state | state: new_widget_state, last_event_render_at: now}
@@ -110,7 +110,7 @@ defmodule Drafter.WidgetServer do
   def handle_cast({:update_props, props}, state) do
     new_widget_state =
       if function_exported?(state.module, :update, 2) do
-        apply(state.module, :update, [props, state.state])
+        state.module.update(props, state.state)
       else
         state.state
       end
@@ -119,7 +119,7 @@ defmodule Drafter.WidgetServer do
       {:noreply, state}
     else
       new_state = %{state | state: new_widget_state}
-      strips = apply(new_state.module, :render, [new_state.state, new_state.rect])
+      strips = new_state.module.render(new_state.state, new_state.rect)
       WidgetStripCache.put(new_state.id, new_state.rect, strips)
       notify_render_needed(new_state.id)
       {:noreply, new_state}
@@ -130,7 +130,7 @@ defmodule Drafter.WidgetServer do
   def handle_call({:update_rect, rect}, _from, state) do
     new_widget_state =
       if function_exported?(state.module, :on_rect_change, 2) do
-        apply(state.module, :on_rect_change, [rect, state.state])
+        state.module.on_rect_change(rect, state.state)
       else
         state.state
       end
@@ -149,7 +149,7 @@ defmodule Drafter.WidgetServer do
     result =
       case WidgetStripCache.get(state.id) do
         nil ->
-          strips = apply(state.module, :render, [state.state, state.rect])
+          strips = state.module.render(state.state, state.rect)
           WidgetStripCache.put(state.id, state.rect, strips)
           {state.rect, strips}
 
@@ -161,18 +161,18 @@ defmodule Drafter.WidgetServer do
   end
 
   def handle_call({:event_sync, event}, _from, state) do
-    result = apply(state.module, :handle_event, [event, state.state])
+    result = state.module.handle_event(event, state.state)
 
     case result do
       {:ok, new_widget_state} ->
         new_state = %{state | state: new_widget_state}
-        strips = apply(new_state.module, :render, [new_state.state, new_state.rect])
+        strips = new_state.module.render(new_state.state, new_state.rect)
         WidgetStripCache.put(new_state.id, new_state.rect, strips)
         {:reply, {:ok, new_widget_state}, new_state}
 
       {:ok, new_widget_state, actions} ->
         new_state = %{state | state: new_widget_state}
-        strips = apply(new_state.module, :render, [new_state.state, new_state.rect])
+        strips = new_state.module.render(new_state.state, new_state.rect)
         WidgetStripCache.put(new_state.id, new_state.rect, strips)
         {:reply, {:ok, new_widget_state, actions}, new_state}
 
@@ -186,7 +186,7 @@ defmodule Drafter.WidgetServer do
 
   def handle_call({:set_state, new_widget_state}, _from, state) do
     new_state = %{state | state: new_widget_state}
-    strips = apply(new_state.module, :render, [new_state.state, new_state.rect])
+    strips = new_state.module.render(new_state.state, new_state.rect)
     WidgetStripCache.put(new_state.id, new_state.rect, strips)
     notify_render_needed(new_state.id)
     {:reply, :ok, new_state}
@@ -194,7 +194,7 @@ defmodule Drafter.WidgetServer do
 
   def handle_call({:capture_event, event}, _from, state) do
     if function_exported?(state.module, :handle_event_capture, 2) do
-      result = apply(state.module, :handle_event_capture, [event, state.state])
+      result = state.module.handle_event_capture(event, state.state)
 
       case result do
         {:continue, updated_event, new_widget_state} ->
@@ -219,9 +219,9 @@ defmodule Drafter.WidgetServer do
   def handle_info(msg, state) do
     result =
       if function_exported?(state.module, :handle_info, 2) do
-        apply(state.module, :handle_info, [msg, state.state])
+        state.module.handle_info(msg, state.state)
       else
-        apply(state.module, :handle_event, [msg, state.state])
+        state.module.handle_event(msg, state.state)
       end
 
     case result do
@@ -244,6 +244,8 @@ defmodule Drafter.WidgetServer do
   end
 
   defp event_priority({:key, _}), do: :high
+  defp event_priority({:key, _, _}), do: :high
+  defp event_priority({:char, _}), do: :high
   defp event_priority({:mouse, _}), do: :high
   defp event_priority({:resize, _}), do: :critical
   defp event_priority({:focus}), do: :high
@@ -260,7 +262,7 @@ defmodule Drafter.WidgetServer do
   end
 
   defp render_and_push(server_state) do
-    strips = apply(server_state.module, :render, [server_state.state, server_state.rect])
+    strips = server_state.module.render(server_state.state, server_state.rect)
     WidgetStripCache.put(server_state.id, server_state.rect, strips)
     notify_render_needed(server_state.id)
   end

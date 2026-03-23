@@ -1,4 +1,5 @@
 defmodule Drafter.Examples.ScrollableTest do
+  @moduledoc false
   use Drafter.App
   import Drafter.App
 

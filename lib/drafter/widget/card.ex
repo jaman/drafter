@@ -66,7 +66,10 @@ defmodule Drafter.Widget.Card do
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    render_card(state, rect)
+  end
 
+  defp render_card(state, rect) do
     computed = Computed.for_widget(:card, state, classes: state.classes, style: state.style)
 
     bg = state.background || computed[:background] || {40, 44, 52}
@@ -83,18 +86,9 @@ defmodule Drafter.Widget.Card do
     content_lines = state.content || []
     content_lines = if is_list(content_lines), do: content_lines, else: [content_lines]
 
-    strips = []
-
-    strips =
-      strips ++ [render_top_border(chars, inner_width, state.title, border_style, title_style)]
-
-    strips =
-      strips ++
-        render_content_lines(chars, inner_width, content_lines, content_style, border_style)
-
-    strips = strips ++ [render_bottom_border(chars, inner_width, border_style)]
-
-    strips
+    [render_top_border(chars, inner_width, state.title, border_style, title_style)] ++
+      render_content_lines(chars, inner_width, content_lines, content_style, border_style) ++
+      [render_bottom_border(chars, inner_width, border_style)]
   end
 
   @impl Drafter.Widget
