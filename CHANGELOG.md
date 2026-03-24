@@ -3,6 +3,17 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.2.3] - 2026-03-24
+
+### Added
+
+- **SSH chat channels** — the `ssh_chat.exs` example now supports multiple chat rooms. `/join #channel` switches rooms, `/channels` lists active rooms, `/help` shows available commands.
+- **`scrollable/2`: `focusable: false` option** — excludes a scrollable container from the tab/focus cycle on a per-instance basis.
+
+### Fixed
+
+- Various bug fixes and rendering improvements across SSH, layout, focus management, and screen lifecycle.
+
 ## [0.2.2] - 2026-03-24
 
 ### Added
