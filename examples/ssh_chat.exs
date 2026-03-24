@@ -108,18 +108,13 @@ defmodule ChatApp do
       label(" ##{state.channel}  \u00b7  #{state.username}", style: %{fg: :cyan, bold: true}),
       rule(),
       scrollable(message_rows, flex: 1),
-      rule(),
-      horizontal([
-        label(" #{state.username}: ", style: %{fg: :green}),
-        text_input(
-          id: :message_input,
-          bind: :input,
-          on_submit: :send_message,
-          keep_focus: true,
-          flex: 1,
-          placeholder: "Type a message... (/help for commands)"
-        )
-      ]),
+      text_input(
+        id: :message_input,
+        bind: :input,
+        on_submit: :send_message,
+        keep_focus: true,
+        placeholder: "Type a message... (/help for commands)"
+      ),
       footer(bindings: [{"Enter", "Send"}, {"/join #ch", "Switch"}, {"^C", "Quit"}])
     ])
   end
