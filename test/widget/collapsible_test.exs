@@ -139,7 +139,7 @@ defmodule Drafter.Widget.CollapsibleTest do
 
     test "click on body row (y: 1) does not toggle" do
       state = Collapsible.mount(%{title: "T", content: "body"})
-      assert {:noreply, new_state} = Collapsible.handle_event({:mouse, %{type: :click, y: 1}}, state)
+      assert {:bubble, new_state} = Collapsible.handle_event({:mouse, %{type: :click, y: 1}}, state)
       assert new_state.expanded == false
     end
 
@@ -156,9 +156,9 @@ defmodule Drafter.Widget.CollapsibleTest do
       assert new_state.focused == false
     end
 
-    test "unhandled event returns noreply" do
+    test "unhandled event bubbles" do
       state = Collapsible.mount(%{})
-      assert {:noreply, ^state} = Collapsible.handle_event({:key, :tab}, state)
+      assert {:bubble, ^state} = Collapsible.handle_event({:key, :tab}, state)
     end
   end
 end

@@ -88,6 +88,35 @@ defmodule CollapsibleDemo do
         ],
         content_height: 3
       ),
+      collapsible(
+        "Charts",
+        [
+          horizontal(
+            [
+              chart([12, 38, 25, 50, 42, 65, 55, 70, 48, 30],
+                chart_type: :braille_area,
+                colors: [{80, 200, 100}],
+                show_baseline: true,
+                height: 8,
+                flex: 1
+              ),
+              chart([5, 15, 35, 20, 45, 30, 55, 40, 25, 10],
+                chart_type: :braille_area,
+                colors: [{80, 140, 220}],
+                show_baseline: true,
+                height: 8,
+                flex: 1
+              )
+            ],
+            gap: 1
+          ),
+          horizontal([
+            label("■ Series A ", style: %{fg: {80, 200, 100}}),
+            label("■ Series B ", style: %{fg: {80, 140, 220}})
+          ])
+        ],
+        content_height: 9
+      ),
       label("Last action: #{state.last_action}"),
       footer()
     ])

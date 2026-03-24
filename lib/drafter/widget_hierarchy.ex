@@ -637,8 +637,8 @@ defmodule Drafter.WidgetHierarchy do
         {focus_widget(hierarchy, hd(focusable_widgets), :down), []}
 
       focused_id ->
-        case dispatch_to_focused(hierarchy, event) do
-          {^hierarchy, []} -> navigate_by_arrow(hierarchy, focused_id, focusable_widgets, direction)
+        case navigate_by_arrow(hierarchy, focused_id, focusable_widgets, direction) do
+          {^hierarchy, []} -> dispatch_to_focused(hierarchy, event)
           result -> result
         end
     end
@@ -907,14 +907,25 @@ defmodule Drafter.WidgetHierarchy do
         mouse_event
 
       virtual_rect ->
-        screen_rect = translate_rect_to_screen(hierarchy, widget_id, virtual_rect)
-        rect = screen_rect || virtual_rect
+        {screen_x, screen_y} = widget_screen_position(hierarchy, widget_id, virtual_rect)
 
         %{
           mouse_event
-          | x: mouse_event.x - rect.x,
-            y: mouse_event.y - rect.y
+          | x: mouse_event.x - screen_x,
+            y: mouse_event.y - screen_y
         }
+    end
+  end
+
+  defp widget_screen_position(hierarchy, widget_id, virtual_rect) do
+    case Map.get(hierarchy.widget_scroll_parents, widget_id) do
+      nil ->
+        {virtual_rect.x, virtual_rect.y}
+
+      scroll_parent_id ->
+        scroll_state = get_widget_state(hierarchy, scroll_parent_id)
+        scroll_y = if scroll_state, do: Map.get(scroll_state, :scroll_offset_y, 0), else: 0
+        {virtual_rect.x, virtual_rect.y - scroll_y}
     end
   end
 

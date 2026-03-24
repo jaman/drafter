@@ -178,6 +178,7 @@ defmodule Drafter.Widget.Chart do
     :show_values,
     bar_gap: 0,
     show_baseline: false,
+    zero_center: :symmetric,
     focused: false,
     _internal: %{}
   ]
@@ -234,6 +235,7 @@ defmodule Drafter.Widget.Chart do
       bar_labels: Map.get(props, :bar_labels, []),
       show_values: Map.get(props, :show_values, false),
       show_baseline: Map.get(props, :show_baseline, false),
+      zero_center: Map.get(props, :zero_center, :symmetric),
       _internal: %{
         render_timestamp: Map.get(props, :_render_timestamp, 0),
         animation_offset: 0,
@@ -328,6 +330,7 @@ defmodule Drafter.Widget.Chart do
       bar_labels: Keyword.get(opts, :bar_labels, []),
       show_values: Keyword.get(opts, :show_values, false),
       show_baseline: Keyword.get(opts, :show_baseline, false),
+      zero_center: Keyword.get(opts, :zero_center, :symmetric),
       style: Keyword.get(opts, :style, %{}),
       classes: classes,
       app_module: Keyword.get(opts, :__app_module__),
@@ -400,8 +403,11 @@ defmodule Drafter.Widget.Chart do
 
     horizontal? = state.orientation == :horizontal
 
-    dispatch_chart(state, chart_width, chart_height, bg, fg, animation_offset, horizontal?)
-    |> apply_axes(state, rect, bg, fg)
+    {strips, effective_state} =
+      dispatch_chart(state, chart_width, chart_height, bg, fg, animation_offset, horizontal?)
+
+    effective_state
+    |> then(&apply_axes(strips, &1, rect, bg, fg))
     |> apply_title(state, rect, bg, fg)
     |> pad_strips(rect.height)
   end
@@ -415,30 +421,33 @@ defmodule Drafter.Widget.Chart do
   defp apply_title(strips, _state, _rect, _bg, _fg), do: strips
 
   defp dispatch_chart(state, w, h, bg, fg, anim, true) do
-    case state.chart_type do
-      :bar -> render_bar_chart_h(state, w, h, bg, fg)
-      :clustered_bar -> render_clustered_bar_h(state, w, h, bg)
-      :stacked_bar -> render_stacked_bar_h(state, w, h, bg)
-      :range_bar -> render_range_bar_h(state, w, h, bg, fg)
-      _ -> dispatch_chart(state, w, h, bg, fg, anim, false)
-    end
+    strips =
+      case state.chart_type do
+        :bar -> render_bar_chart_h(state, w, h, bg, fg)
+        :clustered_bar -> render_clustered_bar_h(state, w, h, bg)
+        :stacked_bar -> render_stacked_bar_h(state, w, h, bg)
+        :range_bar -> render_range_bar_h(state, w, h, bg, fg)
+        _ -> elem(dispatch_chart(state, w, h, bg, fg, anim, false), 0)
+      end
+
+    {strips, state}
   end
 
   defp dispatch_chart(state, w, h, bg, fg, anim, false) do
     dispatch_chart_v(state.chart_type, state, w, h, bg, fg, anim)
   end
 
-  defp dispatch_chart_v(:line, state, w, h, bg, fg, anim), do: render_line_chart(state, w, h, bg, fg, anim)
-  defp dispatch_chart_v(:bar, state, w, h, bg, fg, _anim), do: render_bar_chart_v(state, w, h, bg, fg)
-  defp dispatch_chart_v(:clustered_bar, state, w, h, bg, _fg, _anim), do: render_clustered_bar(state, w, h, bg)
-  defp dispatch_chart_v(:stacked_bar, state, w, h, bg, _fg, _anim), do: render_stacked_bar(state, w, h, bg)
-  defp dispatch_chart_v(:range_bar, state, w, h, bg, fg, _anim), do: render_range_bar(state, w, h, bg, fg)
-  defp dispatch_chart_v(:candlestick, state, w, h, bg, fg, _anim), do: render_candlestick_chart(state, w, h, bg, fg)
-  defp dispatch_chart_v(:area, state, w, h, bg, fg, anim), do: render_area_chart(state, w, h, bg, fg, anim)
-  defp dispatch_chart_v(:scatter, state, w, h, bg, fg, _anim), do: render_scatter_chart(state, w, h, bg, fg)
-  defp dispatch_chart_v(:braille, state, w, h, bg, fg, anim), do: render_braille_chart(state, w, h, bg, fg, anim)
   defp dispatch_chart_v(:braille_area, state, w, h, bg, _fg, _anim), do: render_braille_area(state, w, h, bg)
-  defp dispatch_chart_v(_, state, w, h, bg, fg, anim), do: render_line_chart(state, w, h, bg, fg, anim)
+
+  defp dispatch_chart_v(:bar, s, w, h, bg, fg, _a), do: {render_bar_chart_v(s, w, h, bg, fg), s}
+  defp dispatch_chart_v(:clustered_bar, s, w, h, bg, _fg, _a), do: {render_clustered_bar(s, w, h, bg), s}
+  defp dispatch_chart_v(:stacked_bar, s, w, h, bg, _fg, _a), do: {render_stacked_bar(s, w, h, bg), s}
+  defp dispatch_chart_v(:range_bar, s, w, h, bg, fg, _a), do: {render_range_bar(s, w, h, bg, fg), s}
+  defp dispatch_chart_v(:candlestick, s, w, h, bg, fg, _a), do: {render_candlestick_chart(s, w, h, bg, fg), s}
+  defp dispatch_chart_v(:area, s, w, h, bg, fg, a), do: {render_area_chart(s, w, h, bg, fg, a), s}
+  defp dispatch_chart_v(:scatter, s, w, h, bg, fg, _a), do: {render_scatter_chart(s, w, h, bg, fg), s}
+  defp dispatch_chart_v(:braille, s, w, h, bg, fg, a), do: {render_braille_chart(s, w, h, bg, fg, a), s}
+  defp dispatch_chart_v(_type, s, w, h, bg, fg, a), do: {render_line_chart(s, w, h, bg, fg, a), s}
 
   @impl Drafter.Widget
   def update(props, state) do
@@ -1110,7 +1119,7 @@ defmodule Drafter.Widget.Chart do
       end
 
     case series do
-      [] -> empty_strips(height, bg)
+      [] -> {empty_strips(height, bg), state}
       _ -> render_braille_area_stacked(series, state, width, height, bg)
     end
   end
@@ -1123,25 +1132,39 @@ defmodule Drafter.Widget.Chart do
 
     stacked = slice_and_stack(series, pixel_w, state._internal.scroll_offset || 0)
 
-    {stack_min, range} = compute_stack_range(stacked)
+    range_result = compute_stack_range(stacked, state.zero_center)
 
-    grid = :atomics.new(width * height, signed: false)
-    color_grid = Enum.map(0..(width * height - 1), fn _ -> :atomics.new(3, signed: true) end)
-
-    ctx = %{
+    base = %{
       stacked: stacked, colors: colors, num_series: num_series,
-      pixel_h: pixel_h, pixel_w: pixel_w, range: range,
-      stack_min: stack_min, grid: grid, color_grid: color_grid, char_w: width
+      pixel_h: pixel_h, pixel_w: pixel_w, char_w: width,
+      grid: :atomics.new(width * height, signed: false),
+      color_grid: Enum.map(0..(width * height - 1), fn _ -> :atomics.new(3, signed: true) end)
     }
 
+    build_braille_area(range_result, base, state, width, height, bg)
+  end
+
+  defp build_braille_area({neg_min, pos_max, :split}, base, state, width, height, bg) do
+    ctx = Map.merge(base, %{pos_max: pos_max, neg_min: neg_min, zero_py: div(base.pixel_h, 2), mode: :split})
     fill_braille_area_grid(ctx)
+    baseline_row = div(div(base.pixel_h, 2), 4)
+    strips = render_braille_grid(width, height, base, baseline_row, bg)
+    {strips, %{state | min_value: neg_min, max_value: pos_max}}
+  end
 
-    baseline_row = compute_baseline_row(state, pixel_h, stack_min, range)
+  defp build_braille_area({stack_min, range, mode}, base, state, width, height, bg) do
+    ctx = Map.merge(base, %{range: range, stack_min: stack_min, mode: mode})
+    fill_braille_area_grid(ctx)
+    baseline_row = compute_baseline_row(state, base.pixel_h, stack_min, range)
+    strips = render_braille_grid(width, height, base, baseline_row, bg)
+    {strips, %{state | min_value: stack_min, max_value: stack_min + range}}
+  end
 
+  defp render_braille_grid(width, height, base, baseline_row, bg) do
     for row <- 0..(height - 1) do
       segments =
         for col <- 0..(width - 1) do
-          braille_area_cell(row, col, width, grid, color_grid, baseline_row, bg)
+          braille_area_cell(row, col, width, base.grid, base.color_grid, baseline_row, bg)
         end
 
       Strip.new(segments)
@@ -1158,12 +1181,33 @@ defmodule Drafter.Widget.Chart do
     build_stacked_columns(sliced, length(series))
   end
 
-  defp compute_stack_range(stacked) do
-    all_tops = Enum.flat_map(stacked, fn col -> Enum.map(col, fn {_, top} -> top end) end)
-    computed_max = if all_tops == [], do: 1, else: Enum.max(all_tops)
-    stack_min = 0
-    stack_max = if computed_max == stack_min, do: computed_max + 1, else: computed_max
-    {stack_min, stack_max - stack_min}
+  defp compute_stack_range(stacked, zero_center) do
+    all_values =
+      Enum.flat_map(stacked, fn col ->
+        Enum.flat_map(col, fn {bottom, top} -> [bottom, top] end)
+      end)
+
+    case all_values do
+      [] -> {0, 1, :positive}
+      vals -> classify_stack_range(Enum.min(vals), Enum.max(vals), zero_center)
+    end
+  end
+
+  defp classify_stack_range(data_min, data_max, _zc) when data_min >= 0 do
+    {0, max(1, data_max), :positive}
+  end
+
+  defp classify_stack_range(data_min, data_max, _zc) when data_max <= 0 do
+    {data_min, max(1, abs(data_min)), :negative}
+  end
+
+  defp classify_stack_range(data_min, data_max, :independent) do
+    {min(data_min, -0.001), max(data_max, 0.001), :split}
+  end
+
+  defp classify_stack_range(data_min, data_max, _zc) do
+    extreme = max(abs(data_min), abs(data_max))
+    {-extreme, extreme * 2, :symmetric}
   end
 
   defp compute_baseline_row(state, pixel_h, stack_min, range) do
@@ -1198,14 +1242,23 @@ defmodule Drafter.Widget.Chart do
     max_len = sliced |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
 
     for col_idx <- 0..(max_len - 1) do
-      Enum.reduce(0..(num_series - 1), {0, []}, fn si, {running, acc} ->
+      Enum.reduce(0..(num_series - 1), {0, 0, []}, fn si, acc ->
         val = sliced |> Enum.at(si) |> Enum.at(col_idx, 0)
-        new_top = running + val
-        {new_top, [{running, new_top} | acc]}
+        stack_value(val, acc)
       end)
-      |> elem(1)
+      |> elem(2)
       |> Enum.reverse()
     end
+  end
+
+  defp stack_value(val, {pos_running, neg_running, acc}) when val >= 0 do
+    new_top = pos_running + val
+    {new_top, neg_running, [{pos_running, new_top} | acc]}
+  end
+
+  defp stack_value(val, {pos_running, neg_running, acc}) do
+    new_bottom = neg_running + val
+    {pos_running, new_bottom, [{new_bottom, neg_running} | acc]}
   end
 
   defp fill_braille_area_grid(ctx) do
@@ -1235,12 +1288,28 @@ defmodule Drafter.Widget.Chart do
     end)
   end
 
+  defp compute_pixel_range(bottom, top, %{mode: :split} = ctx) do
+    bottom_py = value_to_pixel_split(bottom, ctx)
+    top_py = value_to_pixel_split(top, ctx)
+    lo_py = max(0, min(top_py, ctx.pixel_h - 1))
+    hi_py = max(0, min(bottom_py, ctx.pixel_h - 1))
+    {lo_py, hi_py, top_py}
+  end
+
   defp compute_pixel_range(bottom, top, ctx) do
     bottom_py = ctx.pixel_h - 1 - round((bottom - ctx.stack_min) / ctx.range * (ctx.pixel_h - 1))
     top_py = ctx.pixel_h - 1 - round((top - ctx.stack_min) / ctx.range * (ctx.pixel_h - 1))
     lo_py = max(0, min(top_py, ctx.pixel_h - 1))
     hi_py = max(0, min(bottom_py, ctx.pixel_h - 1))
     {lo_py, hi_py, top_py}
+  end
+
+  defp value_to_pixel_split(value, ctx) when value >= 0 do
+    ctx.zero_py - 1 - round(value / ctx.pos_max * (ctx.zero_py - 1))
+  end
+
+  defp value_to_pixel_split(value, ctx) do
+    ctx.zero_py + round(value / ctx.neg_min * (ctx.pixel_h - ctx.zero_py - 1))
   end
 
   defp paint_braille_pixel(py, local_x, char_col, top_py, series_color, dim_color, ctx) do

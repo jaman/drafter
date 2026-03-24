@@ -229,6 +229,10 @@ defmodule Drafter.Layout do
     1 + Enum.sum(Enum.map(List.wrap(children), &count_component_slots/1))
   end
 
+  def count_component_slots({:collapsible, _title, content, _opts}) when is_list(content) do
+    1 + Enum.sum(Enum.map(content, &count_component_slots/1))
+  end
+
   def count_component_slots(_), do: 1
 
   @spec get_padding(keyword()) :: {integer(), integer(), integer(), integer()}

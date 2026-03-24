@@ -146,7 +146,7 @@ defmodule Drafter.Widget.Collapsible do
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false, hovered: false}}
   def handle_event(:hover, state), do: {:ok, %{state | hovered: true}}
   def handle_event(:unhover, state), do: {:ok, %{state | hovered: false}}
-  def handle_event(_, state), do: {:noreply, state}
+  def handle_event(_, state), do: {:bubble, state}
 
   defp render_content(content, _content_height, rect, bg_style) when is_binary(content) do
     content_lines = Text.wrap(content, rect.width - 2, :word)

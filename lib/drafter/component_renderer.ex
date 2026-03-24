@@ -335,23 +335,72 @@ defmodule Drafter.ComponentRenderer do
         _ -> expanded
       end
 
-    if current_expanded and is_list(content) do
-      effective_content_height = content_height || 10
+    child_slots =
+      if is_list(content) do
+        Enum.sum(Enum.map(content, &Layout.count_component_slots/1))
+      else
+        0
+      end
 
-      content_rect = %{
-        x: rect.x,
-        y: rect.y + 1,
-        width: rect.width,
-        height: min(effective_content_height, max(0, rect.height - 1))
+    next_counter = id_counter + 1 + child_slots
+
+    if current_expanded and is_list(content) do
+      render_collapsible_content(new_hierarchy, content, content_height, rect, ctx, widget_id, id_counter, next_counter)
+    else
+      {new_hierarchy, next_counter}
+    end
+  end
+
+  defp render_collapsible_content(hierarchy, content, content_height, rect, ctx, parent_id, id_counter, next_counter) do
+    effective_content_height = content_height || 10
+
+    content_rect = %{
+      x: rect.x,
+      y: rect.y + 1,
+      width: rect.width,
+      height: min(effective_content_height, max(0, rect.height - 1))
+    }
+
+    case Map.get(ctx, :scroll_viewport) do
+      %{visible_top: visible_top, visible_bottom: visible_bottom} ->
+        {culled_h, _} =
+          render_children_culled(
+            hierarchy, content, content_rect, ctx, parent_id,
+            id_counter + 1, visible_top, visible_bottom
+          )
+
+        {culled_h, next_counter}
+
+      _ ->
+        {children_hierarchy, _} =
+          render_layout(hierarchy, :vertical, content, content_rect, ctx, parent_id, id_counter + 1, [])
+
+        {children_hierarchy, next_counter}
+    end
+  end
+
+  defp render_children_culled(hierarchy, children, content_rect, ctx, parent_id,
+                              start_counter, visible_top, visible_bottom) do
+    child_sizes = Layout.calculate_vertical_layout(children, content_rect, [], hierarchy)
+
+    Enum.reduce(Enum.zip(children, child_sizes), {hierarchy, start_counter}, fn {child, child_size},
+                                                                                  {acc_h, acc_idc} ->
+      child_rect = %{
+        x: content_rect.x,
+        y: child_size.y,
+        width: content_rect.width,
+        height: child_size.height
       }
 
-      {children_hierarchy, _} =
-        render_layout(new_hierarchy, :vertical, content, content_rect, ctx, widget_id, id_counter + 1, [])
+      above = child_rect.y + child_rect.height <= visible_top
+      below = child_rect.y >= visible_bottom
 
-      {children_hierarchy, id_counter + 1}
-    else
-      {new_hierarchy, id_counter + 1}
-    end
+      if above or below do
+        {acc_h, acc_idc + Layout.count_component_slots(child)}
+      else
+        render_component(acc_h, child, child_rect, ctx, parent_id, acc_idc)
+      end
+    end)
   end
 
   defp upsert_collapsible_widget(hierarchy, widget_id, mount_props, content_height, on_toggle_fn, rect, parent_id) do
@@ -516,6 +565,11 @@ defmodule Drafter.ComponentRenderer do
 
     viewport_height = scrollable_rect.height
 
+    scroll_ctx = Map.put(ctx, :scroll_viewport, %{
+      visible_top: scrollable_rect.y + scroll_offset_y,
+      visible_bottom: scrollable_rect.y + scroll_offset_y + viewport_height
+    })
+
     {updated_hierarchy, final_counter, _} =
       Enum.reduce(scrollable_children, {hierarchy, start_counter, 0}, fn child,
                                                                           {h, counter, virtual_y} ->
@@ -535,7 +589,7 @@ defmodule Drafter.ComponentRenderer do
           }
 
           {new_h, new_counter} =
-            render_component(h, child, child_rect, ctx, scroll_id, counter)
+            render_component(h, child, child_rect, scroll_ctx, scroll_id, counter)
 
           {new_h, new_counter, virtual_y + child_height}
         end
@@ -558,8 +612,8 @@ defmodule Drafter.ComponentRenderer do
       end
 
     final_hierarchy =
-      Enum.reduce(updated_hierarchy.widgets, updated_hierarchy, fn {widget_id, widget_info}, h ->
-        if widget_info.parent == scroll_id do
+      Enum.reduce(updated_hierarchy.widgets, updated_hierarchy, fn {widget_id, _widget_info}, h ->
+        if descendant_of?(updated_hierarchy, widget_id, scroll_id) do
           WidgetHierarchy.set_widget_scroll_parent(h, widget_id, scroll_id)
         else
           h
@@ -567,6 +621,17 @@ defmodule Drafter.ComponentRenderer do
       end)
 
     {final_hierarchy, final_counter}
+  end
+
+  defp descendant_of?(_hierarchy, widget_id, ancestor_id) when widget_id == ancestor_id, do: false
+
+  defp descendant_of?(hierarchy, widget_id, ancestor_id) do
+    case Map.get(hierarchy.widgets, widget_id) do
+      nil -> false
+      %{parent: ^ancestor_id} -> true
+      %{parent: nil} -> false
+      %{parent: parent_id} -> descendant_of?(hierarchy, parent_id, ancestor_id)
+    end
   end
 
   defp render_layout(hierarchy, :horizontal, children, rect, ctx, parent_id, id_counter, opts) do

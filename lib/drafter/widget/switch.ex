@@ -41,7 +41,9 @@ defmodule Drafter.Widget.Switch do
     :on_change,
     :width,
     :height,
-    :size
+    :size,
+    :on_color,
+    :off_color
   ]
 
   @impl Drafter.Widget
@@ -58,7 +60,9 @@ defmodule Drafter.Widget.Switch do
       on_change: Map.get(props, :on_change),
       width: Map.get(props, :width, 12),
       height: Map.get(props, :height, 1),
-      size: size
+      size: size,
+      on_color: Map.get(props, :on_color),
+      off_color: Map.get(props, :off_color)
     }
   end
 
@@ -279,7 +283,9 @@ defmodule Drafter.Widget.Switch do
     is_on = widget_state.state in [:on, :animating_on]
 
     track_style = %{fg: {80, 85, 95}, bg: {50, 55, 65}}
-    thumb_color = if is_on, do: {100, 200, 100}, else: {150, 150, 150}
+    default_on = {100, 200, 100}
+    default_off = {150, 150, 150}
+    thumb_color = if is_on, do: widget_state.on_color || default_on, else: widget_state.off_color || default_off
     thumb_style = %{fg: thumb_color, bg: thumb_color}
 
     segments =
