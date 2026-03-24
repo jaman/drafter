@@ -29,6 +29,12 @@ defmodule Drafter.Widget.Callback do
     fn data -> dispatch(session_pid, name, data) end
   end
 
+  def wrap_1_with_pid(nil, _pid), do: nil
+  def wrap_1_with_pid(f, _pid) when is_function(f, 1), do: f
+  def wrap_1_with_pid(name, session_pid) do
+    fn data -> dispatch(session_pid, name, data) end
+  end
+
   def wrap_2(nil), do: nil
   def wrap_2(f) when is_function(f, 2), do: f
   def wrap_2(name) do

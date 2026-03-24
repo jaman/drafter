@@ -291,7 +291,7 @@ defmodule Drafter.Widget.TextInput do
   defp handle_focused_event({:key, _key, [:ctrl | _]}, state), do: {:bubble, state}
 
   defp handle_focused_event({:key, :enter}, state) when state.on_submit != nil do
-    new_state = %{state | cursor_position: 0, scroll_offset: 0}
+    new_state = %{state | text: "", cursor_position: 0, scroll_offset: 0, selection_start: nil, selection_end: nil}
     actions =
       case trigger_submit(state) do
         {:app_callback, _, _} = cb -> [cb]
@@ -636,8 +636,10 @@ defmodule Drafter.Widget.TextInput do
   defp build_submit_fn(nil, _keep_focus, _session_pid, _widget_id), do: nil
 
   defp build_submit_fn(on_submit, keep_focus, session_pid, widget_id) do
+    wrapped = Callback.wrap_1_with_pid(on_submit, session_pid)
+
     fn {text, _vr} ->
-      Callback.wrap_1(on_submit).(text)
+      wrapped.(text)
       if keep_focus, do: send(session_pid, {:focus_widget, widget_id})
     end
   end
