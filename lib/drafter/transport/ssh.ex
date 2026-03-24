@@ -60,6 +60,7 @@ defmodule Drafter.Transport.SSH do
     after
       SSHDriver.cleanup(driver_pid)
       stop_session_services(session_ctx)
+      exit(:normal)
     end
   end
 

@@ -1,35 +1,58 @@
 Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}])
 
-defmodule ChatBroker do
+defmodule ChatStore do
   use GenServer
 
+  @table :chat_messages
+
   def start_link, do: GenServer.start_link(__MODULE__, [], name: __MODULE__)
-  def subscribe, do: GenServer.call(__MODULE__, {:subscribe, self()})
-  def broadcast(msg), do: GenServer.cast(__MODULE__, {:broadcast, msg})
-  def fetch_new(pid, since), do: GenServer.call(__MODULE__, {:fetch_new, pid, since})
 
-  @impl true
-  def init(_), do: {:ok, %{subscribers: MapSet.new(), messages: []}}
-
-  @impl true
-  def handle_call({:subscribe, pid}, _from, state) do
-    Process.monitor(pid)
-    {:reply, state.messages, %{state | subscribers: MapSet.put(state.subscribers, pid)}}
+  def post(channel, sender, text) do
+    GenServer.call(__MODULE__, {:post, channel, sender, text})
   end
 
-  def handle_call({:fetch_new, _pid, since}, _from, state) do
-    new_msgs = Enum.drop(state.messages, since)
-    {:reply, new_msgs, state}
+  def messages(channel) do
+    :ets.select(@table, [{{:_, :_, :"$1", :_, :_}, [{:==, :"$1", channel}], [:"$_"]}])
+    |> Enum.sort_by(&elem(&1, 0))
+  end
+
+  def messages_since(channel, since_index) do
+    :ets.select(@table, [
+      {{:"$1", :_, :"$2", :_, :_}, [{:andalso, {:>, :"$1", since_index}, {:==, :"$2", channel}}],
+       [:"$_"]}
+    ])
+    |> Enum.sort_by(&elem(&1, 0))
+  end
+
+  def channels do
+    :ets.foldl(
+      fn {_, _, channel, _, _}, acc -> MapSet.put(acc, channel) end,
+      MapSet.new(),
+      @table
+    )
+    |> MapSet.to_list()
+    |> Enum.sort()
   end
 
   @impl true
-  def handle_cast({:broadcast, msg}, state) do
-    {:noreply, %{state | messages: state.messages ++ [msg]}}
+  def init(_) do
+    table = :ets.new(@table, [:ordered_set, :named_table, :public, read_concurrency: true])
+
+    :ets.insert(
+      table,
+      {0, System.system_time(:millisecond), "lobby", "system",
+       "Welcome to Drafter Chat. Type /help for commands."}
+    )
+
+    {:ok, %{table: table, counter: 1}}
   end
 
   @impl true
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    {:noreply, %{state | subscribers: MapSet.delete(state.subscribers, pid)}}
+  def handle_call({:post, channel, sender, text}, _from, state) do
+    idx = state.counter
+    :ets.insert(@table, {idx, System.system_time(:millisecond), channel, sender, text})
+    Phoenix.PubSub.broadcast(Drafter.PubSub, "chat:#{channel}", {:new_message, channel})
+    {:reply, idx, %{state | counter: idx + 1}}
   end
 end
 
@@ -39,98 +62,106 @@ defmodule ChatApp do
 
   def mount(props) do
     username = Map.get(props, :username, "guest")
-    history = ChatBroker.subscribe()
+    channel = "lobby"
+    Phoenix.PubSub.subscribe(Drafter.PubSub, "chat:#{channel}")
 
     %{
-      messages: [%{user: "system", text: "Welcome to Drafter Chat."}] ++ history,
-      input: "",
       username: username,
-      broker_cursor: length(history)
+      channel: channel,
+      input: "",
+      render_seq: 0
     }
   end
 
   def on_ready(state) do
     Drafter.focus(:message_input)
-    Drafter.set_interval(100, :poll)
     state
   end
 
-  def on_timer(:poll, state) do
-    new_msgs = ChatBroker.fetch_new(self(), state.broker_cursor)
-
-    if new_msgs == [] do
-      state
-    else
-      own = Enum.filter(new_msgs, &(&1.user != state.username))
-
-      %{
-        state
-        | messages: state.messages ++ own,
-          broker_cursor: state.broker_cursor + length(new_msgs)
-      }
-    end
+  def on_message({:new_message, channel}, state) when channel == state.channel do
+    %{state | render_seq: state.render_seq + 1}
   end
 
-  def on_timer(_, state), do: state
+  def on_message(_, state), do: state
 
   def render(state) do
-    message_rows =
-      Enum.map(state.messages, fn msg ->
-        case msg.user do
-          "system" ->
-            label("  \u25cf #{msg.text}", style: %{fg: :bright_black}, flex: 1)
+    rows = ChatStore.messages(state.channel)
 
-          user when user == state.username ->
+    message_rows =
+      Enum.map(rows, fn {_idx, _ts, _ch, sender, text} ->
+        cond do
+          sender == "system" ->
+            label("  \u25cf #{text}", style: %{fg: :bright_black})
+
+          sender == state.username ->
             horizontal([
               label("", flex: 1),
-              label(" #{msg.user} \u25b6: #{msg.text} ", style: %{fg: :green})
+              label(" #{text} \u25c0 me ", style: %{fg: :green})
             ])
 
-          _other ->
-            label(" \u25c0 #{msg.user}: #{msg.text}", style: %{fg: :yellow}, flex: 1)
+          true ->
+            label(" #{sender} \u25b6 #{text}", style: %{fg: :yellow})
         end
       end)
 
     vertical([
-      label(" Drafter Chat  \u00b7  #{state.username}", style: %{fg: :cyan, bold: true}),
+      label(" ##{state.channel}  \u00b7  #{state.username}", style: %{fg: :cyan, bold: true}),
       rule(),
       scrollable(message_rows, flex: 1),
       rule(),
       horizontal([
-        label(" #{state.username} \u25b6: ", style: %{fg: :green}),
+        label(" #{state.username}: ", style: %{fg: :green}),
         text_input(
           id: :message_input,
           bind: :input,
           on_submit: :send_message,
           keep_focus: true,
           flex: 1,
-          placeholder: "Type a message..."
+          placeholder: "Type a message... (/help for commands)"
         )
-      ])
+      ]),
+      footer(bindings: [{"Enter", "Send"}, {"/join #ch", "Switch"}, {"^C", "Quit"}])
     ])
   end
 
   def handle_event(:send_message, _text, state) do
     text = String.trim(state.input)
 
-    if text == "" do
-      {:noreply, state}
-    else
-      msg = %{user: state.username, text: text}
-      ChatBroker.broadcast(msg)
+    cond do
+      text == "" ->
+        {:noreply, state}
 
-      {:ok,
-       %{
-         state
-         | messages: state.messages ++ [msg],
-           input: "",
-           broker_cursor: state.broker_cursor + 1
-       }}
+      String.starts_with?(text, "/join ") ->
+        new_channel =
+          text |> String.trim_leading("/join ") |> String.trim_leading("#") |> String.trim()
+
+        switch_channel(state, new_channel)
+
+      String.starts_with?(text, "/channels") ->
+        channels = ChatStore.channels() |> Enum.map_join(", ", &"##{&1}")
+        ChatStore.post(state.channel, "system", "Active channels: #{channels}")
+        {:ok, %{state | input: ""}}
+
+      text == "/help" ->
+        ChatStore.post(state.channel, "system", "Commands: /join #channel, /channels, /help")
+        {:ok, %{state | input: ""}}
+
+      true ->
+        ChatStore.post(state.channel, state.username, String.replace(text, "\n", " "))
+        {:ok, %{state | input: ""}}
     end
   end
 
   def handle_event({:key, :c, [:ctrl]}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
+
+  defp switch_channel(state, new_channel) when new_channel != "" do
+    Phoenix.PubSub.unsubscribe(Drafter.PubSub, "chat:#{state.channel}")
+    Phoenix.PubSub.subscribe(Drafter.PubSub, "chat:#{new_channel}")
+    {:ok, %{state | channel: new_channel, input: "", render_seq: 0}}
+  end
+
+  defp switch_channel(state, _), do: {:noreply, state}
 end
 
 ip = System.get_env("CHAT_IP", "127.0.0.1")
@@ -151,7 +182,7 @@ Press Ctrl+C twice to stop the server.
 """)
 
 :application.ensure_all_started(:ssh)
-ChatBroker.start_link()
+ChatStore.start_link()
 
 {:ok, _} =
   Drafter.Server.start_ssh(ChatApp,

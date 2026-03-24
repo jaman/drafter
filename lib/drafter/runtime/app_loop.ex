@@ -354,7 +354,13 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg(other, {app_module, app_state, rect, timers, wh, ss}) do
     new_state = maybe_on_message(app_module, other, app_state)
-    app_event_loop(app_module, new_state, rect, timers, wh, ss)
+
+    if new_state === app_state do
+      app_event_loop(app_module, app_state, rect, timers, wh, ss)
+    else
+      {_, new_wh} = throttled_render(app_module, new_state, rect, wh)
+      app_event_loop(app_module, new_state, rect, timers, new_wh, ss)
+    end
   end
 
   defp handle_continue_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event) do

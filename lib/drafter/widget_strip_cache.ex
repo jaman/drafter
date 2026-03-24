@@ -17,29 +17,43 @@ defmodule Drafter.WidgetStripCache do
 
   @spec put(term(), map(), list()) :: true
   def put(widget_id, rect, strips) do
-    :ets.insert(@table, {widget_id, rect, strips})
+    :ets.insert(@table, {session_key(widget_id), rect, strips})
   end
 
   @spec get(term()) :: {map(), list()} | nil
   def get(widget_id) do
-    case :ets.lookup(@table, widget_id) do
-      [{^widget_id, rect, strips}] -> {rect, strips}
+    key = session_key(widget_id)
+
+    case :ets.lookup(@table, key) do
+      [{^key, rect, strips}] -> {rect, strips}
       [] -> nil
     end
   end
 
   @spec delete(term()) :: true
   def delete(widget_id) do
-    :ets.delete(@table, widget_id)
+    :ets.delete(@table, session_key(widget_id))
   end
 
   @spec clear() :: :ok
   def clear do
+    session = session_id()
+
     case :ets.whereis(@table) do
-      :undefined -> :ok
+      :undefined ->
+        :ok
+
       _ ->
-        :ets.delete_all_objects(@table)
+        :ets.select_delete(@table, [{{:"$1", :_, :_}, [match_session(session)], [true]}])
         :ok
     end
+  end
+
+  defp session_key(widget_id), do: {session_id(), widget_id}
+
+  defp session_id, do: Process.get(:drafter_compositor, self())
+
+  defp match_session(session) do
+    {:==, {:element, 1, :"$1"}, {:const, session}}
   end
 end
