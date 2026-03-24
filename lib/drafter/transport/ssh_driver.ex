@@ -97,8 +97,8 @@ defmodule Drafter.Transport.SSHDriver do
 
   defp detect_size do
     case {:io.columns(), :io.rows()} do
-      {{:ok, cols}, {:ok, rows}} -> {cols, rows - 1}
-      _ -> {80, 23}
+      {{:ok, cols}, {:ok, rows}} -> {cols, rows}
+      _ -> {80, 24}
     end
   end
 

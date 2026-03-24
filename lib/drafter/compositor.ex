@@ -233,8 +233,17 @@ defmodule Drafter.Compositor do
       end)
 
     case rows do
-      [] -> []
-      _ -> [Terminal.ANSI.sync_start()] ++ rows ++ [Terminal.ANSI.sync_end()]
+      [] ->
+        []
+
+      _ ->
+        [Terminal.ANSI.sync_start()] ++
+          rows ++
+          [
+            Terminal.ANSI.cursor_to(1, 1),
+            Terminal.ANSI.hide_cursor(),
+            Terminal.ANSI.sync_end()
+          ]
     end
   end
 end
