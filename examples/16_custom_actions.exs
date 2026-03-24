@@ -97,16 +97,16 @@ defmodule EventFeedApp do
 
     vertical([
       header("Event Feed  ·  Custom Action Handler Demo"),
-      scrollable(feed, flex: 1),
+      scrollable(feed, flex: 1, focusable: false),
       rule(),
       label("Fire an event:", style: %{fg: :bright_black}),
       horizontal(
         [
-          button("Info", on_click: :fire_info),
-          button("Success", on_click: :fire_success, variant: :success),
-          button("Warning", on_click: :fire_warning, variant: :warning),
-          button("Error", on_click: :fire_error, variant: :error),
-          button("Critical", on_click: :fire_critical, variant: :error)
+          button("Info", id: :btn_info, on_click: :fire_info),
+          button("Success", id: :btn_success, on_click: :fire_success, variant: :success),
+          button("Warning", id: :btn_warning, on_click: :fire_warning, variant: :warning),
+          button("Error", id: :btn_error, on_click: :fire_error, variant: :error),
+          button("Critical", id: :btn_critical, on_click: :fire_critical, variant: :error)
         ],
         gap: 1
       ),

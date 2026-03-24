@@ -86,7 +86,9 @@ defmodule Drafter.ComponentRenderer do
 
     hierarchy.widgets
     |> Enum.filter(fn {id, info} ->
-      widget_focusable?(info.module) and not MapSet.member?(hidden, id)
+      widget_focusable?(info.module) and
+        not MapSet.member?(hidden, id) and
+        Map.get(info.state, :focusable) != false
     end)
     |> Enum.sort_by(fn {_id, info} -> info.order end)
     |> Enum.map(fn {id, _info} -> id end)
@@ -442,6 +444,8 @@ defmodule Drafter.ComponentRenderer do
 
     total_content_height = Enum.sum(child_heights)
 
+    focusable = Keyword.get(opts, :focusable, true)
+
     mount_props = %{
       id: scroll_id,
       content_height: total_content_height,
@@ -450,7 +454,8 @@ defmodule Drafter.ComponentRenderer do
       viewport_width: content_rect.width,
       show_vertical_scrollbar: Keyword.get(opts, :show_vertical_scrollbar, :auto),
       show_horizontal_scrollbar: Keyword.get(opts, :show_horizontal_scrollbar, :never),
-      click_to_scroll: click_to_scroll
+      click_to_scroll: click_to_scroll,
+      focusable: focusable
     }
 
     scrollbar_rect = %{
@@ -466,7 +471,8 @@ defmodule Drafter.ComponentRenderer do
         |> WidgetHierarchy.update_widget_rect(scroll_id, scrollbar_rect)
         |> WidgetHierarchy.update_widget(scroll_id, %{
           content_height: total_content_height,
-          viewport_height: rect.height
+          viewport_height: rect.height,
+          focusable: focusable
         })
       else
         WidgetHierarchy.add_widget(

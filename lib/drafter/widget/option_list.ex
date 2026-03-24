@@ -291,6 +291,7 @@ defmodule Drafter.Widget.OptionList do
 
     base = %{
       options: mount_props.options,
+      visible_height: mount_props.visible_height,
       on_select: mount_props.on_select,
       on_highlight: mount_props.on_highlight,
       trigger: mount_props.trigger,

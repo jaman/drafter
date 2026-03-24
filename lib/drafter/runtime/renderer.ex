@@ -23,11 +23,39 @@ defmodule Drafter.Runtime.Renderer do
     screens = ScreenManager.get_all_screens()
     toasts = ScreenManager.get_toasts()
 
-    if screens != [] or toasts != [] do
-      render_screens_from_manager(screen_rect, app_module, app_state, existing_hierarchy)
-      {:ok, existing_hierarchy}
-    else
-      render_app_direct(app_module, app_state, screen_rect, existing_hierarchy)
+    cond do
+      screens != [] ->
+        render_screens_from_manager(screen_rect, app_module, app_state, existing_hierarchy)
+        {:ok, existing_hierarchy}
+
+      toasts != [] ->
+        hierarchy = rebuild_app_hierarchy(app_module, app_state, screen_rect, existing_hierarchy)
+        render_screens_from_manager(screen_rect, app_module, app_state, hierarchy)
+        {:ok, hierarchy}
+
+      true ->
+        render_app_direct(app_module, app_state, screen_rect, existing_hierarchy)
+    end
+  end
+
+  defp rebuild_app_hierarchy(app_module, app_state, screen_rect, existing_hierarchy) do
+    current_theme = ThemeManager.get_current_theme()
+
+    render_result =
+      case app_module.render(app_state) do
+        [] -> app_module.render(app_state, screen_rect)
+        result -> result
+      end
+
+    case render_result do
+      component_tree when is_tuple(component_tree) ->
+        ComponentRenderer.render_tree(
+          component_tree, screen_rect, current_theme, app_state, existing_hierarchy,
+          app_module: app_module
+        )
+
+      _ ->
+        existing_hierarchy
     end
   end
 
