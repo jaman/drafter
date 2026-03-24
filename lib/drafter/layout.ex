@@ -180,11 +180,14 @@ defmodule Drafter.Layout do
         end
       end)
 
+    max_y = rect.y + rect.height
+
     {sizes, _} =
       Enum.reduce(Enum.with_index(actual_heights), {[], rect.y}, fn {height, idx},
                                                                     {acc, current_y} ->
-        size = %{y: current_y, height: height}
-        next_y = current_y + height + if idx < num_children - 1, do: gap, else: 0
+        clamped_height = max(0, min(height, max_y - current_y))
+        size = %{y: current_y, height: clamped_height}
+        next_y = current_y + clamped_height + if idx < num_children - 1, do: gap, else: 0
         {[size | acc], next_y}
       end)
 

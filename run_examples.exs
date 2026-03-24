@@ -33,6 +33,8 @@ defmodule ExamplesLauncher do
     {:ok, state}
   end
 
+  def handle_event(_event, _data, state), do: {:noreply, state}
+
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event({:key, :q, [:ctrl]}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}

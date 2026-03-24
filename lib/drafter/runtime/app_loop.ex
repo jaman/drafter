@@ -505,6 +505,7 @@ defmodule Drafter.Runtime.AppLoop do
     {prev_module, prev_state, prev_hierarchy, prev_timers, prev_from, prev_ref, prev_handlers} = hd(session_stack)
     cleanup_timers(timers)
     Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
+    Drafter.ScreenManager.reset()
     if prev_from, do: send(prev_from, {:session_result, prev_ref, :ok})
     Drafter.ActionRegistry.init(prev_handlers)
     {_, restored_hierarchy} = Renderer.render_app(prev_module, prev_state, screen_rect, prev_hierarchy)

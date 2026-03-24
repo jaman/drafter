@@ -149,22 +149,27 @@ defmodule Dashboard do
       ),
       box(
         [
-          label("Skin:", style: %{bold: true}),
-          option_list(
-            Enum.map(@skins, fn {id, label, key} -> {"#{key} #{label}", id} end),
-            on_select: :skin_selected,
-            selected: state.current_skin
-          ),
-          label(""),
-          label("Controls:", style: %{bold: true}),
-          checkbox("Auto-refresh", checked: true),
-          checkbox("Alerts enabled", checked: false),
-          switch(label: "Maintenance", enabled: false),
-          switch(label: "Dark mode", enabled: true),
-          radio_set(
-            [{"Low", :low}, {"Med", :med}, {"High", :high}],
-            selected: :med,
-            height: 3
+          scrollable(
+            [
+              label("Skin:", style: %{bold: true}),
+              option_list(
+                Enum.map(@skins, fn {id, label, key} -> {"#{key} #{label}", id} end),
+                on_select: :skin_selected,
+                selected: state.current_skin
+              ),
+              label(""),
+              label("Controls:", style: %{bold: true}),
+              checkbox("Auto-refresh", checked: true),
+              checkbox("Alerts enabled", checked: false),
+              switch(label: "Maintenance", enabled: false),
+              switch(label: "Dark mode", enabled: true),
+              radio_set(
+                [{"Low", :low}, {"Med", :med}, {"High", :high}],
+                selected: :med,
+                height: 3
+              )
+            ],
+            flex: 1
           )
         ],
         title: "Skin & Controls",
@@ -180,7 +185,7 @@ defmodule Dashboard do
           [
             label("CPU", style: %{bold: true}),
             sparkline(state.cpu_hist,
-              height: 4,
+              height: 1,
               min_value: 0,
               max_value: 100,
               min_color: {80, 200, 100},
@@ -189,7 +194,7 @@ defmodule Dashboard do
             label(""),
             label("Memory", style: %{bold: true}),
             sparkline(state.mem_hist,
-              height: 4,
+              height: 1,
               min_value: 0,
               max_value: 100,
               min_color: {80, 140, 215},
@@ -198,7 +203,7 @@ defmodule Dashboard do
             label(""),
             label("Net RX", style: %{bold: true}),
             sparkline(state.net_rx_hist,
-              height: 3,
+              height: 1,
               min_value: 0,
               max_value: 100,
               min_color: {80, 200, 140},
@@ -206,7 +211,7 @@ defmodule Dashboard do
             ),
             label("Net TX", style: %{bold: true}),
             sparkline(state.net_tx_hist,
-              height: 3,
+              height: 1,
               min_value: 0,
               max_value: 100,
               min_color: {215, 140, 60},
