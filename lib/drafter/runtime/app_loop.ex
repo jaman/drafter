@@ -636,8 +636,6 @@ defmodule Drafter.Runtime.AppLoop do
     case event do
       %{type: :key, key: :q, modifiers: [:ctrl]} -> :quit
       {:key, :q, [:ctrl]} -> :quit
-      %{type: :key, key: :c, modifiers: [:ctrl]} -> :quit
-      {:key, :c, [:ctrl]} -> :quit
       _ -> :continue
     end
   end

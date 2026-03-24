@@ -108,7 +108,8 @@ defmodule Drafter.Transport.SSHDriver do
         :ok
 
       {:error, _} ->
-        :ok
+        send(driver_pid, {:stdin, "\x03"})
+        stdin_reader(driver_pid)
 
       "\e" ->
         read_escape_sequence(driver_pid, "\e")
