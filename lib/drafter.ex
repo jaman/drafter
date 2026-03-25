@@ -68,7 +68,9 @@ defmodule Drafter do
       nil ->
         _ = Drafter.Logging.setup()
 
-        with :ok <- start_system(),
+        mouse_hover = app_mouse_hover(app_module)
+
+        with :ok <- start_system(mouse_hover: mouse_hover),
              :ok <- maybe_start_tree_sitter(opts),
              :ok <- register_widget_libraries(opts),
              :ok <- run_app(app_module, opts) do
@@ -893,9 +895,11 @@ defmodule Drafter do
     end
   end
 
-  defp start_system do
+  defp start_system(opts) do
     Drafter.WidgetStripCache.create()
     Drafter.Widget.Registry.scan_and_register()
+
+    mouse_opts = [hover: Keyword.get(opts, :mouse_hover, true)]
 
     with {:ok, em_pid} <- ensure_started(Event.Manager.start_link()),
          {:ok, _} <- ensure_started(Terminal.Driver.start_link()),
@@ -910,7 +914,18 @@ defmodule Drafter do
       Process.put(:drafter_screen_manager, sm_pid)
       Process.put(:drafter_event_handler, eh_pid)
       Process.put(:drafter_skin_manager, skin_pid)
-      Terminal.Driver.setup()
+      Process.put(:drafter_mouse_opts, mouse_opts)
+      Terminal.Driver.setup(mouse_opts)
+    end
+  end
+
+  defp app_mouse_hover(app_module) do
+    Code.ensure_loaded(app_module)
+
+    if function_exported?(app_module, :__mouse_hover__, 0) do
+      app_module.__mouse_hover__()
+    else
+      true
     end
   end
 

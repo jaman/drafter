@@ -69,6 +69,7 @@ defmodule Drafter.App do
 
       @css_path Keyword.get(unquote(opts), :css_path)
       @inline_styles Keyword.get(unquote(opts), :styles, %{})
+      @mouse_hover Keyword.get(unquote(opts), :mouse_hover, true)
       @keybinding_hints []
 
       def mount(_props), do: %{}
@@ -83,6 +84,7 @@ defmodule Drafter.App do
 
       def __css_path__, do: @css_path
       def __inline_styles__, do: @inline_styles
+      def __mouse_hover__, do: @mouse_hover
       def __theme__(action) when action == :get, do: Drafter.ThemeManager.get_current_theme()
 
       defoverridable mount: 1,

@@ -38,8 +38,8 @@ defmodule Drafter.Terminal.Driver do
 
   @doc "Setup terminal for TUI mode"
   @spec setup() :: :ok | {:error, term()}
-  def setup do
-    GenServer.call(__MODULE__, :setup)
+  def setup(mouse_opts \\ []) do
+    GenServer.call(__MODULE__, {:setup, mouse_opts})
   end
 
   @doc "Cleanup and restore terminal"
@@ -73,15 +73,15 @@ defmodule Drafter.Terminal.Driver do
   end
 
   @doc "Enable mouse events"
-  @spec enable_mouse() :: :ok
-  def enable_mouse do
-    GenServer.cast(__MODULE__, :enable_mouse)
+  @spec enable_mouse(keyword()) :: :ok
+  def enable_mouse(opts \\ []) do
+    GenServer.cast(__MODULE__, {:enable_mouse, opts})
   end
 
   @doc "Disable mouse events"
-  @spec disable_mouse() :: :ok
-  def disable_mouse do
-    GenServer.cast(__MODULE__, :disable_mouse)
+  @spec disable_mouse(keyword()) :: :ok
+  def disable_mouse(opts \\ []) do
+    GenServer.cast(__MODULE__, {:disable_mouse, opts})
   end
 
   @impl GenServer
@@ -104,8 +104,8 @@ defmodule Drafter.Terminal.Driver do
   end
 
   @impl GenServer
-  def handle_call(:setup, _from, state) do
-    case setup_terminal(state) do
+  def handle_call({:setup, mouse_opts}, _from, state) do
+    case setup_terminal(state, mouse_opts) do
       {:ok, new_state} ->
         {:reply, :ok, new_state}
 
@@ -147,18 +147,18 @@ defmodule Drafter.Terminal.Driver do
     {:noreply, state}
   end
 
-  def handle_cast(:enable_mouse, state) do
+  def handle_cast({:enable_mouse, opts}, state) do
     if state.raw_mode and not state.mouse_enabled do
-      IO.write(ANSI.enable_mouse())
+      IO.write(ANSI.enable_mouse(opts))
       {:noreply, %{state | mouse_enabled: true}}
     else
       {:noreply, state}
     end
   end
 
-  def handle_cast(:disable_mouse, state) do
+  def handle_cast({:disable_mouse, opts}, state) do
     if state.raw_mode and state.mouse_enabled do
-      IO.write(ANSI.disable_mouse())
+      IO.write(ANSI.disable_mouse(opts))
       {:noreply, %{state | mouse_enabled: false}}
     else
       {:noreply, state}
@@ -197,7 +197,7 @@ defmodule Drafter.Terminal.Driver do
     :ok
   end
 
-  defp setup_terminal(state) do
+  defp setup_terminal(state, mouse_opts) do
     shell_pid = :shell.start_interactive({:noshell, :raw})
 
     case enter_terminal_mode() do
@@ -210,7 +210,7 @@ defmodule Drafter.Terminal.Driver do
           ANSI.enter_alt_screen(),
           ANSI.hide_cursor(),
           ANSI.clear_screen(),
-          ANSI.enable_mouse(),
+          ANSI.enable_mouse(mouse_opts),
           "\e[?2004h"
         ])
 

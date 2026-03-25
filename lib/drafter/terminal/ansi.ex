@@ -304,13 +304,23 @@ defmodule Drafter.Terminal.ANSI do
   @spec show_cursor() :: String.t()
   def show_cursor, do: "\e[?25h"
 
-  @doc "Enable mouse reporting"
-  @spec enable_mouse() :: String.t()
-  def enable_mouse, do: "\e[?1003h\e[?1006h"
+  @spec enable_mouse(keyword()) :: String.t()
+  def enable_mouse(opts \\ []) do
+    if Keyword.get(opts, :hover, true) do
+      "\e[?1003h\e[?1006h"
+    else
+      "\e[?1002h\e[?1006h"
+    end
+  end
 
-  @doc "Disable mouse reporting"
-  @spec disable_mouse() :: String.t()
-  def disable_mouse, do: "\e[?1006l\e[?1003l"
+  @spec disable_mouse(keyword()) :: String.t()
+  def disable_mouse(opts \\ []) do
+    if Keyword.get(opts, :hover, true) do
+      "\e[?1006l\e[?1003l"
+    else
+      "\e[?1006l\e[?1002l"
+    end
+  end
 
   @doc "Enter alternative screen buffer"
   @spec enter_alt_screen() :: String.t()
