@@ -400,8 +400,9 @@ defmodule Drafter.Widget.Chart do
     bg = computed[:background] || {20, 20, 30}
     fg = state.color || computed[:color] || {100, 200, 255}
 
+    axis_label_width = if state.show_axes, do: compute_y_axis_width(state), else: 0
     chart_height = if state.show_axes, do: max(1, rect.height - 2), else: rect.height
-    chart_width = if state.show_axes, do: max(1, rect.width - 6), else: rect.width
+    chart_width = if state.show_axes, do: max(1, rect.width - axis_label_width - 1), else: rect.width
 
     animation_offset =
       if state.animated do
@@ -2036,13 +2037,14 @@ defmodule Drafter.Widget.Chart do
   defp tuple_size_or_length(list), do: length(list)
 
   defp add_axes(strips, state, rect, bg, fg) do
-    y_axis_width = 5
+    label_width = compute_y_axis_width(state)
+    axis_col_width = label_width + 1
 
     y_axis_segments =
       for i <- 0..(rect.height - 3) do
         y_val = state.max_value - (state.max_value - state.min_value) * i / (rect.height - 3)
         label = format_axis_value(y_val)
-        Segment.new(String.pad_leading(label, y_axis_width - 1) <> "│", %{fg: fg, bg: bg})
+        Segment.new(String.pad_leading(label, label_width) <> "│", %{fg: fg, bg: bg})
       end
 
     strips_with_y =
@@ -2054,18 +2056,25 @@ defmodule Drafter.Widget.Chart do
           if idx < length(y_axis_segments) do
             Enum.at(y_axis_segments, idx)
           else
-            Segment.new(String.duplicate(" ", y_axis_width), %{bg: bg})
+            Segment.new(String.duplicate(" ", axis_col_width), %{bg: bg})
           end
 
         Strip.new([y_seg | strip.segments])
       end)
 
-    x_axis = " " <> String.duplicate("─", rect.width - 7) <> "┘"
+    x_axis_content_width = max(1, rect.width - axis_col_width - 1)
+    x_axis = String.duplicate(" ", label_width) <> "└" <> String.duplicate("─", x_axis_content_width)
 
     x_axis_strip =
       Strip.new([Segment.new(String.pad_trailing(x_axis, rect.width), %{fg: fg, bg: bg})])
 
     strips_with_y ++ [x_axis_strip]
+  end
+
+  defp compute_y_axis_width(state) do
+    min_label = format_axis_value(state.min_value)
+    max_label = format_axis_value(state.max_value)
+    max(String.length(min_label), String.length(max_label))
   end
 
   defp add_title(strips, title, _rect, bg, fg) do
