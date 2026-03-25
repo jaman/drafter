@@ -19,16 +19,22 @@ defmodule Drafter.Layout do
   @spec get_preferred_height(component(), hierarchy() | nil) :: pos_integer() | :auto
   def get_preferred_height(component, hierarchy \\ nil)
 
-  def get_preferred_height({:layout, :horizontal, children, _opts}, _hierarchy) do
-    children |> Enum.map(&get_preferred_height(&1, nil)) |> Enum.max(fn -> 1 end)
+  def get_preferred_height({:layout, :horizontal, children, opts}, hierarchy) do
+    children
+    |> Enum.map(&get_preferred_height(&1, hierarchy))
+    |> Enum.max(fn -> 1 end)
+    |> cap_at_max_height(opts)
   end
 
-  def get_preferred_height({:layout, :vertical, children, _opts}, _hierarchy) do
-    children |> Enum.map(&get_preferred_height(&1, nil)) |> Enum.sum()
+  def get_preferred_height({:layout, :vertical, children, opts}, hierarchy) do
+    children
+    |> Enum.map(&get_preferred_height(&1, hierarchy))
+    |> Enum.sum()
+    |> cap_at_max_height(opts)
   end
 
-  def get_preferred_height({:scrollable, children, opts}, _hierarchy) do
-    Keyword.get(opts, :height, children |> Enum.map(&get_preferred_height(&1, nil)) |> Enum.sum())
+  def get_preferred_height({:scrollable, children, opts}, hierarchy) do
+    Keyword.get(opts, :height, children |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum())
   end
 
   def get_preferred_height({:box, children, opts}, hierarchy) do
@@ -72,7 +78,7 @@ defmodule Drafter.Layout do
   def get_preferred_height(_component, _hierarchy), do: 1
 
   @spec get_child_vertical_spec(component(), hierarchy() | nil) ::
-          {pos_integer() | :auto, non_neg_integer(), boolean()}
+          {pos_integer() | :auto, non_neg_integer(), boolean(), pos_integer() | nil}
   def get_child_vertical_spec({:layout, _direction, _children, opts} = child, hierarchy) do
     flex_spec(opts, fn -> get_preferred_height(child, hierarchy) end)
   end
@@ -95,15 +101,17 @@ defmodule Drafter.Layout do
 
   def get_child_vertical_spec({:collapsible, title, content, opts}, hierarchy) do
     preferred = collapsible_height(hierarchy, title, content, opts)
-    {preferred, 0, false}
+    {preferred, 0, false, nil}
   end
 
   def get_child_vertical_spec(child, hierarchy) do
     preferred = get_preferred_height(child, hierarchy)
-    if preferred == :auto, do: {1, 1, true}, else: {preferred, 0, false}
+    if preferred == :auto, do: {1, 1, true, nil}, else: {preferred, 0, false, nil}
   end
 
-  defp collapsible_height(nil, _title, _content, _opts), do: 1
+  defp collapsible_height(nil, _title, content, opts) do
+    collapsible_height_from_opts(content, opts)
+  end
 
   defp collapsible_height(hierarchy, title, content, opts) do
     case find_collapsible_state(hierarchy, title) do
@@ -124,6 +132,7 @@ defmodule Drafter.Layout do
   defp flex_spec(opts, preferred_fn) do
     flex = Keyword.get(opts, :flex, 0)
     has_flex = flex > 0 or Keyword.has_key?(opts, :flex)
+    max_h = Keyword.get(opts, :max_height)
 
     preferred =
       case Keyword.get(opts, :height) do
@@ -131,7 +140,7 @@ defmodule Drafter.Layout do
         height -> height
       end
 
-    {preferred, max(flex, 1), has_flex}
+    {cap_at_max_height(preferred, opts), max(flex, 1), has_flex, max_h}
   end
 
   @spec calculate_vertical_layout(
@@ -147,8 +156,8 @@ defmodule Drafter.Layout do
 
     child_specs =
       Enum.map(children, fn child ->
-        {preferred, flex, has_flex} = get_child_vertical_spec(child, hierarchy)
-        %{preferred: preferred, flex: flex, has_flex: has_flex}
+        {preferred, flex, has_flex, max_h} = get_child_vertical_spec(child, hierarchy)
+        %{preferred: preferred, flex: flex, has_flex: has_flex, max_height: max_h}
       end)
 
     fixed_total =
@@ -172,12 +181,15 @@ defmodule Drafter.Layout do
 
     actual_heights =
       Enum.map(child_specs, fn spec ->
-        if spec.has_flex do
-          flex_share = spec.flex / total_flex
-          max(1, round(available_for_flex * flex_share))
-        else
-          spec.preferred
-        end
+        height =
+          if spec.has_flex do
+            flex_share = spec.flex / total_flex
+            max(1, round(available_for_flex * flex_share))
+          else
+            spec.preferred
+          end
+
+        if spec.max_height, do: min(height, spec.max_height), else: height
       end)
 
     max_y = rect.y + rect.height
@@ -375,6 +387,13 @@ defmodule Drafter.Layout do
       end
 
     Keyword.get(opts, :colspan, 1)
+  end
+
+  defp cap_at_max_height(preferred, opts) do
+    case Keyword.get(opts, :max_height) do
+      nil -> preferred
+      max_h -> min(preferred, max_h)
+    end
   end
 
   defp find_collapsible_state(hierarchy, title) do
