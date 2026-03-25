@@ -31,8 +31,8 @@ defmodule Drafter.Widget.CommandPalette do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed

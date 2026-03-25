@@ -18,8 +18,8 @@ defmodule Drafter.Widget.Checkbox do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :click, :hover],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard, :click, :hover]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed

@@ -22,8 +22,8 @@ defmodule Drafter.Widget.Switch do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :click, :hover],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard, :click, :hover]
 
   alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}

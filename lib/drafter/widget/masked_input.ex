@@ -36,8 +36,8 @@ defmodule Drafter.Widget.MaskedInput do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :char],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard, :char]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed

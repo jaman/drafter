@@ -45,8 +45,8 @@ defmodule Drafter.Widget.TextInput do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :char, :click, :drag],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard, :char, :click, :drag]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed

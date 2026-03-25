@@ -27,8 +27,8 @@ defmodule Drafter.Widget.ScrollableContainer do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :scroll],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard, :scroll]
 
   alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}

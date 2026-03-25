@@ -26,8 +26,8 @@ defmodule Drafter.Widget.RadioSet do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard]
 
   alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
@@ -143,8 +143,21 @@ defmodule Drafter.Widget.RadioSet do
     }
   end
 
-  def handle_event({:key, :up}, state), do: {:ok, %{state | highlighted_index: max(0, state.highlighted_index - 1)}}
-  def handle_event({:key, :down}, state), do: {:ok, %{state | highlighted_index: min(length(state.options) - 1, state.highlighted_index + 1)}}
+  def handle_event({:key, :up}, %{highlighted_index: 0} = state), do: {:bubble, state}
+
+  def handle_event({:key, :up}, state) do
+    {:ok, %{state | highlighted_index: state.highlighted_index - 1}}
+  end
+
+  def handle_event({:key, :down}, state) do
+    max_index = length(state.options) - 1
+
+    if state.highlighted_index >= max_index do
+      {:bubble, state}
+    else
+      {:ok, %{state | highlighted_index: state.highlighted_index + 1}}
+    end
+  end
   def handle_event({:key, key}, state) when key in [:enter, :" "], do: select_current(state)
 
   def handle_event({:mouse, %{type: :mouse_up, y: y}}, state) do

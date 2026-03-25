@@ -1,9 +1,17 @@
 defmodule Drafter.Widget do
   @moduledoc """
   Widget behavior for TUI components.
-  
+
   Defines the contract that all widgets must implement and provides
   utilities for widget lifecycle management.
+
+  Supports two modes:
+
+  **Legacy mode** (handles-based):
+      use Drafter.Widget, handles: [:keyboard, :scroll], focusable: true
+
+  **Trait mode** (composable traits):
+      use Drafter.Widget, traits: [:focusable, :scrollable]
   """
 
   alias Drafter.Draw.Strip
@@ -18,43 +26,19 @@ defmodule Drafter.Widget do
   @type scroll_direction :: :up | :down
   @type key :: atom()
 
-  @doc "Initialize widget with props"
   @callback mount(props()) :: state()
-
-  @doc "Render widget to strips"
   @callback render(state(), rect()) :: render_result()
-
-  @doc "Handle events"
   @callback handle_event(Event.t(), state()) :: event_result()
-
-  @doc "Update widget with new props"
   @callback update(props(), state()) :: state()
-
-  @doc "Cleanup widget resources"
   @callback unmount(state()) :: :ok
-
-  @doc "Handle scroll events"
   @callback handle_scroll(scroll_direction(), state()) :: event_result()
-
-  @doc "Handle keyboard events"
   @callback handle_key(key(), state()) :: event_result()
-
-  @doc "Handle mouse press (button down) events"
   @callback handle_press(x :: integer(), y :: integer(), state()) :: event_result()
-
-  @doc "Handle mouse up events"
   @callback handle_mouse_up(x :: integer(), y :: integer(), state()) :: event_result()
-
-  @doc "Handle drag events"
   @callback handle_drag(x :: integer(), y :: integer(), state()) :: event_result()
-
-  @doc "Handle hover events"
   @callback handle_hover(x :: integer(), y :: integer(), state()) :: event_result()
-
-  @doc "Handle custom events not covered by standard event types"
   @callback handle_custom_event(Event.t(), state()) :: event_result()
 
-  @doc "Handle events during capture phase (before target widget)"
   @callback handle_event_capture(Event.Object.t(), state()) ::
               {:continue, Event.Object.t(), state()}
               | {:stop, Event.Object.t(), state(), list()}
@@ -73,29 +57,70 @@ defmodule Drafter.Widget do
     handle_event_capture: 2
   ]
 
-  @doc "Default mount implementation"
   def mount(_props), do: %{}
-
-  @doc "Default render implementation"
   def render(_state, _rect), do: []
-
-  @doc "Default event handler"
   def handle_event(_event, state), do: {:noreply, state}
-
-  @doc "Default update implementation"
   def update(_props, state), do: state
-
-  @doc "Default unmount implementation"
   def unmount(_state), do: :ok
 
   defmacro __using__(opts) do
+    traits = Keyword.get(opts, :traits, [])
+
+    if traits != [] do
+      generate_trait_based_widget(traits, opts)
+    else
+      generate_handles_based_widget(opts)
+    end
+  end
+
+  defp generate_trait_based_widget(trait_specs, opts) do
+    escaped_opts = Macro.escape(opts)
+    extra_handles = Keyword.get(opts, :handles, [])
+
+    quote do
+      @behaviour Drafter.Widget
+
+      alias Drafter.Widget.Trait
+      alias Drafter.Widget.Trait.Pipeline
+
+      @__trait_modules__ Trait.resolve_all(unquote(trait_specs), unquote(escaped_opts))
+      @__extra_handles__ unquote(extra_handles)
+      @__trait_handles__ Enum.uniq(Trait.collect_handles(@__trait_modules__) ++ @__extra_handles__)
+      @__trait_focusable__ Trait.any_focusable?(@__trait_modules__)
+      @__trait_default_state__ Trait.merge_default_states(@__trait_modules__)
+      @__trait_bitmap__ Trait.build_bitmap(@__trait_modules__)
+      @__trait_render_fields__ Trait.collect_render_affecting_fields(@__trait_modules__)
+      @__trait_layout_static__ Trait.all_layout_static?(@__trait_modules__)
+
+      def __widget_capabilities__ do
+        %{
+          handles: @__trait_handles__,
+          capture_handles: [],
+          focusable: @__trait_focusable__,
+          scroll: Trait.scroll_config(@__trait_modules__, unquote(escaped_opts)),
+          traits: Enum.map(@__trait_modules__, & &1.name())
+        }
+      end
+
+      def __widget_traits__, do: @__trait_modules__
+      def __widget_capabilities_bitmap__, do: @__trait_bitmap__
+      def __render_affecting_fields__, do: @__trait_render_fields__
+      def __layout_static__, do: @__trait_layout_static__
+      def __trait_default_state__, do: @__trait_default_state__
+
+      def handle_event(event, state) do
+        Pipeline.run(__MODULE__, @__trait_modules__, event, state, @__trait_handles__, @__trait_focusable__)
+      end
+
+      unquote(shared_widget_defaults())
+    end
+  end
+
+  defp generate_handles_based_widget(opts) do
     handles = Keyword.get(opts, :handles, [])
     capture_handles = Keyword.get(opts, :capture_handles, [])
     focusable = Keyword.get(opts, :focusable, :keyboard in handles)
-    scroll_opts = Keyword.get(opts, :scroll)
-
-    has_scroll = :scroll in handles
-    scroll_config = parse_scroll_config(scroll_opts, has_scroll)
+    scroll_config = parse_scroll_config(Keyword.get(opts, :scroll), :scroll in handles)
 
     quote do
       @behaviour Drafter.Widget
@@ -116,30 +141,27 @@ defmodule Drafter.Widget do
         }
       end
 
+      def handle_event(event, state) do
+        EventRouter.route_event(
+          __MODULE__, event, state, @__widget_handles__, @__widget_focusable__, @__widget_scroll_config__
+        )
+      end
+
+      unquote(shared_widget_defaults())
+    end
+  end
+
+  defp shared_widget_defaults do
+    quote do
       def mount(props), do: Drafter.Widget.mount(props)
       def render(state, rect), do: Drafter.Widget.render(state, rect)
       def update(props, state), do: Drafter.Widget.update(props, state)
       def unmount(state), do: Drafter.Widget.unmount(state)
 
-      def handle_event(event, state) do
-        EventRouter.route_event(
-          __MODULE__,
-          event,
-          state,
-          @__widget_handles__,
-          @__widget_focusable__,
-          @__widget_scroll_config__
-        )
-      end
-
-      def focused(state) when is_map(state) do
-        Map.get(state, :focused, false)
-      end
-
+      def focused(state) when is_map(state), do: Map.get(state, :focused, false)
       def focused(_state), do: false
 
       def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
-
       def preferred_height(_args, _opts), do: 1
 
       defoverridable Drafter.Widget

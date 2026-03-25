@@ -35,8 +35,8 @@ defmodule Drafter.Widget.DirectoryTree do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :mouse_up, :scroll],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard, :mouse_up, :scroll]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed

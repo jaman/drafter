@@ -29,8 +29,8 @@ defmodule Drafter.Widget.CodeView do
   """
 
   use Drafter.Widget,
-    handles: [:scroll, :keyboard, :drag],
-    focusable: true
+    traits: [:focusable],
+    handles: [:scroll, :keyboard, :drag]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Syntax.{ElixirHighlighter, Highlighter, TreeSitter, TSFeatures}

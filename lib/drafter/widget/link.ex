@@ -21,8 +21,8 @@ defmodule Drafter.Widget.Link do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :click],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard, :click]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed

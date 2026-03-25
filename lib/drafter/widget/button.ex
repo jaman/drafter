@@ -21,8 +21,8 @@ defmodule Drafter.Widget.Button do
   """
 
   use Drafter.Widget,
-    handles: [:mouse_up, :keyboard],
-    focusable: true
+    traits: [:focusable],
+    handles: [:mouse_up, :keyboard]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style
@@ -74,7 +74,12 @@ defmodule Drafter.Widget.Button do
 
   defp render_button(state, rect) do
     computed_opts = [classes: state.classes, style: state.style]
-    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
+
+    computed_opts =
+      if state.app_module,
+        do: Keyword.put(computed_opts, :app_module, state.app_module),
+        else: computed_opts
+
     computed = Computed.for_widget(:button, state, computed_opts)
 
     base_bg = computed[:background] || {60, 60, 60}
@@ -269,11 +274,15 @@ defmodule Drafter.Widget.Button do
     compact = Keyword.get(opts, :compact, false)
     raw_classes = Keyword.get(opts, :class, [])
     raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+
+    classes =
+      Enum.map(raw_classes, fn
+        c when is_binary(c) -> String.to_atom(c)
+        c when is_atom(c) -> c
+      end)
+
     on_click = if disabled, do: nil, else: Callback.wrap_0(Keyword.get(opts, :on_click))
+
     %{
       text: text,
       button_type: Keyword.get(opts, :variant, Keyword.get(opts, :type, :default)),

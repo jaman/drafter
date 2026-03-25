@@ -622,12 +622,33 @@ defmodule Drafter.WidgetHierarchy do
   end
 
   defp try_arrow_navigation(hierarchy, event, direction) do
-    focusable_widgets = get_focusable_widgets(hierarchy)
+    case try_dispatch_arrow_to_widget(hierarchy, event) do
+      {:handled, result} ->
+        result
 
-    if length(focusable_widgets) <= 1 do
-      dispatch_to_focused(hierarchy, event)
+      :not_handled ->
+        focusable_widgets = get_focusable_widgets(hierarchy)
+
+        if length(focusable_widgets) <= 1 do
+          dispatch_to_focused(hierarchy, event)
+        else
+          arrow_navigate_with_focus(hierarchy, event, direction, focusable_widgets)
+        end
+    end
+  end
+
+  defp try_dispatch_arrow_to_widget(hierarchy, event) do
+    with widget_id when not is_nil(widget_id) <- hierarchy.focused_widget,
+         %{} = widget_info <- Map.get(hierarchy.widgets, widget_id) do
+      case dispatch_widget_event(hierarchy, widget_id, widget_info, event) do
+        {new_hierarchy, []} when new_hierarchy.widgets == hierarchy.widgets ->
+          :not_handled
+
+        result ->
+          {:handled, result}
+      end
     else
-      arrow_navigate_with_focus(hierarchy, event, direction, focusable_widgets)
+      _ -> :not_handled
     end
   end
 

@@ -63,7 +63,7 @@ defmodule Drafter.Widget.Tree do
   """
 
   use Drafter.Widget,
-    focusable: true
+    traits: [:focusable]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.ThemeManager

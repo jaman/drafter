@@ -43,8 +43,8 @@ defmodule Drafter.Widget.OptionList do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard, :press, :mouse_up, :scroll],
-    focusable: true
+    traits: [:focusable],
+    handles: [:keyboard, :press, :mouse_up, :scroll]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
@@ -316,7 +316,7 @@ defmodule Drafter.Widget.OptionList do
   defp action_cursor_up(state) do
     case find_previous_enabled(state.options, state.highlighted_index) do
       nil ->
-        {:noreply, state}
+        {:bubble, state}
 
       new_index ->
         change_selection(state, new_index, false)
@@ -326,7 +326,7 @@ defmodule Drafter.Widget.OptionList do
   defp action_cursor_down(state) do
     case find_next_enabled(state.options, state.highlighted_index) do
       nil ->
-        {:noreply, state}
+        {:bubble, state}
 
       new_index ->
         change_selection(state, new_index, false)

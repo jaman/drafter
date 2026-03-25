@@ -3,6 +3,7 @@ defmodule Drafter.WidgetServer do
 
   use GenServer
 
+  alias Drafter.Widget.Trait.Pipeline
   alias Drafter.WidgetStripCache
 
   defstruct [
@@ -265,9 +266,26 @@ defmodule Drafter.WidgetServer do
   end
 
   defp render_and_push(server_state) do
-    strips = server_state.module.render(server_state.state, server_state.rect)
-    WidgetStripCache.put(server_state.id, server_state.rect, strips)
+    trait_modules = get_trait_modules(server_state.module)
+
+    {adjusted_state, adjusted_rect} =
+      Pipeline.apply_pre_render(trait_modules, server_state.state, server_state.rect)
+
+    strips = server_state.module.render(adjusted_state, adjusted_rect)
+
+    final_strips =
+      Pipeline.apply_post_render(trait_modules, strips, adjusted_state, server_state.rect)
+
+    WidgetStripCache.put(server_state.id, server_state.rect, final_strips)
     notify_render_needed(server_state.id)
+  end
+
+  defp get_trait_modules(module) do
+    if function_exported?(module, :__widget_traits__, 0) do
+      module.__widget_traits__()
+    else
+      []
+    end
   end
 
   defp notify_render_needed(widget_id) do

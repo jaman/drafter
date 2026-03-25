@@ -93,10 +93,10 @@ defmodule Drafter.Widget.RadioSetTest do
       assert new_state.highlighted_index == 1
     end
 
-    test "up does not go below 0" do
+    test "up bubbles at index 0" do
       state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}]})
       state = %{state | highlighted_index: 0}
-      assert {:ok, new_state} = RadioSet.handle_event({:key, :up}, state)
+      assert {:bubble, new_state} = RadioSet.handle_event({:key, :up}, state)
       assert new_state.highlighted_index == 0
     end
 
@@ -107,10 +107,10 @@ defmodule Drafter.Widget.RadioSetTest do
       assert new_state.highlighted_index == 1
     end
 
-    test "down does not exceed last option index" do
+    test "down bubbles at last option index" do
       state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}]})
       state = %{state | highlighted_index: 1}
-      assert {:ok, new_state} = RadioSet.handle_event({:key, :down}, state)
+      assert {:bubble, new_state} = RadioSet.handle_event({:key, :down}, state)
       assert new_state.highlighted_index == 1
     end
 

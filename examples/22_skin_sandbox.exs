@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
 
 defmodule SkinSandbox do
   use Drafter.App
@@ -120,7 +120,7 @@ defmodule SkinSandbox do
             ],
             width: 24
           ),
-          vertical(
+          scrollable(
             [
               label("Monthly Sales — vertical bars:", style: %{bold: true}),
               chart(

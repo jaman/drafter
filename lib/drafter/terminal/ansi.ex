@@ -306,11 +306,11 @@ defmodule Drafter.Terminal.ANSI do
 
   @doc "Enable mouse reporting"
   @spec enable_mouse() :: String.t()
-  def enable_mouse, do: "\e[?1002h\e[?1006h"
+  def enable_mouse, do: "\e[?1003h\e[?1006h"
 
   @doc "Disable mouse reporting"
   @spec disable_mouse() :: String.t()
-  def disable_mouse, do: "\e[?1006l\e[?1002l"
+  def disable_mouse, do: "\e[?1006l\e[?1003l"
 
   @doc "Enter alternative screen buffer"
   @spec enter_alt_screen() :: String.t()

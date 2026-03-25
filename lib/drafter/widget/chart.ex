@@ -99,9 +99,9 @@ defmodule Drafter.Widget.Chart do
   """
 
   use Drafter.Widget,
+    traits: [:focusable],
     handles: [:keyboard, :mouse_up, :drag],
-    scroll: [direction: :horizontal, step: 5],
-    focusable: true
+    scroll: [direction: :horizontal, step: 5]
 
   import Bitwise
 

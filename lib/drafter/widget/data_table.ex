@@ -88,8 +88,8 @@ defmodule Drafter.Widget.DataTable do
   """
 
   use Drafter.Widget,
-    handles: [:scroll, :keyboard, :mouse_up, :drag, :hover],
-    focusable: true
+    traits: [:focusable],
+    handles: [:scroll, :keyboard, :mouse_up, :drag, :hover]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.ThemeManager
