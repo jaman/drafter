@@ -277,10 +277,32 @@ defmodule Drafter.Runtime.Renderer do
   defp build_widget_layer(hierarchy, widget_id, hidden, z_base) do
     with false <- MapSet.member?(hidden, widget_id),
          widget_info when not is_nil(widget_info) <- Map.get(hierarchy.widgets, widget_id),
-         widget_rect when not is_nil(widget_rect) <- Map.get(hierarchy.widget_rects, widget_id) do
+         widget_rect when not is_nil(widget_rect) <- Map.get(hierarchy.widget_rects, widget_id),
+         false <- offscreen?(hierarchy, widget_id, widget_rect) do
       render_widget_layer(hierarchy, widget_id, widget_info, widget_rect, z_base)
     else
       _ -> []
+    end
+  end
+
+  defp offscreen?(hierarchy, widget_id, widget_rect) do
+    case WidgetHierarchy.get_widget_scroll_parent(hierarchy, widget_id) do
+      nil ->
+        false
+
+      scroll_parent_id ->
+        scroll_info = WidgetHierarchy.get_scroll_container_info(hierarchy, scroll_parent_id)
+        scroll_state = WidgetHierarchy.get_widget_state(hierarchy, scroll_parent_id)
+
+        if scroll_info && scroll_state do
+          viewport = scroll_info.viewport_rect
+          scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
+          viewport_top = viewport.y + scroll_y
+          viewport_bottom = viewport_top + viewport.height
+          widget_rect.y + widget_rect.height <= viewport_top or widget_rect.y >= viewport_bottom
+        else
+          false
+        end
     end
   end
 
