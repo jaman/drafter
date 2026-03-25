@@ -85,6 +85,8 @@ defmodule Drafter.Widget.Chart do
     * `:orientation` — `:vertical` (default) or `:horizontal`; applies to all bar chart types
     * `:bar_labels` — list of strings labelling each bar or group; shown when `show_labels: true`
     * `:show_values` — show the numeric value beside each bar: `true` / `false` (default)
+    * `:fill_opacity` — brightness of the area fill body relative to the series color,
+      `0.0` (invisible) to `1.0` (same as edge). Default `0.6`.
     * `:animated` — animate new data points: `true` / `false` (default)
     * `:animation_speed` — milliseconds per animation frame (default `100`)
     * `:style` — map of style properties
@@ -177,6 +179,7 @@ defmodule Drafter.Widget.Chart do
     :animation_speed,
     :max_data_points,
     :area_fill,
+    :fill_opacity,
     :orientation,
     :bar_labels,
     :show_values,
@@ -235,6 +238,7 @@ defmodule Drafter.Widget.Chart do
       max_data_points: max_data_points,
       bar_gap: Map.get(props, :bar_gap, 0),
       area_fill: Map.get(props, :area_fill, :below),
+      fill_opacity: Map.get(props, :fill_opacity, 0.6),
       orientation: Map.get(props, :orientation, :vertical),
       bar_labels: Map.get(props, :bar_labels, []),
       show_values: Map.get(props, :show_values, false),
@@ -330,6 +334,7 @@ defmodule Drafter.Widget.Chart do
       max_data_points: Keyword.get(opts, :max_data_points),
       bar_gap: Keyword.get(opts, :bar_gap, 0),
       area_fill: Keyword.get(opts, :area_fill, :below),
+      fill_opacity: Keyword.get(opts, :fill_opacity, 0.6),
       orientation: Keyword.get(opts, :orientation, :vertical),
       bar_labels: Keyword.get(opts, :bar_labels, []),
       show_values: Keyword.get(opts, :show_values, false),
@@ -1198,6 +1203,7 @@ defmodule Drafter.Widget.Chart do
     base = %{
       stacked: stacked, colors: colors, num_series: num_series,
       pixel_h: pixel_h, pixel_w: pixel_w, char_w: width,
+      fill_opacity: state.fill_opacity || 0.6,
       grid: :atomics.new(width * height, signed: false),
       color_grid: Enum.map(0..(width * height - 1), fn _ -> :atomics.new(3, signed: true) end)
     }
@@ -1357,18 +1363,13 @@ defmodule Drafter.Widget.Chart do
   end
 
   defp paint_column_span(lo_py, hi_py, top_py, local_x, char_col, weighted_color, ctx) do
-    span = max(1, hi_py - lo_py)
+    opacity = Map.get(ctx, :fill_opacity, 0.6)
+    {fr, fg, fb} = weighted_color
+    fill_color = {round(fr * opacity), round(fg * opacity), round(fb * opacity)}
 
     Enum.each(lo_py..hi_py, fn py ->
-      depth_ratio = if span > 1, do: (py - lo_py) / span, else: 0.0
-      fill_color = gradient_fill(weighted_color, depth_ratio)
       paint_braille_pixel(py, local_x, char_col, top_py, weighted_color, fill_color, ctx)
     end)
-  end
-
-  defp gradient_fill({r, g, b}, depth_ratio) do
-    brightness = 0.9 - depth_ratio * 0.3
-    {round(r * brightness), round(g * brightness), round(b * brightness)}
   end
 
   defp extract_layer({bottom, top, weight}), do: {bottom, top, weight}
