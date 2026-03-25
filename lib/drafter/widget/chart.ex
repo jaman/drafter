@@ -1364,7 +1364,9 @@ defmodule Drafter.Widget.Chart do
   end
 
   defp paint_column_span(lo_py, hi_py, top_py, local_x, char_col, weighted_color, ctx) do
-    opacity = Map.get(ctx, :fill_opacity, 0.6)
+    base_opacity = Map.get(ctx, :fill_opacity, 0.6)
+    span = hi_py - lo_py
+    opacity = scale_opacity_by_span(base_opacity, span)
     {fr, fg, fb} = weighted_color
     fill_color = {round(fr * opacity), round(fg * opacity), round(fb * opacity)}
 
@@ -1375,6 +1377,10 @@ defmodule Drafter.Widget.Chart do
 
     paint_braille_dot(top_py, local_x, char_col, weighted_color, ctx)
   end
+
+  defp scale_opacity_by_span(_base, span) when span <= 4, do: 1.0
+  defp scale_opacity_by_span(base, span) when span <= 12, do: min(1.0, base + (1.0 - base) * (1 - span / 12))
+  defp scale_opacity_by_span(base, _span), do: base
 
   defp extract_layer({bottom, top, weight}), do: {bottom, top, weight}
   defp extract_layer({bottom, top}), do: {bottom, top, 1.0}
