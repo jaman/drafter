@@ -82,6 +82,7 @@ defmodule Drafter.LayerCompositor do
   @container_modules [
     Drafter.Widget.Box,
     Drafter.Widget.Card,
+    Drafter.Widget.Collapsible,
     Drafter.Widget.ScrollableContainer
   ]
 
@@ -226,7 +227,14 @@ defmodule Drafter.LayerCompositor do
     in_layer_region = col >= layer_x and col < layer_end
 
     {grapheme, style, width, new_canvas, new_layer} =
-      resolve_column(in_layer_region, col, layer_x, canvas_graphemes, layer_graphemes, default_style)
+      resolve_column(
+        in_layer_region,
+        col,
+        layer_x,
+        canvas_graphemes,
+        layer_graphemes,
+        default_style
+      )
 
     new_acc = [{col, grapheme, style} | acc]
     next_col = col + width
