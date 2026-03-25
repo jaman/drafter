@@ -1356,41 +1356,45 @@ defmodule Drafter.Widget.Chart do
 
     Enum.each(0..(ctx.num_series - 1), fn si ->
       {bottom, top, weight} = extract_layer(Enum.at(col_layers, si))
-      series_color = Enum.at(ctx.colors, rem(si, length(ctx.colors)))
-      weighted_color = apply_weight_to_color(series_color, weight)
-      {lo_py, hi_py, top_py} = compute_pixel_range(bottom, top, ctx)
-      paint_column_span(lo_py, hi_py, top_py, local_x, char_col, weighted_color, ctx)
+
+      if bottom != top do
+        series_color = Enum.at(ctx.colors, rem(si, length(ctx.colors)))
+        color = weight_modulate(series_color, weight)
+        {lo_py, hi_py, top_py} = compute_pixel_range(bottom, top, ctx)
+        paint_column_span(lo_py, hi_py, top_py, local_x, char_col, color, ctx)
+      end
     end)
   end
 
-  defp paint_column_span(lo_py, hi_py, top_py, local_x, char_col, weighted_color, ctx) do
-    base_opacity = Map.get(ctx, :fill_opacity, 0.6)
+  defp paint_column_span(lo_py, hi_py, top_py, local_x, char_col, color, ctx) do
+    floor = Map.get(ctx, :fill_opacity, 0.6)
     span = hi_py - lo_py
-    opacity = scale_opacity_by_span(base_opacity, span)
-    {fr, fg, fb} = weighted_color
-    fill_color = {round(fr * opacity), round(fg * opacity), round(fb * opacity)}
 
-    fill_range = Enum.reject(lo_py..hi_py, &(&1 == top_py))
-    Enum.each(fill_range, fn py ->
-      paint_braille_dot(py, local_x, char_col, fill_color, ctx)
+    Enum.each(lo_py..hi_py, fn py ->
+      dot_color = dim_by_depth(color, py, top_py, span, floor)
+      paint_braille_dot(py, local_x, char_col, dot_color, ctx)
     end)
-
-    paint_braille_dot(top_py, local_x, char_col, weighted_color, ctx)
   end
 
-  defp scale_opacity_by_span(_base, span) when span <= 4, do: 1.0
-  defp scale_opacity_by_span(base, span) when span <= 12, do: min(1.0, base + (1.0 - base) * (1 - span / 12))
-  defp scale_opacity_by_span(base, _span), do: base
+  defp dim_by_depth(color, py, top_py, _span, _floor) when py == top_py, do: color
+
+  defp dim_by_depth({r, g, b}, py, top_py, span, floor) when span > 0 do
+    depth = abs(py - top_py) / span
+    brightness = 1.0 - depth * (1.0 - max(0.5, floor))
+    {round(r * brightness), round(g * brightness), round(b * brightness)}
+  end
+
+  defp dim_by_depth(color, _py, _top_py, _span, _floor), do: color
+
+  defp weight_modulate(color, 1.0), do: color
+
+  defp weight_modulate({r, g, b}, weight) do
+    w = min(1.0, max(0.5, weight))
+    {round(r * w), round(g * w), round(b * w)}
+  end
 
   defp extract_layer({bottom, top, weight}), do: {bottom, top, weight}
   defp extract_layer({bottom, top}), do: {bottom, top, 1.0}
-
-  defp apply_weight_to_color(color, 1.0), do: color
-
-  defp apply_weight_to_color({r, g, b}, weight) do
-    w = min(1.0, max(0.1, weight))
-    {round(r * w), round(g * w), round(b * w)}
-  end
 
   defp compute_pixel_range(bottom, top, %{mode: :split} = ctx) do
     bottom_py = value_to_pixel_split(bottom, ctx)

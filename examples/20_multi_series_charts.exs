@@ -91,6 +91,9 @@ defmodule MultiSeriesCharts do
         {val, w}
       end)
 
+    plain_area = Enum.map(0..59, fn i -> :math.sin(i * 0.15 + p) * 30 + 40 end)
+    plain_area_b = Enum.map(0..59, fn i -> :math.cos(i * 0.12 + p * 0.8) * 20 + 25 end)
+
     vertical([
       header("Multi-Series & Extended Bar Charts  (scroll, ← → to pan)", show_clock: true),
       scrollable(
@@ -192,13 +195,38 @@ defmodule MultiSeriesCharts do
             _render_timestamp: state.timestamp
           ),
           gap(),
-          section("Weighted Braille Area: Color intensity shows data weight"),
-          chart([weighted_area, weighted_area_b],
-            id: :warea,
-            chart_type: :braille_area,
-            height: 8,
-            colors: [{80, 200, 100}, {100, 140, 255}],
-            _render_timestamp: state.timestamp
+          section("Braille Area Tiers: Flat | Gradient | Weighted + Gradient"),
+          horizontal(
+            [
+              chart([plain_area, plain_area_b],
+                id: :warea_flat,
+                chart_type: :braille_area,
+                height: 8,
+                fill_opacity: 1.0,
+                colors: [{80, 200, 100}, {100, 140, 255}],
+                _render_timestamp: state.timestamp,
+                flex: 1
+              ),
+              chart([plain_area, plain_area_b],
+                id: :warea_mid,
+                chart_type: :braille_area,
+                height: 8,
+                fill_opacity: 0.6,
+                colors: [{80, 200, 100}, {100, 140, 255}],
+                _render_timestamp: state.timestamp,
+                flex: 1
+              ),
+              chart([weighted_area, weighted_area_b],
+                id: :warea_top,
+                chart_type: :braille_area,
+                height: 8,
+                fill_opacity: 0.6,
+                colors: [{80, 200, 100}, {100, 140, 255}],
+                _render_timestamp: state.timestamp,
+                flex: 1
+              )
+            ],
+            gap: 1
           ),
           label("")
         ],
