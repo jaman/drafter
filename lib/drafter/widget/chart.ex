@@ -111,6 +111,7 @@ defmodule Drafter.Widget.Chart do
   alias Drafter.{CharacterSet, Visualization}
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.Visualization.LTTB
 
   @type chart_type ::
           :line
@@ -605,7 +606,7 @@ defmodule Drafter.Widget.Chart do
     scrolled_series =
       Enum.map(data, fn series ->
         {_start, slice} = Drafter.ScrollMath.end_anchored_slice(series, scroll_offset, viewport_width)
-        slice
+        LTTB.downsample_series(slice, viewport_width)
       end)
 
     render_multi_series(scrolled_series, width, height,
@@ -620,9 +621,10 @@ defmodule Drafter.Widget.Chart do
     scroll_offset = state._internal.scroll_offset || 0
     viewport_width = width * 2
     {_start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, viewport_width)
+    downsampled = LTTB.downsample_series(viewport_data, viewport_width)
     range = state.max_value - state.min_value
     pixel_height = height * 4
-    normalized = normalize_data(viewport_data, state.min_value, range, pixel_height)
+    normalized = normalize_data(downsampled, state.min_value, range, pixel_height)
     shifted = apply_animation_shift(normalized, animation_offset)
     points = Enum.with_index(shifted) |> Enum.map(fn {y, x} -> {x, y} end)
     lines = bresenham_lines(points)
@@ -1022,7 +1024,7 @@ defmodule Drafter.Widget.Chart do
   end
 
   defp render_scatter_single_series(state, data, width, height, bg, fg) do
-    points = normalize_scatter_points(data)
+    points = normalize_scatter_points(data) |> downsample_scatter_points(width * 2)
     range = state.max_value - state.min_value
     pixel_height = height * 4
     scroll_offset = state._internal.scroll_offset || 0
@@ -1078,7 +1080,7 @@ defmodule Drafter.Widget.Chart do
       |> Enum.with_index()
       |> Enum.flat_map(fn {series, idx} ->
         color = Enum.at(colors, idx, hd(colors))
-        points = normalize_scatter_points(series)
+        points = normalize_scatter_points(series) |> downsample_scatter_points(viewport_width)
         max_x = Enum.map(points, fn [x | _] -> x end) |> Enum.max(fn -> 0 end)
         end_x = max_x - scroll_offset
         start_x = max(0, end_x - viewport_width)
@@ -1188,7 +1190,8 @@ defmodule Drafter.Widget.Chart do
     pixel_h = height * 4
     pixel_w = width * 2
 
-    stacked = slice_and_stack(series, pixel_w, state._internal.scroll_offset || 0)
+    downsampled_series = Enum.map(series, &downsample_weighted_series(&1, pixel_w))
+    stacked = slice_and_stack(downsampled_series, pixel_w, state._internal.scroll_offset || 0)
 
     range_result = compute_stack_range(stacked, state.zero_center)
 
@@ -1364,7 +1367,7 @@ defmodule Drafter.Widget.Chart do
   end
 
   defp gradient_fill({r, g, b}, depth_ratio) do
-    brightness = 0.85 - depth_ratio * 0.45
+    brightness = 0.9 - depth_ratio * 0.3
     {round(r * brightness), round(g * brightness), round(b * brightness)}
   end
 
@@ -2203,5 +2206,32 @@ defmodule Drafter.Widget.Chart do
 
   defp update_internal(state, updates) do
     %{state | _internal: Enum.into(updates, state._internal)}
+  end
+
+  defp downsample_scatter_points(points, target) do
+    xy_points = Enum.map(points, fn [x, y | _] -> {x, y} end)
+    downsampled = LTTB.downsample(xy_points, target)
+    downsampled_set = MapSet.new(downsampled)
+
+    Enum.filter(points, fn [x, y | _] -> MapSet.member?(downsampled_set, {x, y}) end)
+  end
+
+  defp downsample_weighted_series(series, target) when length(series) <= target, do: series
+
+  defp downsample_weighted_series(series, target) do
+    values =
+      Enum.map(series, fn
+        {val, _weight} when is_number(val) -> val
+        val when is_number(val) -> val
+      end)
+
+    points = values |> Enum.with_index() |> Enum.map(fn {y, x} -> {x, y} end)
+    downsampled = LTTB.downsample(points, target)
+    indices = MapSet.new(Enum.map(downsampled, fn {x, _y} -> round(x) end))
+
+    series
+    |> Enum.with_index()
+    |> Enum.filter(fn {_elem, idx} -> MapSet.member?(indices, idx) end)
+    |> Enum.map(fn {elem, _idx} -> elem end)
   end
 end
