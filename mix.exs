@@ -4,7 +4,7 @@ defmodule Drafter.MixProject do
   def project do
     [
       app: :drafter,
-      version: "0.2.5",
+      version: "0.2.6",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:elixir_make | Mix.compilers()],
@@ -14,7 +14,7 @@ defmodule Drafter.MixProject do
       deps: deps(),
       description: "An Elixir Terminal User Interface framework",
       package: package(),
-      consolidate_protocols: true,
+      consolsdate_protocols: true,
       source_url: "https://github.com/jaman/drafter",
       homepage_url: "https://github.com/jaman/drafter",
       docs: [
