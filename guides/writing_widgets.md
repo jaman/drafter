@@ -10,6 +10,7 @@ drop it into their own apps.
 - [Minimal widget](#minimal-widget)
 - [Rendering](#rendering)
 - [Event handling](#event-handling)
+- [Composable traits](#composable-traits)
 - [Declaring capabilities](#declaring-capabilities)
 - [The component DSL bridge](#the-component-dsl-bridge)
 - [Packaging a widget library](#packaging-a-widget-library)
@@ -109,7 +110,13 @@ your widget respects the active theme automatically.
 
 ## Event handling
 
-### Option A — declarative `handles:` (recommended)
+### Option A — composable traits (recommended)
+
+See [Composable traits](#composable-traits) below for the preferred
+approach. Traits handle common capabilities like focus management,
+scrolling, and selection automatically.
+
+### Option B — declarative `handles:`
 
 Declare which event types your widget cares about in `use Drafter.Widget`.
 Drafter routes each event to the matching callback automatically.
@@ -149,7 +156,7 @@ Available `handles:` values and their callbacks:
 Setting `focusable: true` (or including `:keyboard` in `handles:`) adds the
 widget to the tab-order and geometric arrow-key navigation.
 
-### Option B — low-level `handle_event/2`
+### Option C — low-level `handle_event/2`
 
 Override `handle_event/2` directly to intercept the raw event term:
 
@@ -191,6 +198,153 @@ The app receives it in `handle_event/3`:
 def handle_event(:item_selected, item, state) do
   {:ok, %{state | selection: item}}
 end
+```
+
+---
+
+## Composable traits
+
+Traits are reusable capabilities that you compose onto a widget. Each trait
+manages its own state fields, handles specific events, and can decorate
+rendering via pre/post render hooks. This is the preferred way to build
+interactive widgets.
+
+### Basic usage
+
+```elixir
+defmodule MyList do
+  use Drafter.Widget,
+    traits: [:focusable],
+    handles: [:keyboard]
+
+  defstruct [:items, :focused, :cursor]
+
+  @impl Drafter.Widget
+  def mount(props) do
+    %__MODULE__{
+      items: Map.get(props, :items, []),
+      focused: false,
+      cursor: 0
+    }
+  end
+
+  @impl Drafter.Widget
+  def handle_key(:up, state), do: {:ok, %{state | cursor: max(0, state.cursor - 1)}}
+  def handle_key(:down, state), do: {:ok, %{state | cursor: state.cursor + 1}}
+  def handle_key(_key, state), do: {:bubble, state}
+end
+```
+
+The `:focusable` trait injects `focused: false` into default state and
+handles `{:focus}` / `{:blur}` events automatically. The `handles:`
+option declares additional event types the widget processes itself.
+
+### Available built-in traits
+
+| Trait | Injected state | Events handled |
+|-------|---------------|----------------|
+| `:focusable` | `focused` | focus, blur |
+| `:scrollable` | `_scroll_offset_y`, `_scroll_offset_x`, `_viewport_height`, `_content_height` | scroll, keyboard (arrows, page up/down, home/end) |
+| `:selectable` | `_cursor_index`, `_selected_indices`, `_selection_mode` | keyboard (arrows, space) |
+| `:editable` | `_text`, `_cursor_position`, `_selection_start`, `_selection_end` | keyboard, char |
+| `:collapsible` | `_expanded` | keyboard (enter/space), click |
+| `:resizable` | `_resize_dragging`, `_resize_edge`, `_min_width`, `_min_height` | drag, press, mouse_up, hover |
+| `:draggable` | `_drag_active`, `_drag_offset_x`, `_drag_offset_y` | press, drag, mouse_up |
+| `:animatable` | `_render_timestamp` | (passive — updated each render cycle) |
+
+### Combining traits
+
+Traits compose naturally. Each trait's event handler runs in declaration
+order. If a trait handles an event, the next trait still gets a chance
+unless the event is explicitly consumed.
+
+```elixir
+defmodule ScrollableList do
+  use Drafter.Widget,
+    traits: [:focusable, :scrollable, :selectable],
+    scroll: [direction: :vertical, step: 1]
+end
+```
+
+### Trait event pipeline
+
+Events pass through each trait in order. Each trait returns one of:
+
+| Return | Meaning |
+|--------|---------|
+| `{:ok, new_trait_state}` | Handled; update state, continue pipeline |
+| `{:pass, trait_state}` | Not handled; pass to next trait |
+| `{:consume, new_trait_state}` | Handled; stop pipeline, skip widget handler |
+
+After all traits process, the event reaches the widget's own handler
+(unless consumed).
+
+### Trait dependencies
+
+Some traits depend on others. Dependencies are resolved automatically:
+
+- `:selectable` depends on `:focusable`
+- `:editable` depends on `:focusable`
+- `:collapsible` depends on `:focusable`
+- `:resizable` depends on `:focusable`
+- `:draggable` depends on `:focusable`
+
+If you declare `traits: [:selectable]`, the `:focusable` trait is
+added automatically.
+
+### Pre/post render hooks
+
+Traits can modify the render rect before your `render/2` runs
+(via `pre_render/3`) and decorate the output strips after (via
+`post_render/4`). For example, the `:scrollable` trait reduces
+rect width by one column for the scrollbar in `pre_render`, then
+clips content and appends the scrollbar in `post_render`.
+
+### Custom traits
+
+Define a custom trait by implementing the `Drafter.Widget.Trait`
+behaviour:
+
+```elixir
+defmodule MyApp.Trait.Highlightable do
+  @behaviour Drafter.Widget.Trait
+
+  defstruct __spark_metadata__: nil
+
+  @impl true
+  def name, do: :highlightable
+
+  @impl true
+  def default_state, do: %{_highlighted: false}
+
+  @impl true
+  def dependencies, do: [:focusable]
+
+  @impl true
+  def handles, do: [:keyboard]
+
+  @impl true
+  def render_affecting_fields, do: [:_highlighted]
+
+  @impl true
+  def layout_static?, do: true
+
+  @impl true
+  def handle_event({:key, :h}, trait_state, _widget_state) do
+    {:ok, %{trait_state | _highlighted: !trait_state._highlighted}}
+  end
+
+  def handle_event(_event, trait_state, _widget_state) do
+    {:pass, trait_state}
+  end
+end
+```
+
+Reference custom traits by full module name:
+
+```elixir
+use Drafter.Widget,
+  traits: [:focusable, MyApp.Trait.Highlightable]
 ```
 
 ---

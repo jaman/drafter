@@ -4,6 +4,22 @@ defmodule Drafter.App do
 
   This module provides a Phoenix LiveView-inspired API for creating TUI apps
   with automatic theme management, layout, and event handling.
+
+  ## Options
+
+  Options can be passed to `use Drafter.App`:
+
+    * `:css_path` - path to a CSS file for widget styling
+    * `:styles` - map of inline style overrides
+    * `:mouse_hover` - enable mouse hover tracking (default: `true`).
+      Set to `false` to reduce mouse event volume when hover effects
+      are not needed.
+
+  ## Example
+
+      defmodule MyApp do
+        use Drafter.App, mouse_hover: false
+      end
   """
 
   alias Drafter.{Event, Widget}
