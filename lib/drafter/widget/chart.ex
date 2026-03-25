@@ -1348,14 +1348,24 @@ defmodule Drafter.Widget.Chart do
       {bottom, top, weight} = extract_layer(Enum.at(col_layers, si))
       series_color = Enum.at(ctx.colors, rem(si, length(ctx.colors)))
       weighted_color = apply_weight_to_color(series_color, weight)
-      dim_color = Drafter.Style.mix({0, 0, 0}, weighted_color, 0.6)
-
       {lo_py, hi_py, top_py} = compute_pixel_range(bottom, top, ctx)
-
-      Enum.each(lo_py..hi_py, fn py ->
-        paint_braille_pixel(py, local_x, char_col, top_py, weighted_color, dim_color, ctx)
-      end)
+      paint_column_span(lo_py, hi_py, top_py, local_x, char_col, weighted_color, ctx)
     end)
+  end
+
+  defp paint_column_span(lo_py, hi_py, top_py, local_x, char_col, weighted_color, ctx) do
+    span = max(1, hi_py - lo_py)
+
+    Enum.each(lo_py..hi_py, fn py ->
+      depth_ratio = if span > 1, do: (py - lo_py) / span, else: 0.0
+      fill_color = gradient_fill(weighted_color, depth_ratio)
+      paint_braille_pixel(py, local_x, char_col, top_py, weighted_color, fill_color, ctx)
+    end)
+  end
+
+  defp gradient_fill({r, g, b}, depth_ratio) do
+    brightness = 0.85 - depth_ratio * 0.45
+    {round(r * brightness), round(g * brightness), round(b * brightness)}
   end
 
   defp extract_layer({bottom, top, weight}), do: {bottom, top, weight}
