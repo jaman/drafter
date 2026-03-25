@@ -8,7 +8,10 @@ defmodule Drafter.Widget.Chart do
   rendering provides 2×2 pixel resolution per cell (coarser but larger dots). Bar
   charts use half-block characters for 2× vertical resolution.
 
-  Scatter data points accept `[x, y]` lists or `{x, y}` tuples.
+  Scatter data points accept `[x, y]` lists, `{x, y}` tuples, or weighted
+  variants `[x, y, weight]` / `{x, y, weight}` where weight is a float
+  between 0.0 and 1.0. Higher weights produce denser braille dot clusters
+  and brighter colors, giving visual density feedback for clustered data.
   Candlestick candles accept `[open, high, low, close]` lists or maps with
   `:open`, `:high`, `:low`, `:close` keys.
 
@@ -553,15 +556,30 @@ defmodule Drafter.Widget.Chart do
 
   defp extract_values([first | _] = data) when is_number(first), do: data
 
+  defp extract_values([{val, _weight} | _] = data) when is_number(val) do
+    Enum.map(data, fn {v, _w} -> v end)
+  end
+
   defp extract_values([first | _] = data) when is_list(first) do
     case first do
-      [nested | _] when is_number(nested) -> Enum.flat_map(data, & &1)
-      [nested | _] when is_list(nested) -> data |> Enum.flat_map(& &1) |> Enum.flat_map(& &1)
-      _ -> []
+      [{v, _w} | _] when is_number(v) ->
+        data |> Enum.flat_map(fn series -> Enum.map(series, &extract_weighted_value/1) end)
+
+      [nested | _] when is_number(nested) ->
+        Enum.flat_map(data, & &1)
+
+      [nested | _] when is_list(nested) ->
+        data |> Enum.flat_map(& &1) |> Enum.flat_map(& &1)
+
+      _ ->
+        []
     end
   end
 
   defp extract_values(_), do: []
+
+  defp extract_weighted_value({v, _w}), do: v
+  defp extract_weighted_value(v) when is_number(v), do: v
 
   defp render_line_chart(state, width, height, bg, fg, animation_offset) do
     data = state.data
@@ -1009,21 +1027,35 @@ defmodule Drafter.Widget.Chart do
     pixel_height = height * 4
     scroll_offset = state._internal.scroll_offset || 0
     viewport_width = width * 2
-    max_x = Enum.map(points, fn [x, _] -> x end) |> Enum.max(fn -> 0 end)
+    max_x = Enum.map(points, fn [x | _] -> x end) |> Enum.max(fn -> 0 end)
     end_x = max_x - scroll_offset
     start_x = max(0, end_x - viewport_width)
 
-    pixels =
-      points
-      |> Enum.filter(fn [x, _y] -> x >= start_x and x < end_x end)
-      |> Enum.map(fn [x, y] ->
-        pixel_y = round((y - state.min_value) / range * pixel_height)
-        {x - start_x, pixel_height - pixel_y - 1}
-      end)
+    has_weights = Enum.any?(points, fn [_, _, w] -> w != 1.0 end)
 
-    case state.pixel_style do
-      :quadrant -> render_quadrant_pixels(pixels, width, height, bg, fg)
-      _ -> render_braille_pixels(pixels, width, height, bg, fg)
+    if has_weights do
+      colored_pixels =
+        points
+        |> Enum.filter(fn [x | _] -> x >= start_x and x < end_x end)
+        |> Enum.flat_map(fn [x, y, w] ->
+          py = round((y - state.min_value) / range * pixel_height)
+          expand_weighted_point(x - start_x, pixel_height - py - 1, w, weight_color(fg, bg, w))
+        end)
+
+      render_braille_pixels_colored(colored_pixels, width, height, bg)
+    else
+      pixels =
+        points
+        |> Enum.filter(fn [x | _] -> x >= start_x and x < end_x end)
+        |> Enum.map(fn [x, y, _w] ->
+          pixel_y = round((y - state.min_value) / range * pixel_height)
+          {x - start_x, pixel_height - pixel_y - 1}
+        end)
+
+      case state.pixel_style do
+        :quadrant -> render_quadrant_pixels(pixels, width, height, bg, fg)
+        _ -> render_braille_pixels(pixels, width, height, bg, fg)
+      end
     end
   end
 
@@ -1047,15 +1079,15 @@ defmodule Drafter.Widget.Chart do
       |> Enum.flat_map(fn {series, idx} ->
         color = Enum.at(colors, idx, hd(colors))
         points = normalize_scatter_points(series)
-        max_x = Enum.map(points, fn [x, _] -> x end) |> Enum.max(fn -> 0 end)
+        max_x = Enum.map(points, fn [x | _] -> x end) |> Enum.max(fn -> 0 end)
         end_x = max_x - scroll_offset
         start_x = max(0, end_x - viewport_width)
 
         points
-        |> Enum.filter(fn [x, _] -> x >= start_x and x < end_x end)
-        |> Enum.map(fn [x, y] ->
+        |> Enum.filter(fn [x | _] -> x >= start_x and x < end_x end)
+        |> Enum.flat_map(fn [x, y, w] ->
           py = round((y - min_val) / range * pixel_height)
-          {x - start_x, pixel_height - py - 1, color}
+          expand_weighted_point(x - start_x, pixel_height - py - 1, w, weight_color(color, bg, w))
         end)
       end)
 
@@ -1067,15 +1099,40 @@ defmodule Drafter.Widget.Chart do
       series == [] ->
         []
 
-      is_list(hd(series)) ->
+      match?([_, _, _], hd(series)) and is_number(hd(hd(series))) ->
         series
 
+      is_list(hd(series)) and length(hd(series)) == 2 ->
+        Enum.map(series, fn [x, y] -> [x, y, 1.0] end)
+
+      match?({_, _, _}, hd(series)) ->
+        Enum.map(series, fn {x, y, w} -> [x, y, w] end)
+
       is_tuple(hd(series)) ->
-        Enum.map(series, fn {x, y} -> [x, y] end)
+        Enum.map(series, fn {x, y} -> [x, y, 1.0] end)
 
       true ->
-        series |> Enum.with_index() |> Enum.map(fn {y, x} -> [x, y] end)
+        series |> Enum.with_index() |> Enum.map(fn {y, x} -> [x, y, 1.0] end)
     end
+  end
+
+  defp expand_weighted_point(px, py, weight, color) when weight >= 0.7 do
+    for dx <- -1..1, dy <- -1..1, abs(dx) + abs(dy) <= 1 do
+      {px + dx, py + dy, color}
+    end
+  end
+
+  defp expand_weighted_point(px, py, weight, color) when weight >= 0.4 do
+    [{px, py, color}, {px, py - 1, color}, {px, py + 1, color}]
+  end
+
+  defp expand_weighted_point(px, py, _weight, color) do
+    [{px, py, color}]
+  end
+
+  defp weight_color({fr, fg, fb}, {br, bg_g, bb}, weight) do
+    w = min(1.0, max(0.0, weight))
+    {round(br + (fr - br) * w), round(bg_g + (fg - bg_g) * w), round(bb + (fb - bb) * w)}
   end
 
   defp colored_braille_segment([], bg), do: Segment.new(braille_char(0), %{bg: bg})
@@ -1115,6 +1172,7 @@ defmodule Drafter.Widget.Chart do
       cond do
         raw == [] -> []
         is_number(hd(raw)) -> [raw]
+        match?({_, _}, hd(raw)) -> [raw]
         true -> raw
       end
 
@@ -1172,19 +1230,30 @@ defmodule Drafter.Widget.Chart do
   end
 
   defp slice_and_stack(series, pixel_w, scroll_offset) do
-    max_len = series |> Enum.map(&length/1) |> Enum.max()
+    normalized = Enum.map(series, &normalize_weighted_series/1)
+    max_len = normalized |> Enum.map(&length/1) |> Enum.max()
     end_idx = max(0, max_len - scroll_offset)
     start_idx = max(0, end_idx - pixel_w)
     visible_count = end_idx - start_idx
 
-    sliced = Enum.map(series, fn s -> Enum.slice(s, start_idx, visible_count) end)
+    sliced = Enum.map(normalized, fn s -> Enum.slice(s, start_idx, visible_count) end)
     build_stacked_columns(sliced, length(series))
+  end
+
+  defp normalize_weighted_series(series) do
+    Enum.map(series, fn
+      {val, weight} when is_number(val) and is_number(weight) -> {val, weight}
+      val when is_number(val) -> {val, 1.0}
+    end)
   end
 
   defp compute_stack_range(stacked, zero_center) do
     all_values =
       Enum.flat_map(stacked, fn col ->
-        Enum.flat_map(col, fn {bottom, top} -> [bottom, top] end)
+        Enum.flat_map(col, fn
+          {bottom, top, _weight} -> [bottom, top]
+          {bottom, top} -> [bottom, top]
+        end)
       end)
 
     case all_values do
@@ -1243,22 +1312,22 @@ defmodule Drafter.Widget.Chart do
 
     for col_idx <- 0..(max_len - 1) do
       Enum.reduce(0..(num_series - 1), {0, 0, []}, fn si, acc ->
-        val = sliced |> Enum.at(si) |> Enum.at(col_idx, 0)
-        stack_value(val, acc)
+        {val, weight} = sliced |> Enum.at(si) |> Enum.at(col_idx, {0, 1.0})
+        stack_value(val, weight, acc)
       end)
       |> elem(2)
       |> Enum.reverse()
     end
   end
 
-  defp stack_value(val, {pos_running, neg_running, acc}) when val >= 0 do
+  defp stack_value(val, weight, {pos_running, neg_running, acc}) when val >= 0 do
     new_top = pos_running + val
-    {new_top, neg_running, [{pos_running, new_top} | acc]}
+    {new_top, neg_running, [{pos_running, new_top, weight} | acc]}
   end
 
-  defp stack_value(val, {pos_running, neg_running, acc}) do
+  defp stack_value(val, weight, {pos_running, neg_running, acc}) do
     new_bottom = neg_running + val
-    {pos_running, new_bottom, [{new_bottom, neg_running} | acc]}
+    {pos_running, new_bottom, [{new_bottom, neg_running, weight} | acc]}
   end
 
   defp fill_braille_area_grid(ctx) do
@@ -1276,16 +1345,27 @@ defmodule Drafter.Widget.Chart do
     local_x = rem(col_idx, 2)
 
     Enum.each(0..(ctx.num_series - 1), fn si ->
-      {bottom, top} = Enum.at(col_layers, si)
+      {bottom, top, weight} = extract_layer(Enum.at(col_layers, si))
       series_color = Enum.at(ctx.colors, rem(si, length(ctx.colors)))
-      dim_color = Drafter.Style.mix({0, 0, 0}, series_color, 0.6)
+      weighted_color = apply_weight_to_color(series_color, weight)
+      dim_color = Drafter.Style.mix({0, 0, 0}, weighted_color, 0.6)
 
       {lo_py, hi_py, top_py} = compute_pixel_range(bottom, top, ctx)
 
       Enum.each(lo_py..hi_py, fn py ->
-        paint_braille_pixel(py, local_x, char_col, top_py, series_color, dim_color, ctx)
+        paint_braille_pixel(py, local_x, char_col, top_py, weighted_color, dim_color, ctx)
       end)
     end)
+  end
+
+  defp extract_layer({bottom, top, weight}), do: {bottom, top, weight}
+  defp extract_layer({bottom, top}), do: {bottom, top, 1.0}
+
+  defp apply_weight_to_color(color, 1.0), do: color
+
+  defp apply_weight_to_color({r, g, b}, weight) do
+    w = min(1.0, max(0.1, weight))
+    {round(r * w), round(g * w), round(b * w)}
   end
 
   defp compute_pixel_range(bottom, top, %{mode: :split} = ctx) do

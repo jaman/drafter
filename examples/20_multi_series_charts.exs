@@ -69,6 +69,28 @@ defmodule MultiSeriesCharts do
     scatter_b = Enum.map(0..29, fn i -> [i * 3, :math.cos(i * 0.4 + p) * 30 + 60] end)
     scatter_c = Enum.map(0..29, fn i -> [i * 3 + 15, :math.sin(i * 0.6 + p * 1.3) * 35 + 45] end)
 
+    weighted_scatter =
+      Enum.map(0..49, fn i ->
+        x = i * 2
+        y = :math.sin(i * 0.3 + p) * 40 + 50
+        w = abs(:math.sin(i * 0.2 + p * 0.7))
+        [x, y, w]
+      end)
+
+    weighted_area =
+      Enum.map(0..59, fn i ->
+        val = :math.sin(i * 0.15 + p) * 30 + 40
+        w = abs(:math.cos(i * 0.1 + p * 0.5))
+        {val, w}
+      end)
+
+    weighted_area_b =
+      Enum.map(0..59, fn i ->
+        val = :math.cos(i * 0.12 + p * 0.8) * 20 + 25
+        w = abs(:math.sin(i * 0.15 + p * 0.3))
+        {val, w}
+      end)
+
     vertical([
       header("Multi-Series & Extended Bar Charts  (scroll, ← → to pan)", show_clock: true),
       scrollable(
@@ -158,6 +180,24 @@ defmodule MultiSeriesCharts do
             chart_type: :scatter,
             height: 8,
             colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)],
+            _render_timestamp: state.timestamp
+          ),
+          gap(),
+          section("Weighted Scatter: Dot density shows data weight"),
+          chart(weighted_scatter,
+            id: :wscat,
+            chart_type: :scatter,
+            height: 8,
+            color: {100, 220, 255},
+            _render_timestamp: state.timestamp
+          ),
+          gap(),
+          section("Weighted Braille Area: Color intensity shows data weight"),
+          chart([weighted_area, weighted_area_b],
+            id: :warea,
+            chart_type: :braille_area,
+            height: 8,
+            colors: [{80, 200, 100}, {100, 140, 255}],
             _render_timestamp: state.timestamp
           ),
           label("")
