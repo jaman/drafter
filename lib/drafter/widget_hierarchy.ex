@@ -1051,9 +1051,11 @@ defmodule Drafter.WidgetHierarchy do
 
     hierarchy.widgets
     |> Enum.filter(fn {widget_id, widget_info} ->
+      live_state = live_widget_state(widget_info)
+
       focusable_widget?(widget_info.module) and
-        not disabled?(widget_info.state) and
-        not instance_unfocusable?(widget_info.state) and
+        not disabled?(live_state) and
+        not instance_unfocusable?(live_state) and
         not MapSet.member?(hidden, widget_id) and
         ancestors_expanded?(hierarchy, widget_info.parent)
     end)
@@ -1072,13 +1074,18 @@ defmodule Drafter.WidgetHierarchy do
         true
 
       ancestor ->
-        if Map.get(ancestor.state, :expanded) == false do
+        ancestor_state = live_widget_state(ancestor)
+
+        if Map.get(ancestor_state, :expanded) == false do
           false
         else
           ancestors_expanded?(hierarchy, ancestor.parent)
         end
     end
   end
+
+  defp live_widget_state(%{pid: pid}) when is_pid(pid), do: WidgetServer.get_state(pid)
+  defp live_widget_state(%{state: state}), do: state
 
   defp disabled?(state) do
     Map.get(state, :disabled, false)
