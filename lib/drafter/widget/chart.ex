@@ -1368,9 +1368,12 @@ defmodule Drafter.Widget.Chart do
     {fr, fg, fb} = weighted_color
     fill_color = {round(fr * opacity), round(fg * opacity), round(fb * opacity)}
 
-    Enum.each(lo_py..hi_py, fn py ->
-      paint_braille_pixel(py, local_x, char_col, top_py, weighted_color, fill_color, ctx)
+    fill_range = Enum.reject(lo_py..hi_py, &(&1 == top_py))
+    Enum.each(fill_range, fn py ->
+      paint_braille_dot(py, local_x, char_col, fill_color, ctx)
     end)
+
+    paint_braille_dot(top_py, local_x, char_col, weighted_color, ctx)
   end
 
   defp extract_layer({bottom, top, weight}), do: {bottom, top, weight}
@@ -1407,7 +1410,7 @@ defmodule Drafter.Widget.Chart do
     ctx.zero_py + round(value / ctx.neg_min * (ctx.pixel_h - ctx.zero_py - 1))
   end
 
-  defp paint_braille_pixel(py, local_x, char_col, top_py, series_color, dim_color, ctx) do
+  defp paint_braille_dot(py, local_x, char_col, color, ctx) do
     local_y = rem(py, 4)
     char_row = div(py, 4)
     bit = Map.get(@braille_dot_offsets, {local_x, local_y}, 0)
@@ -1417,27 +1420,14 @@ defmodule Drafter.Widget.Chart do
     if idx >= 1 and idx <= max_idx do
       old_bits = :atomics.get(ctx.grid, idx)
       :atomics.put(ctx.grid, idx, old_bits ||| bit)
-
-      pixel_color = if py == top_py, do: series_color, else: dim_color
-      blend_pixel_color(Enum.at(ctx.color_grid, idx - 1), pixel_color)
+      set_cell_color(Enum.at(ctx.color_grid, idx - 1), color)
     end
   end
 
-  defp blend_pixel_color(color_ref, {pr, pg, pb} = pixel_color) do
-    old_r = :atomics.get(color_ref, 1)
-    old_g = :atomics.get(color_ref, 2)
-    old_b = :atomics.get(color_ref, 3)
-
-    {mr, mg, mb} =
-      if old_r == 0 and old_g == 0 and old_b == 0 do
-        {pr, pg, pb}
-      else
-        Drafter.Style.mix({old_r, old_g, old_b}, pixel_color, 0.5)
-      end
-
-    :atomics.put(color_ref, 1, mr)
-    :atomics.put(color_ref, 2, mg)
-    :atomics.put(color_ref, 3, mb)
+  defp set_cell_color(color_ref, {r, g, b}) do
+    :atomics.put(color_ref, 1, r)
+    :atomics.put(color_ref, 2, g)
+    :atomics.put(color_ref, 3, b)
   end
 
   defp render_braille_chart(state, width, height, bg, fg, animation_offset) do
