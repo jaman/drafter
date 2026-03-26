@@ -12,10 +12,7 @@ defmodule Drafter.Transport.SSH do
     mount_props = Keyword.get(opts, :mount_props, %{})
     system_dir = opts |> Keyword.get(:system_dir) |> resolve_system_dir()
 
-    user_passwords =
-      opts
-      |> Keyword.get(:auth, [{"admin", "admin"}])
-      |> Enum.map(fn {u, p} -> {to_charlist(u), to_charlist(p)} end)
+    auth = Keyword.get(opts, :auth, [{"admin", "admin"}])
 
     if mode == :shared do
       Session.SharedState.get_or_start(app_module)
@@ -25,14 +22,13 @@ defmodule Drafter.Transport.SSH do
       spawn(fn -> do_start_shell(app_module, mode, mount_props, username) end)
     end
 
-    daemon_opts = [
-      ifaddr: ip,
-      system_dir: to_charlist(system_dir),
-      auth_methods: ~c"password",
-      user_passwords: user_passwords,
-      parallel_login: true,
-      shell: shell_fun
-    ]
+    daemon_opts =
+      [
+        ifaddr: ip,
+        system_dir: to_charlist(system_dir),
+        parallel_login: true,
+        shell: shell_fun
+      ] ++ auth_opts(auth)
 
     case :ssh.daemon(port, daemon_opts) do
       {:ok, pid} -> {:ok, pid}
@@ -108,6 +104,23 @@ defmodule Drafter.Transport.SSH do
   end
 
   defp resolve_system_dir(dir), do: dir
+
+  defp auth_opts(:anonymous) do
+    [
+      auth_methods: ~c"password",
+      pwdfun: fn _user, _password, _peer_addr, _state -> true end
+    ]
+  end
+
+  defp auth_opts(pairs) when is_list(pairs) do
+    user_passwords =
+      Enum.map(pairs, fn {u, p} -> {to_charlist(u), to_charlist(p)} end)
+
+    [
+      auth_methods: ~c"password",
+      user_passwords: user_passwords
+    ]
+  end
 
   defp generate_host_key(dir) do
     System.cmd(
