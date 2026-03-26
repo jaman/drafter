@@ -352,13 +352,17 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
 
+  defp dispatch_loop_msg({:EXIT, _pid, _reason}, {app_module, app_state, rect, timers, wh, ss}) do
+    handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
+  end
+
   defp dispatch_loop_msg(other, {app_module, app_state, rect, timers, wh, ss}) do
     new_state = maybe_on_message(app_module, other, app_state)
 
     if new_state === app_state do
       app_event_loop(app_module, app_state, rect, timers, wh, ss)
     else
-      {_, new_wh} = throttled_render(app_module, new_state, rect, wh)
+      {_, new_wh} = immediate_render(app_module, new_state, rect, wh)
       app_event_loop(app_module, new_state, rect, timers, new_wh, ss)
     end
   end

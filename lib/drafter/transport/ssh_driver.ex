@@ -194,8 +194,11 @@ defmodule Drafter.Transport.SSHDriver do
 
   defp size_poller(driver_pid, last_size) do
     :timer.sleep(500)
-    current = detect_size()
-    if current != last_size, do: send(driver_pid, {:resize, current})
-    size_poller(driver_pid, current)
+
+    if Process.alive?(driver_pid) do
+      current = detect_size()
+      if current != last_size, do: send(driver_pid, {:resize, current})
+      size_poller(driver_pid, current)
+    end
   end
 end
