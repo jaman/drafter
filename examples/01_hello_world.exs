@@ -24,4 +24,3 @@ defmodule HelloWorld do
 end
 
 Drafter.run(HelloWorld)
-N m

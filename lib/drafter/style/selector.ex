@@ -20,6 +20,8 @@ defmodule Drafter.Style.Selector do
 
   @pseudo_classes [:hover, :focus, :active, :disabled, :checked, :selected, :expanded, :collapsed]
 
+  @pseudo_class_map Map.new(@pseudo_classes, fn pc -> {Atom.to_string(pc), pc} end)
+
   def new(opts \\ []) do
     %__MODULE__{
       widget_type: Keyword.get(opts, :widget_type),
@@ -58,14 +60,14 @@ defmodule Drafter.Style.Selector do
 
   defp extract_widget_type(str) do
     case Regex.run(~r/^([a-z][a-z0-9_]*)/, str) do
-      [match, type] -> {String.to_atom(type), String.replace_prefix(str, match, "")}
+      [match, type] -> {safe_to_atom(type), String.replace_prefix(str, match, "")}
       _ -> {nil, str}
     end
   end
 
   defp extract_id(str) do
     case Regex.run(~r/^#([a-z][a-z0-9_]*)/, str) do
-      [match, id] -> {String.to_atom(id), String.replace_prefix(str, match, "")}
+      [match, id] -> {safe_to_atom(id), String.replace_prefix(str, match, "")}
       _ -> {nil, str}
     end
   end
@@ -76,7 +78,11 @@ defmodule Drafter.Style.Selector do
         {[], str}
 
       matches ->
-        classes = Enum.map(matches, fn [_, class] -> String.to_atom(class) end)
+        classes =
+          matches
+          |> Enum.map(fn [_, class] -> safe_to_atom(class) end)
+          |> Enum.reject(&is_nil/1)
+
         cleaned = Regex.replace(~r/\.[a-z][a-z0-9_-]*/, str, "")
         {classes, cleaned}
     end
@@ -90,8 +96,8 @@ defmodule Drafter.Style.Selector do
       matches ->
         pseudo_classes =
           matches
-          |> Enum.map(fn [_, pc] -> String.to_atom(pc) end)
-          |> Enum.filter(&(&1 in @pseudo_classes))
+          |> Enum.map(fn [_, pc] -> Map.get(@pseudo_class_map, pc) end)
+          |> Enum.reject(&is_nil/1)
 
         cleaned = Regex.replace(~r/(?<!:):[a-z]+/, str, "")
         {pseudo_classes, cleaned}
@@ -100,9 +106,15 @@ defmodule Drafter.Style.Selector do
 
   defp extract_part(str) do
     case Regex.run(~r/::([a-z][a-z0-9_]*)/, str) do
-      [match, part] -> {String.to_atom(part), String.replace_prefix(str, match, "")}
+      [match, part] -> {safe_to_atom(part), String.replace_prefix(str, match, "")}
       _ -> {nil, str}
     end
+  end
+
+  defp safe_to_atom(str) do
+    String.to_existing_atom(str)
+  rescue
+    ArgumentError -> nil
   end
 
   def matches?(selector, context) do

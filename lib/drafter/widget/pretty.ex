@@ -88,12 +88,7 @@ defmodule Drafter.Widget.Pretty do
   def component_tag, do: :pretty
 
   def from_component_opts(data, opts) do
-    raw_classes = Keyword.get(opts, :class, [])
-    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
     %{
       data: data,
       expand: Keyword.get(opts, :expand, false),
@@ -125,9 +120,11 @@ defmodule Drafter.Widget.Pretty do
     end
   end
 
+  @syntax_color_lookup Map.new(@syntax_colors, fn {k, v} -> {Atom.to_string(k), v} end)
+
   def parse_color_spec("{" <> spec) do
-    key = spec |> String.slice(0..-2//1) |> String.to_atom()
-    Map.get(@syntax_colors, key, @syntax_colors.default)
+    key = String.slice(spec, 0..-2//1)
+    Map.get(@syntax_color_lookup, key, @syntax_colors.default)
   end
 
   defp pad_and_truncate(segments, width, bg) do
@@ -135,14 +132,16 @@ defmodule Drafter.Widget.Pretty do
       acc + String.length(seg.text)
     end)
 
-    if current_width < width do
-      padding = String.duplicate(" ", width - current_width)
-      segments ++ [Segment.new(padding, %{fg: @syntax_colors.separator, bg: bg})]
-    else if current_width > width do
-      truncate_segments(segments, width)
-    else
-      segments
-    end
+    cond do
+      current_width < width ->
+        padding = String.duplicate(" ", width - current_width)
+        segments ++ [Segment.new(padding, %{fg: @syntax_colors.separator, bg: bg})]
+
+      current_width > width ->
+        truncate_segments(segments, width)
+
+      true ->
+        segments
     end
   end
 

@@ -200,13 +200,7 @@ defmodule Drafter.Style.CSSParser do
   }
 
   defp normalize_property_key(key) do
-    Map.get(@property_key_map, key) || safe_to_atom(key)
-  end
-
-  defp safe_to_atom(str) do
-    String.to_existing_atom(str)
-  rescue
-    ArgumentError -> String.to_atom(str)
+    Map.get(@property_key_map, key) || Drafter.Util.normalize_class(key)
   end
 
   defp parse_value(value_str) do
@@ -234,7 +228,7 @@ defmodule Drafter.Style.CSSParser do
         String.to_float(value_str)
 
       true ->
-        safe_to_atom(value_str)
+        Drafter.Util.normalize_class(value_str)
     end
   end
 

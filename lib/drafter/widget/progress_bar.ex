@@ -265,12 +265,7 @@ defmodule Drafter.Widget.ProgressBar do
 
   def from_component_opts(_args, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 50, height: 1})
-    raw_classes = Keyword.get(opts, :class, [])
-    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-    classes = Enum.map(raw_classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
     %{
       progress: Keyword.get(opts, :progress, 0.0),
       max_value: Keyword.get(opts, :max_value, 100.0),

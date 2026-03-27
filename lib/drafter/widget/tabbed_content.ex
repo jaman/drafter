@@ -235,14 +235,7 @@ defmodule Drafter.Widget.TabbedContent do
 
   def from_component_opts(tabs, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 80})
-    raw_classes = Keyword.get(opts, :class, [])
-    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-
-    classes =
-      Enum.map(raw_classes, fn
-        c when is_binary(c) -> String.to_atom(c)
-        c when is_atom(c) -> c
-      end)
+    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
     all_tabs = if is_list(tabs) and tabs != [], do: tabs, else: Keyword.get(opts, :tabs, [])
 

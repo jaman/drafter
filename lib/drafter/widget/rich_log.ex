@@ -167,14 +167,7 @@ defmodule Drafter.Widget.RichLog do
   def component_tag, do: :rich_log
 
   def from_component_opts(_args, opts) do
-    raw_classes = Keyword.get(opts, :class, [])
-    raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
-
-    classes =
-      Enum.map(raw_classes, fn
-        c when is_binary(c) -> String.to_atom(c)
-        c when is_atom(c) -> c
-      end)
+    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
     %{
       lines: Keyword.get(opts, :lines, []),

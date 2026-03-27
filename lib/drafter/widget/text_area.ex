@@ -27,19 +27,19 @@ defmodule Drafter.Widget.TextArea do
 
   ## Key bindings
 
-    * Arrow keys — move cursor by character or line
-    * `Shift+Arrow` — extend selection
-    * `Ctrl+A` — select all
-    * `Ctrl+C` — copy selection to clipboard
-    * `Ctrl+X` — cut selection to clipboard
-    * `Ctrl+V` — paste from clipboard
-    * `Ctrl+Z` — undo
-    * `Ctrl+Y` — redo
-    * `Ctrl+Left/Right` — word navigation
-    * `Home` / `End` — move to start/end of the current line
-    * `Page Up` / `Page Down` — move cursor by viewport height
-    * `Backspace` / `Delete` — delete character; joins lines at line boundaries
-    * `Enter` — insert a new line at the cursor position
+    * Arrow keys - move cursor by character or line
+    * `Shift+Arrow` - extend selection
+    * `Ctrl+A` - select all
+    * `Ctrl+C` - copy selection to clipboard
+    * `Ctrl+X` - cut selection to clipboard
+    * `Ctrl+V` - paste from clipboard
+    * `Ctrl+Z` - undo
+    * `Ctrl+Y` - redo
+    * `Ctrl+Left/Right` - word navigation
+    * `Home` / `End` - move to start/end of the current line
+    * `Page Up` / `Page Down` - move cursor by viewport height
+    * `Backspace` / `Delete` - delete character; joins lines at line boundaries
+    * `Enter` - insert a new line at the cursor position
 
   ## Usage
 
@@ -52,6 +52,7 @@ defmodule Drafter.Widget.TextArea do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.Widget.TextArea.{Clipboard, Cursor, Editing, Highlight, History, Render, Selection}
 
   defstruct [
     :text,
@@ -114,10 +115,6 @@ defmodule Drafter.Widget.TextArea do
           undo_stack: list(),
           redo_stack: list()
         }
-
-  @python_keywords ~w(def class if else elif for while return import from as try except finally with raise pass break continue lambda yield async await and or not in is True False None)
-  @elixir_keywords ~w(def defp defmodule do end if else cond case when fn for with import alias require use true false nil and or not in)
-  @javascript_keywords ~w(function const let var if else for while return import export from class extends new this true false null undefined async await try catch finally throw typeof instanceof)
 
   @impl Drafter.Widget
   def mount(props) do
@@ -203,7 +200,7 @@ defmodule Drafter.Widget.TextArea do
         end <> String.duplicate("─", content_width) <> "┘"
 
     content_lines =
-      render_content(normalized_state, content_width, content_height, effective_style)
+      Render.render_content(normalized_state, content_width, content_height, effective_style)
 
     strips =
       [
@@ -229,7 +226,7 @@ defmodule Drafter.Widget.TextArea do
               else
                 if String.length(line) > 0 do
                   if normalized_state.language do
-                    highlight_line(line, normalized_state.language, effective_style)
+                    Highlight.highlight_line(line, normalized_state.language, effective_style)
                   else
                     [Segment.new(line, effective_style)]
                   end
@@ -268,16 +265,16 @@ defmodule Drafter.Widget.TextArea do
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
 
   def handle_event({:key, :up}, %{focused: true} = state),
-    do: {:ok, state |> clear_selection() |> do_move_cursor_up() |> adjust_scroll()}
+    do: {:ok, state |> Selection.clear_selection() |> Cursor.move_up() |> Cursor.adjust_scroll()}
 
   def handle_event({:key, :down}, %{focused: true} = state),
-    do: {:ok, state |> clear_selection() |> do_move_cursor_down() |> adjust_scroll()}
+    do: {:ok, state |> Selection.clear_selection() |> Cursor.move_down() |> Cursor.adjust_scroll()}
 
   def handle_event({:key, :left}, %{focused: true} = state),
-    do: {:ok, state |> clear_selection() |> do_move_cursor_left() |> adjust_scroll()}
+    do: {:ok, state |> Selection.clear_selection() |> Cursor.move_left() |> Cursor.adjust_scroll()}
 
   def handle_event({:key, :right}, %{focused: true} = state),
-    do: {:ok, state |> clear_selection() |> do_move_cursor_right() |> adjust_scroll()}
+    do: {:ok, state |> Selection.clear_selection() |> Cursor.move_right() |> Cursor.adjust_scroll()}
 
   def handle_event({:key, :home}, %{focused: true} = state),
     do: {:ok, %{state | cursor_col: 0, selection: nil}}
@@ -291,60 +288,93 @@ defmodule Drafter.Widget.TextArea do
     viewport_height = max(1, state.height - 2)
     new_line = max(0, state.cursor_line - viewport_height)
     new_col = min(state.cursor_col, String.length(Enum.at(state.lines, new_line, "")))
-    {:ok, %{state | cursor_line: new_line, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+    {:ok, %{state | cursor_line: new_line, cursor_col: new_col, selection: nil} |> Cursor.adjust_scroll()}
   end
 
   def handle_event({:key, :page_down}, %{focused: true} = state) do
     viewport_height = max(1, state.height - 2)
     new_line = min(length(state.lines) - 1, state.cursor_line + viewport_height)
     new_col = min(state.cursor_col, String.length(Enum.at(state.lines, new_line, "")))
-    {:ok, %{state | cursor_line: new_line, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+    {:ok, %{state | cursor_line: new_line, cursor_col: new_col, selection: nil} |> Cursor.adjust_scroll()}
   end
 
   def handle_event({:key, {:shift, :up}}, %{focused: true} = state),
-    do: {:ok, extend_selection(state, :up)}
+    do: {:ok, Selection.extend_selection(state, :up)}
 
   def handle_event({:key, {:shift, :down}}, %{focused: true} = state),
-    do: {:ok, extend_selection(state, :down)}
+    do: {:ok, Selection.extend_selection(state, :down)}
 
   def handle_event({:key, {:shift, :left}}, %{focused: true} = state),
-    do: {:ok, extend_selection(state, :left)}
+    do: {:ok, Selection.extend_selection(state, :left)}
 
   def handle_event({:key, {:shift, :right}}, %{focused: true} = state),
-    do: {:ok, extend_selection(state, :right)}
+    do: {:ok, Selection.extend_selection(state, :right)}
 
   def handle_event({:key, 1}, %{focused: true} = state),
-    do: {:ok, select_all(state)}
+    do: {:ok, Selection.select_all(state)}
 
   def handle_event({:key, 3}, %{focused: true} = state) do
-    copy_selection(state)
+    Clipboard.copy_selection(state)
     {:ok, state}
   end
 
-  def handle_event({:key, 24}, %{focused: true} = state), do: handle_cut(state)
+  def handle_event({:key, 24}, %{focused: true} = state) do
+    {tag, new_state} = Clipboard.handle_cut(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
 
-  def handle_event({:key, 22}, %{focused: true, read_only: false} = state),
-    do: handle_paste(state)
+  def handle_event({:key, 22}, %{focused: true, read_only: false} = state) do
+    {tag, new_state} = Clipboard.handle_paste(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
 
-  def handle_event({:key, 26}, %{focused: true} = state), do: handle_undo(state)
-  def handle_event({:key, 25}, %{focused: true} = state), do: handle_redo(state)
+  def handle_event({:key, 26}, %{focused: true} = state) do
+    {tag, new_state} = History.handle_undo(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
+
+  def handle_event({:key, 25}, %{focused: true} = state) do
+    {tag, new_state} = History.handle_redo(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
 
   def handle_event({:key, {:ctrl, :left}}, %{focused: true} = state) do
-    {new_row, new_col} = word_left(state.lines, state.cursor_line, state.cursor_col)
-    {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+    {new_row, new_col} = Cursor.word_left(state.lines, state.cursor_line, state.cursor_col)
+    {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> Cursor.adjust_scroll()}
   end
 
   def handle_event({:key, {:ctrl, :right}}, %{focused: true} = state) do
-    {new_row, new_col} = word_right(state.lines, state.cursor_line, state.cursor_col)
-    {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> adjust_scroll()}
+    {new_row, new_col} = Cursor.word_right(state.lines, state.cursor_line, state.cursor_col)
+    {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> Cursor.adjust_scroll()}
   end
 
-  def handle_event({:key, :backspace}, %{focused: true} = state), do: handle_backspace(state)
-  def handle_event({:key, :delete}, %{focused: true} = state), do: handle_delete(state)
-  def handle_event({:key, :enter}, %{focused: true} = state), do: handle_enter(state)
+  def handle_event({:key, :backspace}, %{focused: true} = state) do
+    {tag, new_state} = Editing.handle_backspace(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
 
-  def handle_event({:key, :tab}, %{focused: true, tab_behavior: :indent} = state),
-    do: handle_tab_indent(state)
+  def handle_event({:key, :delete}, %{focused: true} = state) do
+    {tag, new_state} = Editing.handle_delete(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
+
+  def handle_event({:key, :enter}, %{focused: true} = state) do
+    {tag, new_state} = Editing.handle_enter(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
+
+  def handle_event({:key, :tab}, %{focused: true, tab_behavior: :indent} = state) do
+    {tag, new_state} = Editing.handle_tab_indent(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
 
   def handle_event({:char, char}, %{focused: true} = state) when is_integer(char) do
     char_str = <<char::utf8>>
@@ -356,14 +386,6 @@ defmodule Drafter.Widget.TextArea do
   end
 
   def handle_event(_event, state), do: {:noreply, state}
-
-  defp handle_printable_char(state, char_str) do
-    if printable_char?(char_str) and can_insert_char?(state) do
-      handle_char_input(state, char_str)
-    else
-      {:noreply, state}
-    end
-  end
 
   @impl Drafter.Widget
   def update(props, state) do
@@ -464,856 +486,18 @@ defmodule Drafter.Widget.TextArea do
     end
   end
 
-  defp render_content(state, content_width, content_height, effective_style) do
-    lines = state.lines
-    focused = state.focused
-    placeholder = state.placeholder
-
-    if Enum.all?(lines, &(&1 == "")) and not focused and placeholder != "" do
-      placeholder_lines =
-        String.split(placeholder, "\n")
-        |> Enum.map(fn line ->
-          padded = String.pad_trailing(String.slice(line, 0, content_width), content_width)
-          {padded, nil}
-        end)
-        |> Enum.take(content_height)
-
-      padding_needed = max(0, content_height - length(placeholder_lines))
-
-      placeholder_lines ++
-        List.duplicate({String.duplicate(" ", content_width), nil}, padding_needed)
+  defp handle_printable_char(state, char_str) do
+    if Editing.printable_char?(char_str) and Editing.can_insert_char?(state) do
+      {tag, new_state} = Editing.handle_char_input(state, char_str)
+      trigger_change(new_state)
+      {tag, new_state}
     else
-      visible_lines =
-        lines
-        |> Enum.slice(state.scroll_offset, content_height)
-        |> Enum.with_index(state.scroll_offset)
-        |> Enum.map(&render_visible_line(&1, state, content_width, effective_style))
-
-      padding_needed = max(0, content_height - length(visible_lines))
-
-      visible_lines ++
-        List.duplicate({String.duplicate(" ", content_width), nil}, padding_needed)
-    end
-  end
-
-  defp render_visible_line({line, line_index}, state, content_width, effective_style) do
-    line_content = String.slice(line, 0, content_width)
-    is_cursor_line = state.focused and line_index == state.cursor_line
-
-    cursor_line_style =
-      if state.highlight_cursor_line and is_cursor_line do
-        tint_bg(effective_style, -15)
-      else
-        effective_style
-      end
-
-    segments = build_line_segments(state, line_content, line_index, content_width, cursor_line_style, effective_style)
-    display_line = line_display(is_cursor_line, line_content, state.cursor_col, content_width)
-    {display_line, segments}
-  end
-
-  defp line_display(true, line_content, cursor_col, content_width),
-    do: insert_cursor_in_line(line_content, cursor_col, content_width)
-
-  defp line_display(false, line_content, _cursor_col, content_width),
-    do: String.pad_trailing(line_content, content_width)
-
-  defp build_line_segments(state, line_content, line_index, content_width, cursor_line_style, _effective_style) do
-    focused = state.focused
-    is_cursor_line = focused and line_index == state.cursor_line
-    has_selection = state.selection != nil and focused
-
-    cond do
-      has_selection ->
-        build_selection_segments(state, line_content, line_index, content_width, cursor_line_style)
-
-      is_cursor_line ->
-        build_cursor_segments(line_content, state.cursor_col, content_width, cursor_line_style)
-
-      state.language != nil ->
-        highlight_line(line_content, state.language, cursor_line_style)
-
-      true ->
-        [Segment.new(String.pad_trailing(line_content, content_width), cursor_line_style)]
-    end
-  end
-
-  defp build_cursor_segments(line, cursor_col, content_width, style) do
-    padded = String.pad_trailing(line, content_width)
-    cursor_pos = min(cursor_col, content_width - 1)
-    line_len = String.length(padded)
-
-    if cursor_pos >= 0 and cursor_pos < line_len do
-      before_text = String.slice(padded, 0, cursor_pos)
-      cursor_char = String.slice(padded, cursor_pos, 1)
-      after_text = String.slice(padded, cursor_pos + 1, line_len)
-
-      cursor_style = %{fg: {0, 0, 0}, bg: {255, 255, 255}}
-
-      [
-        Segment.new(before_text, style),
-        Segment.new(cursor_char, cursor_style),
-        Segment.new(after_text, style)
-      ]
-      |> Enum.reject(&(&1.text == ""))
-    else
-      [
-        Segment.new(padded, style),
-        Segment.new(" ", %{fg: {0, 0, 0}, bg: {255, 255, 255}})
-      ]
-    end
-  end
-
-  defp build_selection_segments(state, line_content, line_index, content_width, base_style) do
-    {sel_start_row, sel_start_col, sel_end_row, sel_end_col} = normalize_selection(state.selection)
-    padded = String.pad_trailing(line_content, content_width)
-
-    if line_index < sel_start_row or line_index > sel_end_row do
-      render_unselected_line(padded, state.language, base_style)
-    else
-      sel_bounds = {sel_start_row, sel_start_col, sel_end_row, sel_end_col}
-      build_selected_line_segments(state, padded, line_index, sel_bounds, base_style)
-    end
-  end
-
-  defp render_unselected_line(padded, nil, base_style), do: [Segment.new(padded, base_style)]
-  defp render_unselected_line(padded, language, base_style), do: highlight_line(padded, language, base_style)
-
-  defp build_selected_line_segments(state, padded, line_index, {sel_start_row, sel_start_col, sel_end_row, sel_end_col}, base_style) do
-    line_len = String.length(padded)
-    col_start = if line_index == sel_start_row, do: sel_start_col, else: 0
-    col_end = if line_index == sel_end_row, do: min(sel_end_col, line_len), else: line_len
-
-    before_text = String.slice(padded, 0, col_start)
-    selected_text = String.slice(padded, col_start, col_end - col_start)
-    after_text = String.slice(padded, col_end, line_len - col_end)
-
-    is_cursor_line = state.focused and line_index == state.cursor_line
-    cursor_style = %{fg: {0, 0, 0}, bg: {255, 255, 255}}
-    sel_style = state.selection_style
-
-    []
-    |> append_segment(before_text, base_style)
-    |> append_selected_segment(selected_text, col_start, state.cursor_col, is_cursor_line, sel_style, cursor_style)
-    |> append_after_segment(after_text, col_end, state.cursor_col, is_cursor_line, base_style, cursor_style)
-  end
-
-  defp append_segment(segs, "", _style), do: segs
-  defp append_segment(segs, text, style), do: segs ++ [Segment.new(text, style)]
-
-  defp append_selected_segment(segs, "", _col_start, _cursor_col, _is_cursor_line, _sel_style, _cursor_style),
-    do: segs
-
-  defp append_selected_segment(segs, selected_text, col_start, cursor_col, true, sel_style, cursor_style),
-    do: build_selected_with_cursor(selected_text, col_start, cursor_col, sel_style, cursor_style, segs)
-
-  defp append_selected_segment(segs, selected_text, _col_start, _cursor_col, false, sel_style, _cursor_style),
-    do: segs ++ [Segment.new(selected_text, sel_style)]
-
-  defp append_after_segment(segs, "", _col_end, _cursor_col, _is_cursor_line, _base_style, _cursor_style),
-    do: segs
-
-  defp append_after_segment(segs, after_text, col_end, cursor_col, true, base_style, cursor_style)
-       when cursor_col >= col_end do
-    after_cursor_pos = cursor_col - col_end
-    after_len = String.length(after_text)
-    split_text_with_cursor(segs, after_text, after_cursor_pos, after_len, base_style, cursor_style)
-  end
-
-  defp append_after_segment(segs, after_text, _col_end, _cursor_col, _is_cursor_line, base_style, _cursor_style),
-    do: segs ++ [Segment.new(after_text, base_style)]
-
-  defp split_text_with_cursor(segs, text, cursor_pos, text_len, base_style, cursor_style)
-       when cursor_pos < text_len do
-    before_c = String.slice(text, 0, cursor_pos)
-    cursor_c = String.slice(text, cursor_pos, 1)
-    after_c = String.slice(text, cursor_pos + 1, text_len)
-
-    segs
-    |> append_segment(before_c, base_style)
-    |> then(&(&1 ++ [Segment.new(cursor_c, cursor_style)]))
-    |> append_segment(after_c, base_style)
-  end
-
-  defp split_text_with_cursor(segs, text, _cursor_pos, _text_len, base_style, _cursor_style),
-    do: segs ++ [Segment.new(text, base_style)]
-
-  defp build_selected_with_cursor(selected_text, col_start, cursor_col, sel_style, cursor_style, acc) do
-    sel_len = String.length(selected_text)
-    relative_cursor = cursor_col - col_start
-
-    if relative_cursor >= 0 and relative_cursor < sel_len do
-      before_c = String.slice(selected_text, 0, relative_cursor)
-      cursor_c = String.slice(selected_text, relative_cursor, 1)
-      after_c = String.slice(selected_text, relative_cursor + 1, sel_len)
-
-      segs = if before_c != "", do: acc ++ [Segment.new(before_c, sel_style)], else: acc
-      segs = segs ++ [Segment.new(cursor_c, cursor_style)]
-      if after_c != "", do: segs ++ [Segment.new(after_c, sel_style)], else: segs
-    else
-      acc ++ [Segment.new(selected_text, sel_style)]
-    end
-  end
-
-  defp insert_cursor_in_line(line, cursor_col, max_width) do
-    padded_line = String.pad_trailing(line, max_width)
-    cursor_pos = min(cursor_col, max_width - 1)
-
-    if cursor_pos >= 0 and cursor_pos < String.length(padded_line) do
-      {before, after_text} = String.split_at(padded_line, cursor_pos)
-      after_char = String.slice(after_text, 1..-1//1) || ""
-      before <> "█" <> after_char
-    else
-      padded_line <> "█"
+      {:noreply, state}
     end
   end
 
   defp normalize_state(%__MODULE__{} = state), do: state
   defp normalize_state(props), do: mount(props)
-
-  defp tint_bg(style, delta) do
-    case Map.get(style, :bg) do
-      {r, g, b} ->
-        clamped = fn v -> max(0, min(255, v + delta)) end
-        Map.put(style, :bg, {clamped.(r), clamped.(g), clamped.(b)})
-
-      _ ->
-        style
-    end
-  end
-
-  defp normalize_selection({anchor_row, anchor_col, active_row, active_col}) do
-    if {anchor_row, anchor_col} <= {active_row, active_col} do
-      {anchor_row, anchor_col, active_row, active_col}
-    else
-      {active_row, active_col, anchor_row, anchor_col}
-    end
-  end
-
-  defp clear_selection(state), do: %{state | selection: nil}
-
-  defp select_all(state) do
-    last_line = length(state.lines) - 1
-    last_col = String.length(Enum.at(state.lines, last_line, ""))
-
-    %{state | selection: {0, 0, last_line, last_col}, cursor_line: last_line, cursor_col: last_col}
-  end
-
-  defp extend_selection(state, direction) do
-    anchor =
-      case state.selection do
-        nil -> {state.cursor_line, state.cursor_col}
-        {ar, ac, _, _} -> {ar, ac}
-      end
-
-    moved_state = apply_cursor_move(state, direction)
-    {anchor_row, anchor_col} = anchor
-
-    %{moved_state
-      | selection: {anchor_row, anchor_col, moved_state.cursor_line, moved_state.cursor_col}}
-  end
-
-  defp apply_cursor_move(state, :up), do: do_move_cursor_up(state) |> adjust_scroll()
-  defp apply_cursor_move(state, :down), do: do_move_cursor_down(state) |> adjust_scroll()
-  defp apply_cursor_move(state, :left), do: do_move_cursor_left(state) |> adjust_scroll()
-  defp apply_cursor_move(state, :right), do: do_move_cursor_right(state) |> adjust_scroll()
-
-  defp do_move_cursor_up(state) do
-    if state.cursor_line > 0 do
-      new_line = state.cursor_line - 1
-      line_length = String.length(Enum.at(state.lines, new_line, ""))
-      %{state | cursor_line: new_line, cursor_col: min(state.cursor_col, line_length)}
-    else
-      state
-    end
-  end
-
-  defp do_move_cursor_down(state) do
-    if state.cursor_line < length(state.lines) - 1 do
-      new_line = state.cursor_line + 1
-      line_length = String.length(Enum.at(state.lines, new_line, ""))
-      %{state | cursor_line: new_line, cursor_col: min(state.cursor_col, line_length)}
-    else
-      state
-    end
-  end
-
-  defp do_move_cursor_left(state) do
-    if state.cursor_col > 0 do
-      %{state | cursor_col: state.cursor_col - 1}
-    else
-      if state.cursor_line > 0 do
-        prev_line = Enum.at(state.lines, state.cursor_line - 1, "")
-        %{state | cursor_line: state.cursor_line - 1, cursor_col: String.length(prev_line)}
-      else
-        state
-      end
-    end
-  end
-
-  defp do_move_cursor_right(state) do
-    current_line = Enum.at(state.lines, state.cursor_line, "")
-
-    if state.cursor_col < String.length(current_line) do
-      %{state | cursor_col: state.cursor_col + 1}
-    else
-      if state.cursor_line < length(state.lines) - 1 do
-        %{state | cursor_line: state.cursor_line + 1, cursor_col: 0}
-      else
-        state
-      end
-    end
-  end
-
-  defp word_left(lines, row, 0) when row > 0 do
-    prev_line = Enum.at(lines, row - 1, "")
-    {row - 1, String.length(prev_line)}
-  end
-
-  defp word_left(_lines, row, 0), do: {row, 0}
-
-  defp word_left(lines, row, col) do
-    line = Enum.at(lines, row, "")
-    chars = line |> String.slice(0, col) |> String.graphemes() |> Enum.reverse()
-    {skipped_word, remaining} = take_while_count(chars, &word_char?/1)
-    {skipped_non_word, _} = take_while_count(remaining, &(not word_char?(&1)))
-    new_col = col - skipped_word - skipped_non_word
-    {row, max(0, new_col)}
-  end
-
-  defp word_right(lines, row, col) do
-    line = Enum.at(lines, row, "")
-    line_len = String.length(line)
-
-    if col >= line_len and row < length(lines) - 1 do
-      {row + 1, 0}
-    else
-      chars = line |> String.slice(col, line_len - col) |> String.graphemes()
-      {skipped_non_word, remaining} = take_while_count(chars, &(not word_char?(&1)))
-      {skipped_word, _} = take_while_count(remaining, &word_char?/1)
-      new_col = col + skipped_non_word + skipped_word
-      {row, min(new_col, line_len)}
-    end
-  end
-
-  defp take_while_count(list, pred), do: take_while_count(list, pred, 0)
-
-  defp take_while_count([], _pred, count), do: {count, []}
-
-  defp take_while_count([h | t], pred, count) do
-    if pred.(h), do: take_while_count(t, pred, count + 1), else: {count, [h | t]}
-  end
-
-  defp word_char?(char), do: Regex.match?(~r/\w/, char)
-
-  defp handle_backspace(state) do
-    if state.selection != nil do
-      {:ok, push_undo(state) |> delete_selection()}
-    else
-      if state.read_only do
-        {:noreply, state}
-      else
-        do_backspace(state)
-      end
-    end
-  end
-
-  defp do_backspace(state) do
-    current_line = Enum.at(state.lines, state.cursor_line, "")
-    state = push_undo(state)
-
-    cond do
-      state.cursor_col > 0 ->
-        {before, after_text} = String.split_at(current_line, state.cursor_col)
-        new_line_content = String.slice(before, 0..-2//1) <> after_text
-        new_lines = List.replace_at(state.lines, state.cursor_line, new_line_content)
-
-        new_state = %{
-          state
-          | lines: new_lines,
-            cursor_col: state.cursor_col - 1,
-            text: Enum.join(new_lines, "\n")
-        }
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      state.cursor_line > 0 ->
-        prev_line = Enum.at(state.lines, state.cursor_line - 1, "")
-        joined_line = prev_line <> current_line
-
-        new_lines =
-          state.lines
-          |> List.replace_at(state.cursor_line - 1, joined_line)
-          |> List.delete_at(state.cursor_line)
-
-        new_state =
-          %{
-            state
-            | lines: new_lines,
-              cursor_line: state.cursor_line - 1,
-              cursor_col: String.length(prev_line),
-              text: Enum.join(new_lines, "\n")
-          }
-          |> adjust_scroll()
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      true ->
-        {:ok, state}
-    end
-  end
-
-  defp handle_delete(state) do
-    if state.selection != nil do
-      {:ok, push_undo(state) |> delete_selection()}
-    else
-      if state.read_only do
-        {:noreply, state}
-      else
-        do_delete(state)
-      end
-    end
-  end
-
-  defp do_delete(state) do
-    current_line = Enum.at(state.lines, state.cursor_line, "")
-    state = push_undo(state)
-
-    cond do
-      state.cursor_col < String.length(current_line) ->
-        {before, after_text} = String.split_at(current_line, state.cursor_col)
-        new_line_content = before <> String.slice(after_text, 1..-1//1)
-        new_lines = List.replace_at(state.lines, state.cursor_line, new_line_content)
-
-        new_state = %{state | lines: new_lines, text: Enum.join(new_lines, "\n")}
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      state.cursor_line < length(state.lines) - 1 ->
-        next_line = Enum.at(state.lines, state.cursor_line + 1, "")
-        joined_line = current_line <> next_line
-
-        new_lines =
-          state.lines
-          |> List.replace_at(state.cursor_line, joined_line)
-          |> List.delete_at(state.cursor_line + 1)
-
-        new_state = %{state | lines: new_lines, text: Enum.join(new_lines, "\n")}
-
-        trigger_change(new_state)
-        {:ok, new_state}
-
-      true ->
-        {:ok, state}
-    end
-  end
-
-  defp handle_enter(state) do
-    if state.read_only do
-      {:noreply, state}
-    else
-      state = if state.selection != nil, do: push_undo(state) |> delete_selection(), else: push_undo(state)
-      current_line = Enum.at(state.lines, state.cursor_line, "")
-      {before, after_text} = String.split_at(current_line, state.cursor_col)
-
-      new_lines =
-        state.lines
-        |> List.replace_at(state.cursor_line, before)
-        |> List.insert_at(state.cursor_line + 1, after_text)
-
-      new_state =
-        %{
-          state
-          | lines: new_lines,
-            cursor_line: state.cursor_line + 1,
-            cursor_col: 0,
-            text: Enum.join(new_lines, "\n")
-        }
-        |> adjust_scroll()
-
-      trigger_change(new_state)
-      {:ok, new_state}
-    end
-  end
-
-  defp handle_tab_indent(state) do
-    if state.read_only do
-      {:noreply, state}
-    else
-      spaces = String.duplicate(" ", state.tab_size)
-      state = push_undo(state)
-      state = if state.selection != nil, do: delete_selection(state), else: state
-
-      current_line = Enum.at(state.lines, state.cursor_line, "")
-      {before, after_text} = String.split_at(current_line, state.cursor_col)
-      new_line_content = before <> spaces <> after_text
-      new_lines = List.replace_at(state.lines, state.cursor_line, new_line_content)
-
-      new_state = %{
-        state
-        | lines: new_lines,
-          cursor_col: state.cursor_col + state.tab_size,
-          text: Enum.join(new_lines, "\n")
-      }
-
-      trigger_change(new_state)
-      {:ok, new_state}
-    end
-  end
-
-  defp handle_char_input(state, char_str) do
-    if state.read_only do
-      {:noreply, state}
-    else
-      state = push_undo(state)
-      state = if state.selection != nil, do: delete_selection(state), else: state
-      insert_char(state, char_str)
-    end
-  end
-
-  defp insert_char(state, char) do
-    current_line = Enum.at(state.lines, state.cursor_line, "")
-    {before, after_text} = String.split_at(current_line, state.cursor_col)
-    new_line_content = before <> char <> after_text
-
-    new_lines = List.replace_at(state.lines, state.cursor_line, new_line_content)
-
-    new_state = %{
-      state
-      | lines: new_lines,
-        cursor_col: state.cursor_col + 1,
-        text: Enum.join(new_lines, "\n")
-    }
-
-    trigger_change(new_state)
-    {:ok, new_state}
-  end
-
-  defp delete_selection(state) do
-    {start_row, start_col, end_row, end_col} = normalize_selection(state.selection)
-
-    start_line = Enum.at(state.lines, start_row, "")
-    end_line = Enum.at(state.lines, end_row, "")
-
-    before_text = String.slice(start_line, 0, start_col)
-    after_text = String.slice(end_line, end_col, String.length(end_line) - end_col)
-
-    merged_line = before_text <> after_text
-
-    lines_before = Enum.slice(state.lines, 0, start_row)
-    lines_after = Enum.slice(state.lines, end_row + 1, length(state.lines))
-
-    new_lines = lines_before ++ [merged_line] ++ lines_after
-
-    %{
-      state
-      | lines: new_lines,
-        cursor_line: start_row,
-        cursor_col: start_col,
-        selection: nil,
-        text: Enum.join(new_lines, "\n")
-    }
-    |> adjust_scroll()
-  end
-
-  defp selected_text(state) do
-    case state.selection do
-      nil ->
-        ""
-
-      selection ->
-        {start_row, start_col, end_row, end_col} = normalize_selection(selection)
-
-        if start_row == end_row do
-          line = Enum.at(state.lines, start_row, "")
-          String.slice(line, start_col, end_col - start_col)
-        else
-          first_line = Enum.at(state.lines, start_row, "")
-          last_line = Enum.at(state.lines, end_row, "")
-          first_part = String.slice(first_line, start_col, String.length(first_line) - start_col)
-          last_part = String.slice(last_line, 0, end_col)
-
-          middle_lines =
-            state.lines
-            |> Enum.slice(start_row + 1, end_row - start_row - 1)
-
-          ([first_part] ++ middle_lines ++ [last_part]) |> Enum.join("\n")
-        end
-    end
-  end
-
-  defp copy_selection(state) do
-    text = selected_text(state)
-    if text != "", do: clipboard_copy(text)
-  end
-
-  defp handle_cut(state) do
-    if state.selection == nil or state.read_only do
-      {:ok, state}
-    else
-      copy_selection(state)
-      new_state = push_undo(state) |> delete_selection()
-      trigger_change(new_state)
-      {:ok, new_state}
-    end
-  end
-
-  defp handle_paste(state) do
-    text = clipboard_paste()
-
-    if text == "" do
-      {:ok, state}
-    else
-      state = push_undo(state)
-      state = if state.selection != nil, do: delete_selection(state), else: state
-
-      pasted_lines = String.split(text, "\n")
-      current_line = Enum.at(state.lines, state.cursor_line, "")
-      {before, after_text} = String.split_at(current_line, state.cursor_col)
-
-      new_lines =
-        case pasted_lines do
-          [single] ->
-            new_line = before <> single <> after_text
-            List.replace_at(state.lines, state.cursor_line, new_line)
-
-          [first | rest] ->
-            last = List.last(rest)
-            middle = Enum.slice(rest, 0, length(rest) - 1)
-            first_line = before <> first
-            last_line = last <> after_text
-
-            lines_before = Enum.slice(state.lines, 0, state.cursor_line)
-            lines_after = Enum.slice(state.lines, state.cursor_line + 1, length(state.lines))
-
-            lines_before ++ [first_line] ++ middle ++ [last_line] ++ lines_after
-        end
-
-      new_cursor_line = state.cursor_line + length(pasted_lines) - 1
-      last_pasted = List.last(pasted_lines)
-
-      new_cursor_col =
-        if length(pasted_lines) == 1 do
-          state.cursor_col + String.length(last_pasted)
-        else
-          String.length(last_pasted)
-        end
-
-      new_state =
-        %{
-          state
-          | lines: new_lines,
-            cursor_line: new_cursor_line,
-            cursor_col: new_cursor_col,
-            text: Enum.join(new_lines, "\n")
-        }
-        |> adjust_scroll()
-
-      trigger_change(new_state)
-      {:ok, new_state}
-    end
-  end
-
-  defp clipboard_copy(text) do
-    case :os.type() do
-      {:unix, :darwin} ->
-        System.cmd("pbcopy", [], input: text, stderr_to_stdout: true)
-
-      {:unix, _} ->
-        System.cmd("xclip", ["-selection", "clipboard"], input: text, stderr_to_stdout: true)
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp clipboard_paste do
-    case :os.type() do
-      {:unix, :darwin} ->
-        {output, 0} = System.cmd("pbpaste", [])
-        output
-
-      {:unix, _} ->
-        {output, 0} = System.cmd("xclip", ["-selection", "clipboard", "-o"], [])
-        output
-
-      _ ->
-        ""
-    end
-  rescue
-    _ -> ""
-  catch
-    _, _ -> ""
-  end
-
-  defp snapshot(state), do: {state.lines, state.cursor_line, state.cursor_col}
-
-  defp push_undo(state) do
-    snap = snapshot(state)
-    trimmed = Enum.take([snap | state.undo_stack], state.max_checkpoints)
-    %{state | undo_stack: trimmed, redo_stack: []}
-  end
-
-  defp handle_undo(state) do
-    case state.undo_stack do
-      [] ->
-        {:ok, state}
-
-      [prev | rest] ->
-        current_snap = snapshot(state)
-        {prev_lines, prev_row, prev_col} = prev
-
-        new_state =
-          %{
-            state
-            | lines: prev_lines,
-              cursor_line: prev_row,
-              cursor_col: prev_col,
-              text: Enum.join(prev_lines, "\n"),
-              undo_stack: rest,
-              redo_stack: [current_snap | state.redo_stack],
-              selection: nil
-          }
-          |> adjust_scroll()
-
-        trigger_change(new_state)
-        {:ok, new_state}
-    end
-  end
-
-  defp handle_redo(state) do
-    case state.redo_stack do
-      [] ->
-        {:ok, state}
-
-      [next | rest] ->
-        current_snap = snapshot(state)
-        {next_lines, next_row, next_col} = next
-
-        new_state =
-          %{
-            state
-            | lines: next_lines,
-              cursor_line: next_row,
-              cursor_col: next_col,
-              text: Enum.join(next_lines, "\n"),
-              redo_stack: rest,
-              undo_stack: [current_snap | state.undo_stack],
-              selection: nil
-          }
-          |> adjust_scroll()
-
-        trigger_change(new_state)
-        {:ok, new_state}
-    end
-  end
-
-  defp adjust_scroll(state) do
-    content_height = state.height - 2
-
-    cond do
-      state.cursor_line < state.scroll_offset ->
-        %{state | scroll_offset: state.cursor_line}
-
-      state.cursor_line >= state.scroll_offset + content_height ->
-        %{state | scroll_offset: state.cursor_line - content_height + 1}
-
-      true ->
-        state
-    end
-  end
-
-  defp printable_char?(char) do
-    String.length(char) == 1 and String.printable?(char) and char not in ["\t", "\r"]
-  end
-
-  @highlight_colors %{
-    keyword: {200, 120, 220},
-    string: {180, 200, 100},
-    comment: {100, 120, 100},
-    number: {180, 150, 100},
-    function: {100, 180, 220}
-  }
-
-  defp highlight_line(line, language, base_style) do
-    keywords = get_keywords(language)
-    bg = base_style[:bg] || {40, 40, 40}
-    default_fg = base_style[:fg] || {200, 200, 200}
-
-    tokenize_line(line, language)
-    |> Enum.map(fn {type, text} ->
-      color = token_color(type, text, keywords, default_fg)
-      Segment.new(text, %{fg: color, bg: bg})
-    end)
-  end
-
-  defp token_color(:keyword, text, keywords, default_fg) do
-    if text in keywords, do: @highlight_colors.keyword, else: default_fg
-  end
-
-  defp token_color(type, _text, _keywords, default_fg) do
-    Map.get(@highlight_colors, type, default_fg)
-  end
-
-  defp get_keywords(:python), do: @python_keywords
-  defp get_keywords(:elixir), do: @elixir_keywords
-  defp get_keywords(:javascript), do: @javascript_keywords
-  defp get_keywords(:js), do: @javascript_keywords
-  defp get_keywords(_), do: []
-
-  defp tokenize_line(line, language) do
-    comment_prefix =
-      case language do
-        :python -> "#"
-        :elixir -> "#"
-        :javascript -> "//"
-        :js -> "//"
-        _ -> "#"
-      end
-
-    if String.contains?(line, comment_prefix) do
-      [before_comment, comment_text] = String.split(line, comment_prefix, parts: 2)
-      tokenize_code(before_comment, language) ++ [{:comment, comment_prefix <> comment_text}]
-    else
-      tokenize_code(line, language)
-    end
-  end
-
-  defp tokenize_code(code, language) do
-    keywords = get_keywords(language)
-
-    pattern = ~r/("[^"]*"|'[^']*'|\b\d+\.?\d*\b|\b\w+\b(?=\s*\()?|\b\w+\b|[^\s\w"']+|\s+)/
-
-    Regex.scan(pattern, code)
-    |> Enum.map(fn [match] ->
-      cond do
-        String.starts_with?(match, "\"") or String.starts_with?(match, "'") ->
-          {:string, match}
-
-        Regex.match?(~r/^\d+\.?\d*$/, match) ->
-          {:number, match}
-
-        Regex.match?(~r/^\w+$/, match) and match in keywords ->
-          {:keyword, match}
-
-        Regex.match?(~r/^\w+$/, match) ->
-          {:identifier, match}
-
-        true ->
-          {:other, match}
-      end
-    end)
-  end
-
-  defp can_insert_char?(state) do
-    case state.max_lines do
-      nil -> true
-      max_lines -> length(state.lines) < max_lines
-    end
-  end
 
   defp trigger_change(state) do
     if state.on_change do

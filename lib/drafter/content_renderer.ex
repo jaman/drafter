@@ -44,12 +44,7 @@ defmodule Drafter.ContentRenderer do
   defp render_label(text, opts, rect) do
     alias Drafter.Style.Computed
 
-    classes = Keyword.get(opts, :class, [])
-    classes = if is_list(classes), do: classes, else: [classes]
-    classes = Enum.map(classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
     computed = Computed.for_widget(:label, %{classes: classes}, [])
     fg = computed[:color] || {200, 200, 200}
@@ -65,12 +60,7 @@ defmodule Drafter.ContentRenderer do
     alias Drafter.Style.Computed
 
     button_type = Keyword.get(opts, :type, :default)
-    classes = Keyword.get(opts, :class, [])
-    classes = if is_list(classes), do: classes, else: [classes]
-    classes = Enum.map(classes, fn
-      c when is_binary(c) -> String.to_atom(c)
-      c when is_atom(c) -> c
-    end)
+    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
     computed = Computed.for_widget(:button, %{type: button_type, classes: classes}, [])
     fg = computed[:color] || {255, 255, 255}
@@ -270,7 +260,7 @@ defmodule Drafter.ContentRenderer do
       ""
     end
 
-    display_text = sparkline <> summary_str
+    display_text = IO.iodata_to_binary([sparkline, summary_str])
     padded = String.pad_trailing(display_text, rect.width, " ")
 
     [Strip.new([Segment.new(padded, %{fg: fg, bg: bg})])]
@@ -305,7 +295,7 @@ defmodule Drafter.ContentRenderer do
     filled = round(progress * bar_width)
     empty = bar_width - filled
 
-    bar = "[" <> String.duplicate("█", filled) <> String.duplicate("░", empty) <> "]"
+    bar = IO.iodata_to_binary(["[", String.duplicate("█", filled), String.duplicate("░", empty), "]"])
 
     display_text = if show_percentage do
       pct = round(progress * 100)
