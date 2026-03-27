@@ -267,7 +267,7 @@ defmodule Drafter.WidgetHierarchy do
   def get_parent(hierarchy, widget_id) do
     case get_widget_info(hierarchy, widget_id) do
       nil -> nil
-      widget_info -> widget_info.parent_id
+      widget_info -> widget_info.parent
     end
   end
 
@@ -275,7 +275,7 @@ defmodule Drafter.WidgetHierarchy do
   def get_children(hierarchy, parent_id) do
     hierarchy.widgets
     |> Enum.filter(fn {_id, widget_info} ->
-      widget_info.parent_id == parent_id
+      widget_info.parent == parent_id
     end)
     |> Enum.map(fn {id, _widget_info} -> id end)
   end

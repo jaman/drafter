@@ -53,6 +53,43 @@ defmodule Drafter.WidgetHierarchyTest do
     end
   end
 
+  describe "parent/child traversal" do
+    test "get_parent returns the parent widget id" do
+      hierarchy =
+        WidgetHierarchy.new()
+        |> WidgetHierarchy.add_widget(:parent, Drafter.Widget.Container, %{})
+        |> WidgetHierarchy.add_widget(:child, Drafter.Widget.Label, %{text: "C"}, :parent)
+
+      assert WidgetHierarchy.get_parent(hierarchy, :child) == :parent
+      assert WidgetHierarchy.get_parent(hierarchy, :parent) == nil
+    end
+
+    test "get_parent returns nil for unknown widget" do
+      hierarchy = WidgetHierarchy.new()
+      assert WidgetHierarchy.get_parent(hierarchy, :nonexistent) == nil
+    end
+
+    test "get_children returns direct children" do
+      hierarchy =
+        WidgetHierarchy.new()
+        |> WidgetHierarchy.add_widget(:root, Drafter.Widget.Container, %{})
+        |> WidgetHierarchy.add_widget(:a, Drafter.Widget.Label, %{text: "A"}, :root)
+        |> WidgetHierarchy.add_widget(:b, Drafter.Widget.Label, %{text: "B"}, :root)
+        |> WidgetHierarchy.add_widget(:c, Drafter.Widget.Label, %{text: "C"}, :a)
+
+      children = WidgetHierarchy.get_children(hierarchy, :root)
+      assert Enum.sort(children) == [:a, :b]
+    end
+
+    test "get_children returns empty list for leaf widget" do
+      hierarchy =
+        WidgetHierarchy.new()
+        |> WidgetHierarchy.add_widget(:leaf, Drafter.Widget.Label, %{text: "L"})
+
+      assert WidgetHierarchy.get_children(hierarchy, :leaf) == []
+    end
+  end
+
   describe "focus management" do
     test "focus_widget sets the focused widget" do
       hierarchy = WidgetHierarchy.new()
