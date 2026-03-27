@@ -3,6 +3,19 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.2.10] - 2026-03-27
+
+### Added
+
+- **Weighted scatter points** — scatter data points accept an optional weight component (`[x, y, weight]` or `{x, y, weight}`) where weight is a float 0.0–1.0. Higher weights produce denser braille dot clusters and brighter colors, providing visual density feedback for clustered data.
+- **`fill_opacity` chart option** — controls the brightness of area fill relative to the series edge color, from `0.0` (invisible) to `1.0` (same as edge). Default `0.6`. Applies to `:area` and `:braille_area` chart types.
+- **Braille area example** — `26_braille_area.exs` demonstrates stacked braille area charts with per-series opacity.
+- **SSH anonymous authentication** — pass `auth: :anonymous` to `Drafter.Server` to allow anonymous SSH connections (still need password, but do not need to be registered).
+
+### Changed
+
+- **Adaptive color depth in braille area charts** — fill color now scales inversely with span thickness, producing more natural gradient fills for stacked series.
+
 ## [0.2.3] - 2026-03-24
 
 ### Added
