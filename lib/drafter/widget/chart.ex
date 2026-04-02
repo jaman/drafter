@@ -604,7 +604,6 @@ defmodule Drafter.Widget.Chart do
   defp format_axis_value(val, precision) when is_float(val) do
     cond do
       abs(val) >= 1000 -> "#{Float.round(val / 1000, 1)}k"
-      abs(val) >= 1 -> :erlang.float_to_binary(Float.round(val, 1), decimals: 1)
       true -> :erlang.float_to_binary(Float.round(val, precision), decimals: precision)
     end
   end
