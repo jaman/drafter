@@ -70,7 +70,7 @@ defmodule Drafter.Widget.Chart do
       pairs for `:range_bar`
     * `:chart_type` — `:line` (default), `:area`, `:braille_area`, `:bar`,
       `:clustered_bar`, `:stacked_bar`, `:range_bar`, `:scatter`, `:candlestick`
-    * `:marker` — render density: `:braille` (default), `:half_block`, `:block`, `:dot`
+
     * `:pixel_style` — pixel rendering style for line and scatter: `:braille` (default) or `:quadrant`
     * `:min_value` — explicit Y minimum; auto-detected when omitted
     * `:max_value` — explicit Y maximum; auto-detected when omitted
@@ -124,12 +124,9 @@ defmodule Drafter.Widget.Chart do
           | :braille
           | :braille_area
 
-  @type marker :: :braille | :half_block | :block | :dot
-
   defstruct [
     :data,
     :chart_type,
-    :marker,
     :pixel_style,
     :min_value,
     :max_value,
@@ -177,7 +174,6 @@ defmodule Drafter.Widget.Chart do
     %__MODULE__{
       data: data,
       chart_type: Map.get(props, :chart_type, :line),
-      marker: Map.get(props, :marker, :braille),
       pixel_style: Map.get(props, :pixel_style, :braille),
       min_value: min_val,
       max_value: max_val,
@@ -205,6 +201,7 @@ defmodule Drafter.Widget.Chart do
       show_baseline: Map.get(props, :show_baseline, false),
       zero_center: Map.get(props, :zero_center, :symmetric),
       _internal: %{
+        precision: Map.get(props, :precision, 3),
         render_timestamp: Map.get(props, :_render_timestamp, 0),
         animation_offset: 0,
         live_candle: live_candle,
@@ -269,7 +266,6 @@ defmodule Drafter.Widget.Chart do
     %{
       data: all_data,
       chart_type: Keyword.get(opts, :chart_type, :line),
-      marker: Keyword.get(opts, :marker, :braille),
       pixel_style: Keyword.get(opts, :pixel_style, :braille),
       min_value: Keyword.get(opts, :min_value),
       max_value: Keyword.get(opts, :max_value),
@@ -375,7 +371,6 @@ defmodule Drafter.Widget.Chart do
       state
       | data: new_data,
         chart_type: Map.get(props, :chart_type, state.chart_type),
-        marker: Map.get(props, :marker, state.marker),
         pixel_style: Map.get(props, :pixel_style, state.pixel_style),
         min_value: min_val,
         max_value: max_val,
@@ -399,6 +394,7 @@ defmodule Drafter.Widget.Chart do
         show_values: Map.get(props, :show_values, state.show_values),
         _internal:
           Map.merge(state._internal, %{
+            precision: Map.get(props, :precision, state._internal[:precision] || 3),
             render_timestamp: Map.get(props, :_render_timestamp, state._internal.render_timestamp),
             live_candle: live_candle,
             data_tuple: new_tuple,
@@ -550,7 +546,7 @@ defmodule Drafter.Widget.Chart do
     y_axis_segments =
       for i <- 0..(rect.height - 3) do
         y_val = state.max_value - (state.max_value - state.min_value) * i / (rect.height - 3)
-        label = format_axis_value(y_val)
+        label = format_axis_value(y_val, state._internal[:precision] || 3)
         Segment.new(IO.iodata_to_binary([String.pad_leading(label, label_width), "│"]), %{fg: fg, bg: bg})
       end
 
@@ -579,8 +575,8 @@ defmodule Drafter.Widget.Chart do
   end
 
   defp compute_y_axis_width(state) do
-    min_label = format_axis_value(state.min_value)
-    max_label = format_axis_value(state.max_value)
+    min_label = format_axis_value(state.min_value, state._internal[:precision] || 3)
+    max_label = format_axis_value(state.max_value, state._internal[:precision] || 3)
     max(String.length(min_label), String.length(max_label))
   end
 
@@ -605,15 +601,15 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
-  defp format_axis_value(val) when is_float(val) do
+  defp format_axis_value(val, precision) when is_float(val) do
     cond do
       abs(val) >= 1000 -> "#{Float.round(val / 1000, 1)}k"
-      abs(val) >= 1 -> Float.round(val, 1) |> to_string()
-      true -> Float.round(val, 3) |> to_string()
+      abs(val) >= 1 -> :erlang.float_to_binary(Float.round(val, 1), decimals: 1)
+      true -> :erlang.float_to_binary(Float.round(val, precision), decimals: precision)
     end
   end
 
-  defp format_axis_value(val), do: to_string(val)
+  defp format_axis_value(val, _precision), do: to_string(val)
 
   defp update_internal(state, updates) do
     %{state | _internal: Enum.into(updates, state._internal)}

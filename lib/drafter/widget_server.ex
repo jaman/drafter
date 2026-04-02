@@ -202,14 +202,18 @@ defmodule Drafter.WidgetServer do
 
       case result do
         {:continue, updated_event, new_widget_state} ->
-          {:reply, {:continue, updated_event, new_widget_state}, %{state | state: new_widget_state}}
+          {:reply, {:continue, updated_event, new_widget_state},
+           %{state | state: new_widget_state}}
 
         {:stop, updated_event, new_widget_state, actions} ->
           handle_actions(state.id, actions)
-          {:reply, {:stop, updated_event, new_widget_state, actions}, %{state | state: new_widget_state}}
+
+          {:reply, {:stop, updated_event, new_widget_state, actions},
+           %{state | state: new_widget_state}}
 
         {:prevent, updated_event, new_widget_state} ->
-          {:reply, {:prevent, updated_event, new_widget_state}, %{state | state: new_widget_state}}
+          {:reply, {:prevent, updated_event, new_widget_state},
+           %{state | state: new_widget_state}}
 
         other ->
           {:reply, other, state}
