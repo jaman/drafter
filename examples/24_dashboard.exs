@@ -80,13 +80,13 @@ defmodule Dashboard do
     Process.put(:dash_memory, memory)
 
     Drafter.push_data(:cpu_spark, cpu)
-    Drafter.push_data(:cpu_bar, cpu * 1.0)
+    Drafter.push_data(:cpu_meter, cpu / 100)
     Drafter.push_data(:mem_spark, memory)
-    Drafter.push_data(:mem_bar, memory * 1.0)
+    Drafter.push_data(:mem_meter, memory / 100)
     Drafter.push_data(:rx_spark, rx)
-    Drafter.push_data(:rx_bar, rx * 1.0)
+    Drafter.push_data(:rx_meter, rx / 100)
     Drafter.push_data(:tx_spark, tx)
-    Drafter.push_data(:tx_bar, tx * 1.0)
+    Drafter.push_data(:tx_meter, tx / 100)
 
     log_idx = Process.get(:dash_log_index, 8)
     msg = Enum.at(@log_messages, rem(log_idx, length(@log_messages)))
@@ -99,6 +99,10 @@ defmodule Dashboard do
   def render(state) do
     vertical([
       header("System Dashboard  — skins: 1 graphical  2 classic  3 retro  4 wireframe  5 ascii"),
+      breadcrumb(
+        [{"Home", :home}, {"Infrastructure", :infra}, {"Dashboard", :dash}],
+        separator: " › "
+      ),
       split_pane(
         [
           split_pane(
@@ -128,16 +132,16 @@ defmodule Dashboard do
       box(
         [
           label("CPU", style: %{bold: true}),
-          progress_bar(id: :cpu_bar, buffer: 1, show_percentage: true),
+          meter(id: :cpu_meter, buffer: 1),
           label(""),
           label("Memory", style: %{bold: true}),
-          progress_bar(id: :mem_bar, buffer: 1, show_percentage: true),
+          meter(id: :mem_meter, buffer: 1),
           label(""),
           label("Net RX", style: %{bold: true}),
-          progress_bar(id: :rx_bar, buffer: 1, show_percentage: true),
+          meter(id: :rx_meter, buffer: 1),
           label(""),
           label("Net TX", style: %{bold: true}),
-          progress_bar(id: :tx_bar, buffer: 1, show_percentage: true)
+          meter(id: :tx_meter, buffer: 1)
         ],
         title: "Resources"
       ),
@@ -146,9 +150,12 @@ defmodule Dashboard do
           label("Uptime  #{format_uptime(93_847)}"),
           label("Nodes   3 / 3 online"),
           label("Alerts  2 active"),
-          label("Tasks   14 running")
+          label("Tasks   14 running"),
+          label(""),
+          calendar()
         ],
-        title: "Overview"
+        title: "Overview",
+        flex: 1
       ),
       box(
         [
@@ -256,10 +263,6 @@ defmodule Dashboard do
       )
     ])
   end
-
-  defp bar_style(pct) when pct >= 85, do: %{fg: {215, 60, 60}, bold: true}
-  defp bar_style(pct) when pct >= 70, do: %{fg: {215, 160, 0}, bold: true}
-  defp bar_style(_), do: %{fg: {80, 200, 100}, bold: true}
 
   defp clamp(v, lo, hi), do: max(lo, min(hi, v))
 

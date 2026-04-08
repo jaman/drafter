@@ -119,6 +119,35 @@ defmodule Charts do
           label(""),
           label("Scatter Plot", style: %{fg: {100, 150, 255}, bold: true}),
           chart(state.data, chart_type: :scatter, height: 5, color: {255, 184, 108}),
+          label(""),
+          label("Pie Charts", style: %{fg: {100, 150, 255}, bold: true}),
+          horizontal(
+            [
+              pie_chart(
+                [
+                  {"Electronics", 34.2},
+                  {"Clothing", 22.8},
+                  {"Food & Bev", 18.5},
+                  {"Home", 12.1},
+                  {"Sports", 7.9},
+                  {"Other", 4.5}
+                ],
+                show_legend: true,
+                show_percentages: true
+              ),
+              pie_chart(
+                [
+                  {"Elixir", 42, {148, 94, 207}},
+                  {"Rust", 28, {222, 110, 55}},
+                  {"Go", 18, {0, 173, 216}},
+                  {"Python", 12, {55, 118, 171}}
+                ],
+                show_legend: true,
+                show_percentages: true
+              )
+            ],
+            gap: 2
+          ),
           label("")
         ],
         flex: 1

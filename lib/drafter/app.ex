@@ -319,6 +319,22 @@ defmodule Drafter.App do
     {:chart, data, opts}
   end
 
+  def pie_chart(data, opts \\ []) do
+    {:pie_chart, data, opts}
+  end
+
+  def calendar(opts \\ []) do
+    {:calendar, opts}
+  end
+
+  def breadcrumb(items, opts \\ []) do
+    {:breadcrumb, items, opts}
+  end
+
+  def meter(opts \\ []) do
+    {:meter, opts}
+  end
+
   def link(text, opts \\ [])
 
   def link(text, url) when is_binary(url) do

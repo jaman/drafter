@@ -22,7 +22,7 @@ defmodule Drafter.Widget.FilePicker do
   """
 
   use Drafter.App
-  import Drafter.App
+  import Drafter.App, except: [breadcrumb: 1, breadcrumb: 2]
 
   @sidebar_locations [
     {"Desktop", "~/Desktop"},
