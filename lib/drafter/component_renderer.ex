@@ -770,7 +770,8 @@ defmodule Drafter.ComponentRenderer do
       ratio: default_ratio,
       orientation: orientation,
       total_size: total_size,
-      show_handle: Keyword.get(opts, :show_handle, true)
+      show_handle: Keyword.get(opts, :show_handle, true),
+      resize_mode: Keyword.get(opts, :resize_mode, :quick)
     }
 
     divider_update = %{orientation: orientation, total_size: total_size}

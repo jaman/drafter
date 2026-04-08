@@ -108,14 +108,16 @@ defmodule Dashboard do
             ],
             orientation: :horizontal,
             ratio: 0.32,
-            id: :inner_split
+            id: :inner_split,
+            resize_mode: :quick
           ),
           render_right(state)
         ],
         orientation: :horizontal,
         ratio: 0.7,
         id: :outer_split,
-        flex: 1
+        flex: 1,
+        resize_mode: :live
       ),
       footer()
     ])
@@ -238,7 +240,8 @@ defmodule Dashboard do
       ],
       orientation: :vertical,
       ratio: 0.6,
-      id: :center_split
+      id: :center_split,
+      resize_mode: :live
     )
   end
 

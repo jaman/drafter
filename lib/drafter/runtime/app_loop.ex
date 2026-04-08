@@ -8,6 +8,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   alias Drafter.{Compositor, Event, RenderCache, SkinManager, Terminal, ThemeManager}
   alias Drafter.Runtime.Renderer
+  alias Drafter.Widget.SplitPaneDivider
 
   @scroll_debounce_ms 150
 
@@ -417,14 +418,6 @@ defmodule Drafter.Runtime.AppLoop do
     Process.put(:render_cache_layout_dirty, true)
     {needs_layout, layout_direction} = RenderCache.extract_layout_impact(actions)
 
-    updated_hierarchy =
-      if needs_layout do
-        scoped_invalidate_for_layout(layout_direction, screen_rect)
-        Renderer.update_hierarchy_preferred_sizes(new_hierarchy)
-      else
-        new_hierarchy
-      end
-
     new_app_state =
       Enum.reduce(actions, app_state, fn
         {:app_callback, callback, data}, acc_state ->
@@ -436,14 +429,28 @@ defmodule Drafter.Runtime.AppLoop do
     has_app_callback = Enum.any?(actions, &match?({:app_callback, _, _}, &1))
     post_widget_state = maybe_passthrough_mouse(app_module, event, new_app_state, raw_mouse_event?, has_app_callback)
 
-    if :scroll_fast_render in actions and scroll_optimization_enabled?() do
-      scrolled_app_state = maybe_scroll_active(app_module, post_widget_state)
-      Renderer.render_hierarchy(updated_hierarchy, screen_rect)
-      reschedule_scroll_debounce()
-      app_event_loop(app_module, scrolled_app_state, screen_rect, timers, updated_hierarchy, session_stack)
-    else
-      {_, final_hierarchy} = immediate_render(app_module, post_widget_state, screen_rect, updated_hierarchy)
-      app_event_loop(app_module, post_widget_state, screen_rect, timers, final_hierarchy, session_stack)
+    cond do
+      :divider_move in actions ->
+        moved_hierarchy = move_divider_rect(new_hierarchy)
+        Renderer.render_hierarchy(moved_hierarchy, screen_rect)
+        app_event_loop(app_module, post_widget_state, screen_rect, timers, moved_hierarchy, session_stack)
+
+      needs_layout ->
+        clear_divider_origins()
+        scoped_invalidate_for_layout(layout_direction, screen_rect)
+        updated_h = Renderer.update_hierarchy_preferred_sizes(new_hierarchy)
+        {_, done_h} = immediate_render(app_module, post_widget_state, screen_rect, updated_h)
+        app_event_loop(app_module, post_widget_state, screen_rect, timers, done_h, session_stack)
+
+      :scroll_fast_render in actions and scroll_optimization_enabled?() ->
+        scrolled_app_state = maybe_scroll_active(app_module, post_widget_state)
+        Renderer.render_hierarchy(new_hierarchy, screen_rect)
+        reschedule_scroll_debounce()
+        app_event_loop(app_module, scrolled_app_state, screen_rect, timers, new_hierarchy, session_stack)
+
+      true ->
+        {_, final_hierarchy} = immediate_render(app_module, post_widget_state, screen_rect, new_hierarchy)
+        app_event_loop(app_module, post_widget_state, screen_rect, timers, final_hierarchy, session_stack)
     end
   end
 
@@ -834,8 +841,66 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
+  defp move_divider_rect(hierarchy) do
+    Enum.reduce(hierarchy.widgets, hierarchy, fn {widget_id, widget_info}, acc ->
+      state = widget_info.state
+
+      if widget_info.module == SplitPaneDivider and
+           Map.get(state, :dragging, false) do
+        apply_divider_delta(acc, widget_id, state)
+      else
+        acc
+      end
+    end)
+  end
+
+  defp apply_divider_delta(hierarchy, widget_id, state) do
+    current_rect = Map.get(hierarchy.widget_rects, widget_id)
+    start_pos = Map.get(state, :drag_start_pos)
+
+    if current_rect && start_pos do
+      origin_key = {:divider_origin_rect, widget_id}
+
+      origin_rect =
+        case Process.get(origin_key) do
+          nil ->
+            Process.put(origin_key, current_rect)
+            current_rect
+
+          rect ->
+            rect
+        end
+
+      new_pos = SplitPaneDivider.effective_pos(state)
+      delta = new_pos - start_pos
+
+      new_rect =
+        if state.orientation == :horizontal do
+          %{origin_rect | x: origin_rect.x + delta}
+        else
+          %{origin_rect | y: origin_rect.y + delta}
+        end
+
+      Drafter.WidgetHierarchy.update_widget_rect(hierarchy, widget_id, new_rect)
+    else
+      hierarchy
+    end
+  end
+
+  defp clear_divider_origins do
+    Process.get_keys()
+    |> Enum.each(fn
+      {:divider_origin_rect, _} = key -> Process.delete(key)
+      _ -> :ok
+    end)
+  end
+
   defp scoped_invalidate_for_layout(:all, _screen_rect) do
     RenderCache.invalidate()
+  end
+
+  defp scoped_invalidate_for_layout(:resize, _screen_rect) do
+    Process.put(:render_cache_layout_dirty, true)
   end
 
   defp scoped_invalidate_for_layout(direction, screen_rect) when direction in [:self, :below, :above, :left, :right, :parent] do

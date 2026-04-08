@@ -32,7 +32,9 @@ defmodule Drafter.Widget.SplitPaneDivider do
     :focused,
     :dragging,
     :total_size,
-    :show_handle
+    :show_handle,
+    :drag_start_pos,
+    resize_mode: :quick
   ]
 
   @spec mount(map()) :: %__MODULE__{}
@@ -45,7 +47,8 @@ defmodule Drafter.Widget.SplitPaneDivider do
       focused: false,
       dragging: false,
       total_size: Map.get(props, :total_size, 100),
-      show_handle: Map.get(props, :show_handle, true)
+      show_handle: Map.get(props, :show_handle, true),
+      resize_mode: Map.get(props, :resize_mode, :quick)
     }
   end
 
@@ -106,19 +109,29 @@ defmodule Drafter.Widget.SplitPaneDivider do
 
   @spec handle_press(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}}
   def handle_press(_x, _y, state) do
-    {:ok, %{state | dragging: true}}
+    {:ok, %{state | dragging: true, drag_start_pos: effective_pos(state)}}
   end
 
   @spec handle_drag(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}, list()}
-  def handle_drag(x, y, state) do
+  def handle_drag(x, y, %{resize_mode: :live} = state) do
     delta = if state.orientation == :horizontal, do: x, else: y
     new_pos = clamp_pos(effective_pos(state) + delta, state.total_size)
     {:ok, %{state | fixed_pos: new_pos}, [{:widget_layout_needed, :all}]}
   end
 
-  @spec handle_mouse_up(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}}
-  def handle_mouse_up(_x, _y, state) do
+  def handle_drag(x, y, state) do
+    delta = if state.orientation == :horizontal, do: x, else: y
+    new_pos = clamp_pos(effective_pos(state) + delta, state.total_size)
+    {:ok, %{state | fixed_pos: new_pos}, [:divider_move]}
+  end
+
+  @spec handle_mouse_up(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}, list()}
+  def handle_mouse_up(_x, _y, %{resize_mode: :live} = state) do
     {:ok, %{state | dragging: false}}
+  end
+
+  def handle_mouse_up(_x, _y, state) do
+    {:ok, %{state | dragging: false}, [{:widget_layout_needed, :all}]}
   end
 
   @spec effective_pos(%__MODULE__{}) :: integer()
