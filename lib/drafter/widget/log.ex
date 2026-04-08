@@ -139,6 +139,12 @@ defmodule Drafter.Widget.Log do
     }
   end
 
+  @impl Drafter.Widget
+  def apply_data_buffer(state, buffer, rect) do
+    lines = Drafter.RingBuffer.last_n(buffer, rect.height)
+    %{state | lines: lines}
+  end
+
   defp ensure_mounted(state) do
     if is_struct(state, __MODULE__), do: state, else: mount(state)
   end

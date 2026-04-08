@@ -33,7 +33,7 @@ defmodule Drafter.Widget.Sparkline do
 
   use Drafter.Widget
 
-  alias Drafter.{CharacterSet, Visualization}
+  alias Drafter.{CharacterSet, RingBuffer, Visualization}
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
 
@@ -106,6 +106,18 @@ defmodule Drafter.Widget.Sparkline do
   end
 
   @impl Drafter.Widget
+  def apply_data_buffer(state, %RingBuffer{count: 0}, _rect), do: state
+
+  def apply_data_buffer(state, buffer, rect) do
+    width = if state.summary, do: rect.width - 20, else: rect.width
+    data = RingBuffer.last_n(buffer, max(1, width))
+
+    {min_val, max_val} = {Enum.min(data), Enum.max(data)}
+
+    %{state | data: data, min_value: min_val, max_value: max_val}
+  end
+
+  @impl Drafter.Widget
   def handle_event(_event, state) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
     {:noreply, state}
@@ -148,7 +160,12 @@ defmodule Drafter.Widget.Sparkline do
   def from_component_opts(data, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
-    all_data = if is_list(data), do: data, else: Keyword.get(opts, :data, [])
+    all_data =
+      if is_list(data) and data != [] and not Keyword.keyword?(data) do
+        data
+      else
+        Keyword.get(opts, :data, [])
+      end
 
     %{
       data: all_data,

@@ -170,23 +170,71 @@ defmodule Drafter do
     {Footer, props}
   end
 
-  @doc "Set an interval timer"
-  @spec set_interval(pos_integer(), atom()) :: :ok
-  def set_interval(value, unit_or_id) do
-    interval_ms =
-      case unit_or_id do
-        :fps -> round(1000 / value)
-        :ms -> value
-        :tick -> value
-        _ -> value
-      end
+  @doc """
+  Set an interval timer.
 
+  The first argument specifies the rate — accepts:
+    * integer milliseconds: `set_interval(500)` or `set_interval(500, :my_timer)`
+    * fps string: `set_interval("24fps")` or `set_interval("24fps", :my_timer)`
+    * fps atom shorthand: `set_interval(24, :fps)` (legacy, equivalent to `"24fps"`)
+
+  The optional second argument is the timer ID used in `on_timer/2`.
+  Defaults to `:tick` when omitted or when a unit atom (`:fps`, `:ms`) is given.
+
+      set_interval("30fps")
+      set_interval(500, :poll)
+      set_interval("10fps", :animation)
+  """
+  @spec set_interval(pos_integer() | String.t(), atom()) :: :ok
+  def set_interval(rate, timer_id \\ :tick)
+
+  def set_interval(rate, timer_id) when is_binary(rate) do
+    do_set_interval(parse_rate(rate), timer_id)
+  end
+
+  def set_interval(value, :fps) do
+    do_set_interval(round(1000 / value), :tick)
+  end
+
+  def set_interval(value, :ms) do
+    do_set_interval(value, :tick)
+  end
+
+  def set_interval(value, timer_id) when is_integer(value) do
+    do_set_interval(value, timer_id)
+  end
+
+  defp do_set_interval(interval_ms, timer_id) do
     case Process.get(:pending_intervals) do
-      nil -> send(self(), {:set_interval, interval_ms, unit_or_id})
-      pending -> Process.put(:pending_intervals, [{interval_ms, unit_or_id} | pending])
+      nil -> send(self(), {:set_interval, interval_ms, timer_id})
+      pending -> Process.put(:pending_intervals, [{interval_ms, timer_id} | pending])
     end
 
     :ok
+  end
+
+  defp parse_rate(s) when is_binary(s) do
+    cond do
+      Regex.match?(~r/^\d+(\.\d+)?\s*fps$/i, s) ->
+        [fps_str] = Regex.run(~r/[\d.]+/, s)
+
+        fps =
+          if String.contains?(fps_str, "."),
+            do: String.to_float(fps_str),
+            else: String.to_integer(fps_str)
+
+        round(1000 / fps)
+
+      Regex.match?(~r/^\d+(\.\d+)?\s*ms$/i, s) ->
+        [ms_str] = Regex.run(~r/[\d.]+/, s)
+
+        if String.contains?(ms_str, "."),
+          do: round(String.to_float(ms_str)),
+          else: String.to_integer(ms_str)
+
+      true ->
+        raise ArgumentError, "invalid interval rate: #{inspect(s)}. Use integer ms, \"24fps\", or \"500ms\""
+    end
   end
 
   @doc "Set a one-time timeout timer"
@@ -247,6 +295,67 @@ defmodule Drafter do
     after
       100 -> nil
     end
+  end
+
+  @doc """
+  Push data into a widget's data channel buffer.
+
+  The widget must have been declared with `buffer:` and `refresh:` options.
+  Data accumulates in the widget's RingBuffer and triggers a render only
+  when the widget's throttle window opens.
+
+      Drafter.push_data(:cpu_sparkline, 42.5)
+      Drafter.push_data(:event_log, "Connection established")
+  """
+  @spec push_data(atom(), term()) :: :ok
+  def push_data(widget_id, data) do
+    case Drafter.WidgetPidRegistry.lookup(widget_id) do
+      nil -> :ok
+      pid -> Drafter.WidgetServer.push_data(pid, data)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Push multiple data items into a widget's data channel buffer.
+
+      Drafter.push_data_many(:cpu_sparkline, [42.5, 43.1, 41.8])
+  """
+  @spec push_data_many(atom(), Enumerable.t()) :: :ok
+  def push_data_many(widget_id, items) do
+    case Drafter.WidgetPidRegistry.lookup(widget_id) do
+      nil -> :ok
+      pid -> Drafter.WidgetServer.push_data_many(pid, items)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Pause a widget's data channel. Data still buffers but no renders fire.
+  """
+  @spec pause_widget_data(atom()) :: :ok
+  def pause_widget_data(widget_id) do
+    case Drafter.WidgetPidRegistry.lookup(widget_id) do
+      nil -> :ok
+      pid -> Drafter.WidgetServer.pause_data(pid)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Resume a paused widget's data channel.
+  """
+  @spec resume_widget_data(atom()) :: :ok
+  def resume_widget_data(widget_id) do
+    case Drafter.WidgetPidRegistry.lookup(widget_id) do
+      nil -> :ok
+      pid -> Drafter.WidgetServer.resume_data(pid)
+    end
+
+    :ok
   end
 
   @doc """
@@ -756,7 +865,9 @@ defmodule Drafter do
   end
 
   defp maybe_update_sizes(hierarchy, actions) do
-    if Enum.member?(actions, :widget_layout_needed) do
+    {needs_layout, _direction} = Drafter.RenderCache.extract_layout_impact(actions)
+
+    if needs_layout do
       Renderer.update_hierarchy_preferred_sizes(hierarchy)
     else
       hierarchy

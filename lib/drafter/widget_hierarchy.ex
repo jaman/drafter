@@ -89,28 +89,30 @@ defmodule Drafter.WidgetHierarchy do
     Process.put(:rendered_widget_ids, MapSet.put(rendered, widget_id))
   end
 
-  @spec add_widget(t(), widget_id(), module(), map(), widget_id() | nil, rect()) :: t()
+  @spec add_widget(t(), widget_id(), module(), map(), widget_id() | nil, rect(), keyword()) :: t()
   def add_widget(
         hierarchy,
         widget_id,
         widget_module,
         mount_props,
         parent_id \\ nil,
-        rect \\ %{x: 0, y: 0, width: 0, height: 0}
+        rect \\ %{x: 0, y: 0, width: 0, height: 0},
+        server_opts \\ []
       ) do
     mark_widget_rendered(widget_id)
     Code.ensure_loaded(widget_module)
 
     session_ctx = collect_session_pdict()
 
-    {:ok, pid} =
-      WidgetServer.start_link(
-        id: widget_id,
-        module: widget_module,
-        props: mount_props,
-        rect: rect,
-        session_ctx: session_ctx
-      )
+    base_opts = [
+      id: widget_id,
+      module: widget_module,
+      props: mount_props,
+      rect: rect,
+      session_ctx: session_ctx
+    ]
+
+    {:ok, pid} = WidgetServer.start_link(base_opts ++ server_opts)
 
     widget_state = WidgetServer.get_state(pid)
     order = hierarchy.widget_counter

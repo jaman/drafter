@@ -25,6 +25,7 @@ defmodule Drafter.Widget do
   @type expand_option :: :fill | :content | pos_integer()
   @type scroll_direction :: :up | :down
   @type key :: atom()
+  @type layout_impact :: :self | :below | :above | :left | :right | :all | :parent
 
   @callback mount(props()) :: state()
   @callback render(state(), rect()) :: render_result()
@@ -44,6 +45,8 @@ defmodule Drafter.Widget do
               | {:stop, Event.Object.t(), state(), list()}
               | {:prevent, Event.Object.t(), state()}
 
+  @callback apply_data_buffer(state(), Drafter.RingBuffer.t(), rect()) :: state()
+
   @optional_callbacks [
     update: 2,
     unmount: 1,
@@ -54,7 +57,8 @@ defmodule Drafter.Widget do
     handle_drag: 3,
     handle_hover: 3,
     handle_custom_event: 2,
-    handle_event_capture: 2
+    handle_event_capture: 2,
+    apply_data_buffer: 3
   ]
 
   def mount(_props), do: %{}
@@ -76,6 +80,7 @@ defmodule Drafter.Widget do
   defp generate_trait_based_widget(trait_specs, opts) do
     escaped_opts = Macro.escape(opts)
     extra_handles = Keyword.get(opts, :handles, [])
+    layout_impact = Keyword.get(opts, :layout_impact, :self)
 
     quote do
       @behaviour Drafter.Widget
@@ -91,6 +96,7 @@ defmodule Drafter.Widget do
       @__trait_bitmap__ Trait.build_bitmap(@__trait_modules__)
       @__trait_render_fields__ Trait.collect_render_affecting_fields(@__trait_modules__)
       @__trait_layout_static__ Trait.all_layout_static?(@__trait_modules__)
+      @__layout_impact__ unquote(layout_impact)
 
       def __widget_capabilities__ do
         %{
@@ -98,7 +104,8 @@ defmodule Drafter.Widget do
           capture_handles: [],
           focusable: @__trait_focusable__,
           scroll: Trait.scroll_config(@__trait_modules__, unquote(escaped_opts)),
-          traits: Enum.map(@__trait_modules__, & &1.name())
+          traits: Enum.map(@__trait_modules__, & &1.name()),
+          layout_impact: @__layout_impact__
         }
       end
 
@@ -107,6 +114,7 @@ defmodule Drafter.Widget do
       def __render_affecting_fields__, do: @__trait_render_fields__
       def __layout_static__, do: @__trait_layout_static__
       def __trait_default_state__, do: @__trait_default_state__
+      def __layout_impact__, do: @__layout_impact__
 
       def handle_event(event, state) do
         Pipeline.run(__MODULE__, @__trait_modules__, event, state, @__trait_handles__, @__trait_focusable__)
@@ -121,6 +129,7 @@ defmodule Drafter.Widget do
     capture_handles = Keyword.get(opts, :capture_handles, [])
     focusable = Keyword.get(opts, :focusable, :keyboard in handles)
     scroll_config = parse_scroll_config(Keyword.get(opts, :scroll), :scroll in handles)
+    layout_impact = Keyword.get(opts, :layout_impact, :self)
 
     quote do
       @behaviour Drafter.Widget
@@ -131,15 +140,19 @@ defmodule Drafter.Widget do
       @__widget_capture_handles__ unquote(capture_handles)
       @__widget_focusable__ unquote(focusable)
       @__widget_scroll_config__ unquote(Macro.escape(scroll_config))
+      @__layout_impact__ unquote(layout_impact)
 
       def __widget_capabilities__ do
         %{
           handles: @__widget_handles__,
           capture_handles: @__widget_capture_handles__,
           focusable: @__widget_focusable__,
-          scroll: @__widget_scroll_config__
+          scroll: @__widget_scroll_config__,
+          layout_impact: @__layout_impact__
         }
       end
+
+      def __layout_impact__, do: @__layout_impact__
 
       def handle_event(event, state) do
         EventRouter.route_event(
@@ -165,7 +178,7 @@ defmodule Drafter.Widget do
       def preferred_height(_args, _opts), do: 1
 
       defoverridable Drafter.Widget
-      defoverridable focused: 1, update_props_from_mount: 3, preferred_height: 2
+      defoverridable focused: 1, update_props_from_mount: 3, preferred_height: 2, __layout_impact__: 0
     end
   end
 

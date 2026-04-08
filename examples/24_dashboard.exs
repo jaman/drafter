@@ -1,4 +1,8 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([
+  {:drafter, path: Path.join(__DIR__, "..")},
+  {:elixir_make, "~> 0.9"},
+  {:spark, "~> 2.6"}
+])
 
 defmodule Dashboard do
   use Drafter.App
@@ -42,26 +46,23 @@ defmodule Dashboard do
   ]
 
   def mount(_props) do
-    %{
-      current_skin: :graphical,
-      tick: 0,
-      cpu: 38,
-      memory: 61,
-      net_rx: 42,
-      net_tx: 18,
-      uptime_secs: 93_847,
-      cpu_hist: gen_hist(60, 10, 60),
-      mem_hist: gen_hist(60, 45, 30),
-      net_rx_hist: gen_hist(60, 5, 80),
-      net_tx_hist: gen_hist(60, 2, 40),
-      log_lines: Enum.take(@log_messages, 8),
-      log_index: 8
-    }
+    Process.put(:dash_memory, 61)
+    Process.put(:dash_log_index, 8)
+    %{current_skin: :graphical}
   end
 
   def on_ready(state) do
-    Drafter.set_interval(500, :tick)
+    Drafter.set_interval(24, :fps)
+    seed_buffers()
     state
+  end
+
+  defp seed_buffers do
+    Enum.each(gen_hist(60, 10, 60), &Drafter.push_data(:cpu_spark, &1))
+    Enum.each(gen_hist(60, 45, 30), &Drafter.push_data(:mem_spark, &1))
+    Enum.each(gen_hist(60, 5, 80), &Drafter.push_data(:rx_spark, &1))
+    Enum.each(gen_hist(60, 2, 40), &Drafter.push_data(:tx_spark, &1))
+    Enum.each(Enum.take(@log_messages, 8), &Drafter.push_data(:event_log, &1))
   end
 
   def keybindings do
@@ -70,29 +71,29 @@ defmodule Dashboard do
   end
 
   def on_timer(:tick, state) do
+    prev_mem = Process.get(:dash_memory, 61)
     cpu = clamp(:rand.uniform(100), 5, 95)
-    memory = clamp(state.memory + :rand.uniform(7) - 3, 30, 90)
+    memory = clamp(prev_mem + :rand.uniform(7) - 3, 30, 90)
     rx = clamp(:rand.uniform(100), 5, 99)
     tx = clamp(:rand.uniform(60), 2, 60)
 
-    msg = Enum.at(@log_messages, rem(state.log_index, length(@log_messages)))
-    new_line = timestamp_prefix() <> msg
+    Process.put(:dash_memory, memory)
 
-    %{
-      state
-      | tick: state.tick + 1,
-        cpu: cpu,
-        memory: memory,
-        net_rx: rx,
-        net_tx: tx,
-        uptime_secs: state.uptime_secs + 1,
-        cpu_hist: tl(state.cpu_hist) ++ [cpu],
-        mem_hist: tl(state.mem_hist) ++ [memory],
-        net_rx_hist: tl(state.net_rx_hist) ++ [rx],
-        net_tx_hist: tl(state.net_tx_hist) ++ [tx],
-        log_lines: Enum.take(state.log_lines ++ [new_line], -200),
-        log_index: state.log_index + 1
-    }
+    Drafter.push_data(:cpu_spark, cpu)
+    Drafter.push_data(:cpu_bar, cpu * 1.0)
+    Drafter.push_data(:mem_spark, memory)
+    Drafter.push_data(:mem_bar, memory * 1.0)
+    Drafter.push_data(:rx_spark, rx)
+    Drafter.push_data(:rx_bar, rx * 1.0)
+    Drafter.push_data(:tx_spark, tx)
+    Drafter.push_data(:tx_bar, tx * 1.0)
+
+    log_idx = Process.get(:dash_log_index, 8)
+    msg = Enum.at(@log_messages, rem(log_idx, length(@log_messages)))
+    Drafter.push_data(:event_log, timestamp_prefix() <> msg)
+    Process.put(:dash_log_index, log_idx + 1)
+
+    state
   end
 
   def render(state) do
@@ -124,23 +125,23 @@ defmodule Dashboard do
     vertical([
       box(
         [
-          label("CPU    #{state.cpu}%", style: bar_style(state.cpu)),
-          progress_bar(progress: state.cpu * 1.0, show_percentage: false),
+          label("CPU", style: %{bold: true}),
+          progress_bar(id: :cpu_bar, buffer: 1, show_percentage: true),
           label(""),
-          label("Memory #{state.memory}%", style: bar_style(state.memory)),
-          progress_bar(progress: state.memory * 1.0, show_percentage: false),
+          label("Memory", style: %{bold: true}),
+          progress_bar(id: :mem_bar, buffer: 1, show_percentage: true),
           label(""),
-          label("Net RX #{state.net_rx} Mbps"),
-          progress_bar(progress: state.net_rx * 1.0, show_percentage: false),
+          label("Net RX", style: %{bold: true}),
+          progress_bar(id: :rx_bar, buffer: 1, show_percentage: true),
           label(""),
-          label("Net TX #{state.net_tx} Mbps"),
-          progress_bar(progress: state.net_tx * 1.0, show_percentage: false)
+          label("Net TX", style: %{bold: true}),
+          progress_bar(id: :tx_bar, buffer: 1, show_percentage: true)
         ],
         title: "Resources"
       ),
       box(
         [
-          label("Uptime  #{format_uptime(state.uptime_secs)}"),
+          label("Uptime  #{format_uptime(93_847)}"),
           label("Nodes   3 / 3 online"),
           label("Alerts  2 active"),
           label("Tasks   14 running")
@@ -178,42 +179,42 @@ defmodule Dashboard do
     ])
   end
 
-  defp render_center(state) do
+  defp render_center(_state) do
     split_pane(
       [
         box(
           [
             label("CPU", style: %{bold: true}),
-            sparkline(state.cpu_hist,
+            sparkline(
+              id: :cpu_spark,
+              buffer: :auto,
               height: 1,
-              min_value: 0,
-              max_value: 100,
               min_color: {80, 200, 100},
               max_color: {215, 60, 60}
             ),
             label(""),
             label("Memory", style: %{bold: true}),
-            sparkline(state.mem_hist,
+            sparkline(
+              id: :mem_spark,
+              buffer: :auto,
               height: 1,
-              min_value: 0,
-              max_value: 100,
               min_color: {80, 140, 215},
               max_color: {215, 60, 60}
             ),
             label(""),
             label("Net RX", style: %{bold: true}),
-            sparkline(state.net_rx_hist,
+            sparkline(
+              id: :rx_spark,
+              buffer: :auto,
               height: 1,
-              min_value: 0,
-              max_value: 100,
               min_color: {80, 200, 140},
               max_color: {80, 200, 140}
             ),
             label("Net TX", style: %{bold: true}),
-            sparkline(state.net_tx_hist,
+            sparkline(
+              id: :tx_spark,
+              buffer: :auto,
               height: 1,
-              min_value: 0,
-              max_value: 100,
               min_color: {215, 140, 60},
               max_color: {215, 140, 60}
             )
@@ -241,11 +242,11 @@ defmodule Dashboard do
     )
   end
 
-  defp render_right(state) do
+  defp render_right(_state) do
     vertical([
       box(
         [
-          log(id: :event_log, lines: state.log_lines)
+          log(id: :event_log, buffer: 200)
         ],
         title: "Event Log",
         flex: 1

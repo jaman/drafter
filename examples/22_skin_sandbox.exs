@@ -1,4 +1,8 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([
+  {:drafter, path: Path.join(__DIR__, "..")},
+  {:elixir_make, "~> 0.9"},
+  {:spark, "~> 2.6"}
+])
 
 defmodule SkinSandbox do
   use Drafter.App
@@ -43,13 +47,13 @@ defmodule SkinSandbox do
   def mount(_props) do
     %{
       current_skin: Drafter.current_skin(),
-      progress: 68.0,
-      sparkline_data: Enum.map(1..30, fn _ -> :rand.uniform(100) end)
+      progress: 68.0
     }
   end
 
   def on_ready(state) do
-    Drafter.set_interval(20, :fps)
+    Drafter.set_interval(30, :sparkline_tick)
+    Enum.each(1..60, fn _ -> Drafter.push_data(:live_sparkline, :rand.uniform(100)) end)
     state
   end
 
@@ -65,9 +69,9 @@ defmodule SkinSandbox do
     ]
   end
 
-  def on_timer(:fps, state) do
-    [_ | rest] = state.sparkline_data
-    %{state | sparkline_data: rest ++ [:rand.uniform(100)]}
+  def on_timer(:sparkline_tick, state) do
+    Drafter.push_data(:live_sparkline, :rand.uniform(100))
+    state
   end
 
   def render(state) do
@@ -178,7 +182,9 @@ defmodule SkinSandbox do
               label(""),
               label("Sparkline (live):", style: %{bold: true}),
               sparkline(
-                state.sparkline_data,
+                id: :live_sparkline,
+                buffer: :auto,
+                #                refresh: 20,
                 min_color: {80, 180, 255},
                 max_color: {255, 100, 80},
                 summary: true

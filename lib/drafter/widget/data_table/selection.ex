@@ -356,12 +356,7 @@ defmodule Drafter.Widget.DataTable.Selection do
 
   def handle_mouse_drag(state, _x, _y) when state.drag.dragging_scrollbar == false, do: {:noreply, state}
 
-  def handle_mouse_drag(state, x, y) do
-    case determine_click_region(state, x, y) do
-      :scrollbar -> drag_scrollbar_to(state, x, y)
-      _ -> {:ok, put_in(state.drag.dragging_scrollbar, false), [:render_update]}
-    end
-  end
+  def handle_mouse_drag(state, _x, y), do: drag_scrollbar_to(state, 0, y)
 
   def handle_mouse_release(state, _x, _y) do
     {:ok, put_in(state.drag.dragging_scrollbar, false), [:render_update]}

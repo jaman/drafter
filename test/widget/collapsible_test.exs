@@ -125,10 +125,10 @@ defmodule Drafter.Widget.CollapsibleTest do
       assert new_state.expanded == true
     end
 
-    test "toggle action includes :widget_layout_needed" do
+    test "toggle action includes {:widget_layout_needed, :below}" do
       state = Collapsible.mount(%{title: "T", content: "body"})
       assert {:ok, _new_state, actions} = Collapsible.handle_event({:key, :enter}, state)
-      assert :widget_layout_needed in actions
+      assert {:widget_layout_needed, :below} in actions
     end
 
     test "click on title row (y: 0) toggles expanded" do

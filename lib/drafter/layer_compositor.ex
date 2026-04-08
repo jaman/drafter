@@ -50,16 +50,26 @@ defmodule Drafter.LayerCompositor do
   Each layer's content is placed at its bounds position.
   """
   def composite(layers, viewport) when is_list(layers) do
-    # Sort layers by z_index (background to foreground)
     sorted_layers = Enum.sort_by(layers, & &1.z_index)
-
-    # Initialize canvas with empty strips
     canvas = initialize_canvas(viewport)
 
-    # Composite each layer onto the canvas
     Enum.reduce(sorted_layers, canvas, fn layer, current_canvas ->
       composite_layer(current_canvas, layer, viewport)
     end)
+  end
+
+  @spec composite_incremental([map()], viewport(), [Strip.t()], MapSet.t(non_neg_integer())) ::
+          [Strip.t()]
+  def composite_incremental(layers, viewport, previous_composite, dirty_rows) do
+    sorted_layers = Enum.sort_by(layers, & &1.z_index)
+    canvas = initialize_canvas(viewport)
+
+    full_composite =
+      Enum.reduce(sorted_layers, canvas, fn layer, current_canvas ->
+        composite_layer_rows(current_canvas, layer, viewport, dirty_rows)
+      end)
+
+    merge_with_previous(full_composite, previous_composite, dirty_rows)
   end
 
   @doc """
@@ -384,4 +394,47 @@ defmodule Drafter.LayerCompositor do
   end
 
   defp char_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
+
+  defp composite_layer_rows(canvas, layer, viewport, dirty_rows) do
+    bounds = layer.bounds
+    layer_strips = layer.strips || []
+
+    canvas
+    |> Enum.with_index()
+    |> Enum.map(fn {canvas_strip, row_index} ->
+      if MapSet.member?(dirty_rows, row_index) do
+        composite_layer_row(canvas_strip, layer_strips, bounds, row_index, viewport)
+      else
+        canvas_strip
+      end
+    end)
+  end
+
+  defp composite_layer_row(canvas_strip, layer_strips, bounds, row_index, viewport) do
+    layer_row = row_index - bounds.y
+
+    in_bounds =
+      layer_row >= 0 and layer_row < length(layer_strips) and
+        row_index >= bounds.y and row_index < bounds.y + bounds.height and
+        bounds.x < viewport.width
+
+    if in_bounds do
+      layer_strip = Enum.at(layer_strips, layer_row)
+      composite_strips_at_position(canvas_strip, layer_strip, bounds.x, viewport.width)
+    else
+      canvas_strip
+    end
+  end
+
+  defp merge_with_previous(partial_composite, previous_composite, dirty_rows) do
+    partial_composite
+    |> Enum.with_index()
+    |> Enum.map(fn {strip, row_index} ->
+      if MapSet.member?(dirty_rows, row_index) do
+        strip
+      else
+        Enum.at(previous_composite, row_index) || strip
+      end
+    end)
+  end
 end

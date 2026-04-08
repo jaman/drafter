@@ -301,6 +301,17 @@ defmodule Drafter.Widget.Chart do
   end
 
   @impl Drafter.Widget
+  def apply_data_buffer(state, buffer, _rect) do
+    data = Drafter.RingBuffer.to_list(buffer)
+
+    if data != [] do
+      %{state | data: data}
+    else
+      state
+    end
+  end
+
+  @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
@@ -602,9 +613,10 @@ defmodule Drafter.Widget.Chart do
   end
 
   defp format_axis_value(val, precision) when is_float(val) do
-    cond do
-      abs(val) >= 1000 -> "#{Float.round(val / 1000, 1)}k"
-      true -> :erlang.float_to_binary(Float.round(val, precision), decimals: precision)
+    if abs(val) >= 1000 do
+      "#{Float.round(val / 1000, 1)}k"
+    else
+      :erlang.float_to_binary(Float.round(val, precision), decimals: precision)
     end
   end
 

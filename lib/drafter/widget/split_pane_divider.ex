@@ -16,7 +16,8 @@ defmodule Drafter.Widget.SplitPaneDivider do
 
   use Drafter.Widget,
     traits: [:focusable],
-    handles: [:keyboard, :press, :mouse_up, :drag]
+    handles: [:keyboard, :press, :mouse_up, :drag],
+    layout_impact: :all
 
   alias Drafter.{CharacterSet, ThemeManager}
   alias Drafter.Draw.{Segment, Strip}
@@ -112,7 +113,7 @@ defmodule Drafter.Widget.SplitPaneDivider do
   def handle_drag(x, y, state) do
     delta = if state.orientation == :horizontal, do: x, else: y
     new_pos = clamp_pos(effective_pos(state) + delta, state.total_size)
-    {:ok, %{state | fixed_pos: new_pos}, [:widget_layout_needed]}
+    {:ok, %{state | fixed_pos: new_pos}, [{:widget_layout_needed, :all}]}
   end
 
   @spec handle_mouse_up(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}}

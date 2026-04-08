@@ -413,6 +413,10 @@ defmodule Drafter.Widget.DataTable do
   end
 
   @impl Drafter.Widget
+  def handle_drag(_x, y, state) when state.drag.dragging_scrollbar do
+    Selection.drag_scrollbar_to(state, 0, y)
+  end
+
   def handle_drag(x, _y, state) when state.drag.resize_col != nil do
     Columns.do_column_resize(state, x)
   end

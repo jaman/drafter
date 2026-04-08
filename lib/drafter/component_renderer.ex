@@ -154,7 +154,8 @@ defmodule Drafter.ComponentRenderer do
 
   defp render_component_internal(h, {tag, args, opts}, rect, ctx, pid, idc)
        when is_atom(tag) and is_list(opts) do
-    dispatch_via_registry(h, tag, args, opts, rect, ctx, pid, idc)
+    {resolved_args, resolved_opts} = resolve_args_opts(args, opts)
+    dispatch_via_registry(h, tag, resolved_args, resolved_opts, rect, ctx, pid, idc)
   end
 
   defp render_component_internal(h, {tag, opts}, rect, ctx, pid, idc)
@@ -471,7 +472,31 @@ defmodule Drafter.ComponentRenderer do
       |> WidgetHierarchy.update_widget_rect(widget_id, rect)
       |> WidgetHierarchy.update_widget(widget_id, update_props)
     else
-      WidgetHierarchy.add_widget(hierarchy, widget_id, module, mount_props, parent_id, rect)
+      server_opts = extract_data_channel_opts(opts)
+      WidgetHierarchy.add_widget(hierarchy, widget_id, module, mount_props, parent_id, rect, server_opts)
+    end
+  end
+
+  defp resolve_args_opts(args, opts) when is_list(args) and is_list(opts) and opts == [] do
+    if Keyword.keyword?(args) do
+      {nil, args}
+    else
+      {args, opts}
+    end
+  end
+
+  defp resolve_args_opts(args, opts), do: {args, opts}
+
+  defp extract_data_channel_opts(opts) do
+    []
+    |> maybe_add_opt(opts, :buffer)
+    |> maybe_add_opt(opts, :refresh)
+  end
+
+  defp maybe_add_opt(acc, opts, key) do
+    case Keyword.get(opts, key) do
+      nil -> acc
+      val -> [{key, val} | acc]
     end
   end
 

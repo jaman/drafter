@@ -6,7 +6,7 @@ defmodule Drafter.Runtime.AppLoop do
   Calls Drafter.Runtime.Renderer for all rendering.
   """
 
-  alias Drafter.{Compositor, Event, SkinManager, Terminal, ThemeManager}
+  alias Drafter.{Compositor, Event, RenderCache, SkinManager, Terminal, ThemeManager}
   alias Drafter.Runtime.Renderer
 
   @scroll_debounce_ms 150
@@ -72,6 +72,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg({:tui_event, {:resize, {w, h}}}, {app_module, app_state, _rect, timers, wh, ss}) do
     rect = make_screen_rect(w, h)
+    RenderCache.invalidate()
     {_, new_wh} = immediate_render(app_module, app_state, rect, wh)
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
@@ -114,6 +115,7 @@ defmodule Drafter.Runtime.AppLoop do
         s when is_map(s) -> s
       end
 
+    RenderCache.invalidate()
     {_, new_wh} = immediate_render(app_module, new_state, rect, wh)
     app_event_loop(app_module, new_state, rect, timers, new_wh, ss)
   end
@@ -125,6 +127,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg({:skin_updated, skin}, {app_module, app_state, rect, timers, wh, ss}) do
     Process.put(:drafter_skin, skin)
+    RenderCache.invalidate()
     {_, new_wh} = immediate_render(app_module, app_state, rect, wh)
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
@@ -160,12 +163,14 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg({:focus_widget, widget_id}, {app_module, app_state, rect, timers, wh, ss}) do
     new_wh = if wh, do: Drafter.WidgetHierarchy.focus_widget(wh, widget_id), else: wh
+    Process.put(:render_cache_layout_dirty, true)
     {_, updated_wh} = immediate_render(app_module, app_state, rect, new_wh)
     app_event_loop(app_module, app_state, rect, timers, updated_wh, ss)
   end
 
   defp dispatch_loop_msg({:widget_event, event}, {app_module, app_state, rect, timers, wh, ss}) when wh != nil do
     {new_wh, _} = Drafter.WidgetHierarchy.broadcast_event(wh, event)
+    Process.put(:render_cache_layout_dirty, true)
     {_, updated_wh} = immediate_render(app_module, app_state, rect, new_wh)
     app_event_loop(app_module, app_state, rect, timers, updated_wh, ss)
   end
@@ -176,6 +181,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg({:widget_event, widget_id, event}, {app_module, app_state, rect, timers, wh, ss}) when wh != nil do
     {new_wh, _} = Drafter.WidgetHierarchy.send_event_to_widget(wh, widget_id, event)
+    Process.put(:render_cache_layout_dirty, true)
     {_, updated_wh} = immediate_render(app_module, app_state, rect, new_wh)
     app_event_loop(app_module, app_state, rect, timers, updated_wh, ss)
   end
@@ -186,6 +192,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg({:widget_render_needed, _id}, {app_module, app_state, rect, timers, wh, ss}) do
     drain_widget_render_notifications()
+    Process.put(:render_cache_layout_dirty, true)
     if wh, do: Renderer.render_hierarchy(wh, rect)
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
@@ -330,6 +337,7 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg({:push_session, new_module, opts, action_handlers, from_pid, ref}, {app_module, app_state, rect, timers, wh, ss}) do
+    RenderCache.invalidate()
     mount_props = opts |> Keyword.drop([:scroll_optimization, :syntax_highlighting, :refresh_rate]) |> Map.new()
     setup_frame_rate(new_module, opts)
     prev_handlers = Drafter.ActionRegistry.collect()
@@ -406,8 +414,12 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp handle_widget_consumed(app_module, app_state, screen_rect, timers, new_hierarchy, session_stack, actions, {event, raw_mouse_event?}) do
+    Process.put(:render_cache_layout_dirty, true)
+    {needs_layout, layout_direction} = RenderCache.extract_layout_impact(actions)
+
     updated_hierarchy =
-      if Enum.member?(actions, :widget_layout_needed) do
+      if needs_layout do
+        scoped_invalidate_for_layout(layout_direction, screen_rect)
         Renderer.update_hierarchy_preferred_sizes(new_hierarchy)
       else
         new_hierarchy
@@ -528,12 +540,18 @@ defmodule Drafter.Runtime.AppLoop do
     {new_hierarchy, widget_handled, needs_rerender, actions} =
       resolve_hierarchy_event(widget_hierarchy, event)
 
+    {needs_layout, layout_direction} = RenderCache.extract_layout_impact(actions)
+
     updated_hierarchy =
-      if Enum.member?(actions, :widget_layout_needed) do
+      if needs_layout do
+        Process.put(:render_cache_layout_dirty, true)
+        scoped_invalidate_for_layout(layout_direction, screen_rect)
         Renderer.update_hierarchy_preferred_sizes(new_hierarchy)
       else
         new_hierarchy
       end
+
+    if widget_handled, do: Process.put(:render_cache_layout_dirty, true)
 
     new_app_state =
       Enum.reduce(actions, app_state, fn
@@ -814,5 +832,19 @@ defmodule Drafter.Runtime.AppLoop do
       Process.send_after(self(), :deferred_render, remaining)
       Process.put(:render_deferred, true)
     end
+  end
+
+  defp scoped_invalidate_for_layout(:all, _screen_rect) do
+    RenderCache.invalidate()
+  end
+
+  defp scoped_invalidate_for_layout(direction, screen_rect) when direction in [:self, :below, :above, :left, :right, :parent] do
+    Process.put(:render_cache_layout_dirty, true)
+    Process.put(:render_cache_layout_direction, direction)
+    Process.put(:render_cache_layout_rect, screen_rect)
+  end
+
+  defp scoped_invalidate_for_layout(_, _screen_rect) do
+    RenderCache.invalidate()
   end
 end

@@ -292,4 +292,12 @@ defmodule Drafter.Widget.ProgressBar do
       classes: mount_props.classes
     }
   end
+
+  @impl Drafter.Widget
+  def apply_data_buffer(state, buffer, _rect) do
+    case Drafter.RingBuffer.last(buffer) do
+      nil -> state
+      value -> %{state | progress: value}
+    end
+  end
 end

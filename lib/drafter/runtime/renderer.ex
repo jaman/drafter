@@ -10,6 +10,7 @@ defmodule Drafter.Runtime.Renderer do
   alias Drafter.Compositor
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.LayerCompositor
+  alias Drafter.RenderCache
   alias Drafter.Screen
   alias Drafter.ScreenManager
   alias Drafter.ThemeManager
@@ -60,15 +61,29 @@ defmodule Drafter.Runtime.Renderer do
   end
 
   defp render_app_direct(app_module, app_state, screen_rect, existing_hierarchy) do
-    current_theme = ThemeManager.get_current_theme()
+    app_hash = :erlang.phash2(app_state)
+    prev_hash = RenderCache.get_app_state_hash()
+    layout_dirty = Process.get(:render_cache_layout_dirty, true)
 
-    render_result =
-      case app_module.render(app_state) do
-        [] -> app_module.render(app_state, screen_rect)
-        result -> result
-      end
+    if prev_hash == app_hash and existing_hierarchy != nil and not layout_dirty do
+      RenderCache.put_app_state_hash(app_hash)
+      render_hierarchy(existing_hierarchy, screen_rect)
+      {:ok, existing_hierarchy}
+    else
+      RenderCache.put_app_state_hash(app_hash)
+      Process.delete(:render_cache_layout_dirty)
+      Process.delete(:render_cache_layout_direction)
+      Process.delete(:render_cache_layout_rect)
+      current_theme = ThemeManager.get_current_theme()
 
-    apply_render_result(render_result, app_module, app_state, screen_rect, current_theme, existing_hierarchy)
+      render_result =
+        case app_module.render(app_state) do
+          [] -> app_module.render(app_state, screen_rect)
+          result -> result
+        end
+
+      apply_render_result(render_result, app_module, app_state, screen_rect, current_theme, existing_hierarchy)
+    end
   end
 
   defp apply_render_result(component_tree, app_module, app_state, screen_rect, theme, existing_hierarchy)
@@ -92,14 +107,22 @@ defmodule Drafter.Runtime.Renderer do
 
   defp render_hierarchy_layers(hierarchy, screen_rect, theme) do
     background_strips = create_app_background(screen_rect, theme)
-    widget_layers = create_widget_layers_from_hierarchy(hierarchy, screen_rect)
+    {widget_layers, dirty_ids, stale_bounds} = create_widget_layers_tracking_dirty(hierarchy, screen_rect)
 
     if widget_layers == [] do
+      RenderCache.put_composited(background_strips)
+      RenderCache.put_layer_count(0)
       Compositor.render_strips(background_strips, 0, 0)
     else
       viewport = %{width: screen_rect.width, height: screen_rect.height}
       background_layer = LayerCompositor.background_layer(background_strips, screen_rect)
-      final_strips = LayerCompositor.composite([background_layer] ++ widget_layers, viewport)
+      all_layers = [background_layer | widget_layers]
+
+      final_strips =
+        incremental_composite_or_full(all_layers, viewport, dirty_ids, stale_bounds)
+
+      RenderCache.put_composited(final_strips)
+      RenderCache.put_layer_count(length(all_layers))
       Compositor.render_strips(final_strips, 0, 0)
     end
   end
@@ -112,13 +135,21 @@ defmodule Drafter.Runtime.Renderer do
     background_strips = create_app_background(screen_rect, current_theme)
     viewport = %{width: screen_rect.width, height: screen_rect.height}
     background_layer = LayerCompositor.background_layer(background_strips, screen_rect)
-    base_layers = create_widget_layers_from_hierarchy(hierarchy, screen_rect)
+    {base_layers, dirty_ids, stale_bounds} = create_widget_layers_tracking_dirty(hierarchy, screen_rect)
 
     if screens == [] and toasts == [] do
       if base_layers == [] do
+        RenderCache.put_composited(background_strips)
+        RenderCache.put_layer_count(0)
         Compositor.render_strips(background_strips, 0, 0)
       else
-        final_strips = LayerCompositor.composite([background_layer] ++ base_layers, viewport)
+        all_layers = [background_layer | base_layers]
+
+        final_strips =
+          incremental_composite_or_full(all_layers, viewport, dirty_ids, stale_bounds)
+
+        RenderCache.put_composited(final_strips)
+        RenderCache.put_layer_count(length(all_layers))
         Compositor.render_strips(final_strips, 0, 0)
       end
     else
@@ -132,7 +163,11 @@ defmodule Drafter.Runtime.Renderer do
       all_layers =
         [background_layer] ++ base_layers ++ screen_layers ++ overlay_layers ++ toast_layers
 
-      final_strips = LayerCompositor.composite(all_layers, viewport)
+      final_strips =
+        incremental_composite_or_full(all_layers, viewport, dirty_ids, stale_bounds)
+
+      RenderCache.put_composited(final_strips)
+      RenderCache.put_layer_count(length(all_layers))
       Compositor.render_strips(final_strips, 0, 0)
     end
   end
@@ -271,6 +306,95 @@ defmodule Drafter.Runtime.Renderer do
     |> Map.keys()
     |> Enum.flat_map(fn widget_id ->
       build_widget_layer(hierarchy, widget_id, hidden, z_base)
+    end)
+  end
+
+  defp create_widget_layers_tracking_dirty(hierarchy, _rect, z_base \\ 0) do
+    hidden = Map.get(hierarchy, :hidden_widgets, MapSet.new())
+
+    {layers, dirty_ids, stale_bounds} =
+      hierarchy.widgets
+      |> Map.keys()
+      |> Enum.reduce({[], [], []}, fn widget_id, {layer_acc, dirty_acc, stale_acc} ->
+        case build_widget_layer(hierarchy, widget_id, hidden, z_base) do
+          [] ->
+            {layer_acc, dirty_acc, stale_acc}
+
+          widget_layers ->
+            {new_dirty, new_stale} = track_widget_dirty(widget_id, hd(widget_layers), dirty_acc, stale_acc)
+            {layer_acc ++ widget_layers, new_dirty, new_stale}
+        end
+      end)
+
+    visible_ids = layers |> Enum.map(& &1.id) |> MapSet.new()
+    vanished_bounds = collect_vanished_bounds(visible_ids)
+
+    {layers, dirty_ids, stale_bounds ++ vanished_bounds}
+  end
+
+  defp track_widget_dirty(widget_id, layer, dirty_acc, stale_acc) do
+    fingerprint = RenderCache.strips_fingerprint(layer.strips)
+    prev_fingerprint = RenderCache.get_widget_fingerprint(widget_id)
+    prev_bounds = RenderCache.get_widget_bounds(widget_id)
+
+    RenderCache.put_widget_fingerprint(widget_id, fingerprint)
+    RenderCache.put_widget_bounds(widget_id, layer.bounds)
+
+    changed = prev_fingerprint != fingerprint or prev_bounds != layer.bounds
+
+    if changed do
+      stale = if prev_bounds && prev_bounds != layer.bounds, do: [prev_bounds | stale_acc], else: stale_acc
+      {[widget_id | dirty_acc], stale}
+    else
+      {dirty_acc, stale_acc}
+    end
+  end
+
+  defp collect_vanished_bounds(visible_ids) do
+    RenderCache.get_all_widget_bounds()
+    |> Enum.reject(fn {id, _} -> MapSet.member?(visible_ids, id) end)
+    |> Enum.map(fn {_, bounds} -> bounds end)
+  end
+
+  defp incremental_composite_or_full(all_layers, viewport, dirty_ids, stale_bounds) do
+    previous = RenderCache.get_composited()
+    prev_layer_count = RenderCache.get_layer_count()
+
+    has_cache =
+      previous != nil and
+        prev_layer_count == length(all_layers) and
+        length(previous) == viewport.height
+
+    cond do
+      has_cache and dirty_ids == [] and stale_bounds == [] ->
+        previous
+
+      has_cache ->
+        dirty_rows =
+          dirty_ids
+          |> RenderCache.compute_dirty_rows()
+          |> add_bounds_rows(stale_bounds)
+
+        if MapSet.size(dirty_rows) >= viewport.height do
+          LayerCompositor.composite(all_layers, viewport)
+        else
+          LayerCompositor.composite_incremental(all_layers, viewport, previous, dirty_rows)
+        end
+
+      true ->
+        LayerCompositor.composite(all_layers, viewport)
+    end
+  end
+
+  defp add_bounds_rows(dirty_rows, bounds_list) do
+    Enum.reduce(bounds_list, dirty_rows, fn bounds, acc ->
+      y_end = bounds.y + bounds.height - 1
+
+      if y_end >= bounds.y do
+        Enum.reduce(bounds.y..y_end//1, acc, &MapSet.put(&2, &1))
+      else
+        acc
+      end
     end)
   end
 

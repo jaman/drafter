@@ -46,7 +46,8 @@ defmodule Drafter.Widget.Collapsible do
 
   use Drafter.Widget,
     traits: [:focusable],
-    handles: [:keyboard, :click]
+    handles: [:keyboard, :click],
+    layout_impact: :below
 
   alias Drafter.{CharacterSet, Text, ThemeManager}
   alias Drafter.Draw.{Segment, Strip}
@@ -176,6 +177,6 @@ defmodule Drafter.Widget.Collapsible do
       end
     end
 
-    {:ok, new_state, [:widget_layout_needed]}
+    {:ok, new_state, [{:widget_layout_needed, :below}]}
   end
 end

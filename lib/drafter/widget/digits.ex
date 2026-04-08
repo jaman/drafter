@@ -101,6 +101,7 @@ defmodule Drafter.Widget.Digits do
     " " => ["     ", "     ", "     "]
   }
 
+  @impl Drafter.Widget
   def mount(props) do
     %{
       text: Map.get(props, :text, ""),
@@ -114,6 +115,7 @@ defmodule Drafter.Widget.Digits do
     }
   end
 
+  @impl Drafter.Widget
   def render(state, rect) do
     digits = String.graphemes(state.text)
 
@@ -127,10 +129,12 @@ defmodule Drafter.Widget.Digits do
     end
   end
 
+  @impl Drafter.Widget
   def update(props, state) do
     Map.merge(state, props)
   end
 
+  @impl Drafter.Widget
   def handle_event(_event, state) do
     {:noreply, state}
   end
@@ -175,6 +179,14 @@ defmodule Drafter.Widget.Digits do
       bg_min: mount_props.bg_min,
       bg_max: mount_props.bg_max
     }
+  end
+
+  @impl Drafter.Widget
+  def apply_data_buffer(state, buffer, _rect) do
+    case Drafter.RingBuffer.last(buffer) do
+      nil -> state
+      value -> %{state | text: to_string(value)}
+    end
   end
 
   defp render_with_bg(digits, data, state, rect) do

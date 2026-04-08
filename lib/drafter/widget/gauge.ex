@@ -142,6 +142,14 @@ defmodule Drafter.Widget.Gauge do
     }
   end
 
+  @impl Drafter.Widget
+  def apply_data_buffer(state, buffer, _rect) do
+    case Drafter.RingBuffer.last(buffer) do
+      nil -> state
+      value -> %{state | value: value}
+    end
+  end
+
   defp build_arc_map(state, cx, cy, radius, thickness) do
     value_angle = @arc_start + state.value * @arc_sweep
     inner_r2 = (radius - thickness / 2.0) ** 2

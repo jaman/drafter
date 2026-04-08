@@ -1,4 +1,8 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([
+  {:drafter, path: Path.join(__DIR__, "..")},
+  {:elixir_make, "~> 0.9"},
+  {:spark, "~> 2.6"}
+])
 
 defmodule InputModal do
   use Drafter.Screen
@@ -45,7 +49,6 @@ defmodule ThemeSandbox do
       current_theme: "textual-dark",
       progress: 65.0,
       modal_result: nil,
-      sparkline_data: Enum.map(1..20, fn _ -> :rand.uniform(10) end),
       current_time: current_time(),
       table_data: [
         %{name: "Alice", age: 28, score: 92, status: "Active"},
@@ -93,13 +96,14 @@ defmodule ThemeSandbox do
   def keybindings, do: [{"tab", "next"}, {"q", "quit"}]
 
   def on_ready(state) do
-    Drafter.set_interval(24, :fps)
+    Drafter.set_interval(24, :sparkline_tick)
+    Enum.each(1..60, fn _ -> Drafter.push_data(:live_sparkline, :rand.uniform(10)) end)
     state
   end
 
-  def on_timer(:fps, state) do
-    [_ | rest] = state.sparkline_data
-    %{state | sparkline_data: rest ++ [:rand.uniform(10)], current_time: current_time()}
+  def on_timer(:sparkline_tick, state) do
+    Drafter.push_data(:live_sparkline, :rand.uniform(10))
+    %{state | current_time: current_time()}
   end
 
   def render(state) do
@@ -283,7 +287,7 @@ defmodule ThemeSandbox do
               ),
               label(""),
               label("Sparkline (live):"),
-              sparkline(state.sparkline_data),
+              sparkline(id: :live_sparkline, buffer: :auto, summary: true),
               label(""),
               label("Loading Indicators:"),
               horizontal(

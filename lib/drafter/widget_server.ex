@@ -3,6 +3,7 @@ defmodule Drafter.WidgetServer do
 
   use GenServer
 
+  alias Drafter.Widget.DataChannel
   alias Drafter.Widget.Trait.Pipeline
   alias Drafter.WidgetStripCache
 
@@ -11,6 +12,8 @@ defmodule Drafter.WidgetServer do
     :module,
     :state,
     :rect,
+    :data_channel,
+    auto_buffer: false,
     last_event_render_at: 0
   ]
 
@@ -54,6 +57,22 @@ defmodule Drafter.WidgetServer do
     GenServer.call(pid, {:set_state, new_widget_state})
   end
 
+  def push_data(pid, data) do
+    GenServer.cast(pid, {:push_data, data})
+  end
+
+  def push_data_many(pid, items) do
+    GenServer.cast(pid, {:push_data_many, items})
+  end
+
+  def pause_data(pid) do
+    GenServer.cast(pid, :pause_data)
+  end
+
+  def resume_data(pid) do
+    GenServer.cast(pid, :resume_data)
+  end
+
   @impl true
   def init(opts) do
     module = Keyword.fetch!(opts, :module)
@@ -65,14 +84,18 @@ defmodule Drafter.WidgetServer do
     Enum.each(session_ctx, fn {key, val} -> Process.put(key, val) end)
 
     WidgetStripCache.create()
+    if id, do: Drafter.WidgetPidRegistry.register(id, self())
 
     widget_state = module.mount(props)
+    data_channel = init_data_channel(opts)
 
     state = %__MODULE__{
       id: id,
       module: module,
       state: widget_state,
-      rect: rect
+      rect: rect,
+      data_channel: data_channel,
+      auto_buffer: auto_buffer?(opts)
     }
 
     strips = module.render(widget_state, rect)
@@ -80,6 +103,20 @@ defmodule Drafter.WidgetServer do
 
     {:ok, state}
   end
+
+  defp init_data_channel(opts) do
+    buffer_spec = Keyword.get(opts, :buffer)
+    refresh = Keyword.get(opts, :refresh)
+
+    case buffer_spec do
+      nil -> nil
+      :auto -> DataChannel.new(128, refresh || :on_demand)
+      size when is_integer(size) and size > 0 -> DataChannel.new(size, refresh || :on_demand)
+      _ -> nil
+    end
+  end
+
+  defp auto_buffer?(opts), do: Keyword.get(opts, :buffer) == :auto
 
   @impl true
   def handle_cast({:event, event}, state) do
@@ -123,12 +160,34 @@ defmodule Drafter.WidgetServer do
       {:noreply, state}
     else
       new_state = %{state | state: new_widget_state}
-      strips = new_state.module.render(new_state.state, new_state.rect)
-      WidgetStripCache.put(new_state.id, new_state.rect, strips)
-      notify_render_needed(new_state.id)
+      render_and_push(new_state)
       {:noreply, new_state}
     end
   end
+
+  def handle_cast({:push_data, item}, %{data_channel: ch} = state) when not is_nil(ch) do
+    {:noreply, %{state | data_channel: DataChannel.push(ch, item)}}
+  end
+
+  def handle_cast({:push_data, _item}, state), do: {:noreply, state}
+
+  def handle_cast({:push_data_many, items}, %{data_channel: ch} = state) when not is_nil(ch) do
+    {:noreply, %{state | data_channel: DataChannel.push_many(ch, items)}}
+  end
+
+  def handle_cast({:push_data_many, _items}, state), do: {:noreply, state}
+
+  def handle_cast(:pause_data, %{data_channel: ch} = state) when not is_nil(ch) do
+    {:noreply, %{state | data_channel: DataChannel.pause(ch)}}
+  end
+
+  def handle_cast(:pause_data, state), do: {:noreply, state}
+
+  def handle_cast(:resume_data, %{data_channel: ch} = state) when not is_nil(ch) do
+    {:noreply, %{state | data_channel: DataChannel.resume(ch)}}
+  end
+
+  def handle_cast(:resume_data, state), do: {:noreply, state}
 
   @impl true
   def handle_call({:update_rect, rect}, _from, state) do
@@ -139,7 +198,8 @@ defmodule Drafter.WidgetServer do
         state.state
       end
 
-    new_state = %{state | rect: rect, state: new_widget_state}
+    new_channel = maybe_resize_auto_buffer(state, rect)
+    new_state = %{state | rect: rect, state: new_widget_state, data_channel: new_channel}
     render_and_push(new_state)
     {:reply, :ok, new_state}
   end
@@ -150,10 +210,13 @@ defmodule Drafter.WidgetServer do
   end
 
   def handle_call(:get_render, _from, state) do
+    Process.put(:widget_last_render_ms, System.monotonic_time(:millisecond))
+
     result =
       case WidgetStripCache.get(state.id) do
         nil ->
-          strips = state.module.render(state.state, state.rect)
+          render_state = maybe_apply_buffer(state)
+          strips = state.module.render(render_state, state.rect)
           WidgetStripCache.put(state.id, state.rect, strips)
           {state.rect, strips}
 
@@ -224,6 +287,21 @@ defmodule Drafter.WidgetServer do
   end
 
   @impl true
+  def handle_info(:data_channel_tick, %{data_channel: ch, module: module} = state) when not is_nil(ch) do
+    {new_ch, had_data} = DataChannel.flush(ch)
+
+    if had_data and not recently_rendered?(state) do
+      widget_state = apply_buffer_to_widget(module, state.state, DataChannel.buffer(new_ch), state.rect)
+      new_state = %{state | state: widget_state, data_channel: new_ch}
+      render_and_push(new_state)
+      {:noreply, new_state}
+    else
+      {:noreply, %{state | data_channel: new_ch}}
+    end
+  end
+
+  def handle_info(:data_channel_tick, state), do: {:noreply, state}
+
   def handle_info(msg, state) do
     result =
       if function_exported?(state.module, :handle_info, 2) do
@@ -270,10 +348,13 @@ defmodule Drafter.WidgetServer do
   end
 
   defp render_and_push(server_state) do
+    Process.put(:widget_last_render_ms, System.monotonic_time(:millisecond))
     trait_modules = get_trait_modules(server_state.module)
 
+    render_state = maybe_apply_buffer(server_state)
+
     {adjusted_state, adjusted_rect} =
-      Pipeline.apply_pre_render(trait_modules, server_state.state, server_state.rect)
+      Pipeline.apply_pre_render(trait_modules, render_state, server_state.rect)
 
     strips = server_state.module.render(adjusted_state, adjusted_rect)
 
@@ -282,6 +363,20 @@ defmodule Drafter.WidgetServer do
 
     WidgetStripCache.put(server_state.id, server_state.rect, final_strips)
     notify_render_needed(server_state.id)
+  end
+
+  defp maybe_apply_buffer(%{data_channel: nil, state: widget_state}), do: widget_state
+
+  defp maybe_apply_buffer(%{data_channel: ch, module: module, state: widget_state, rect: rect}) do
+    apply_buffer_to_widget(module, widget_state, DataChannel.buffer(ch), rect)
+  end
+
+  defp apply_buffer_to_widget(module, widget_state, buffer, rect) do
+    if function_exported?(module, :apply_data_buffer, 3) do
+      module.apply_data_buffer(widget_state, buffer, rect)
+    else
+      widget_state
+    end
   end
 
   defp get_trait_modules(module) do
@@ -305,4 +400,17 @@ defmodule Drafter.WidgetServer do
       end)
     end
   end
+
+  defp recently_rendered?(_state) do
+    interval = Drafter.AppRegistry.get_frame_interval() || 33
+    last = Process.get(:widget_last_render_ms, 0)
+    System.monotonic_time(:millisecond) - last < interval
+  end
+
+  defp maybe_resize_auto_buffer(%{auto_buffer: true, data_channel: ch}, rect) when not is_nil(ch) do
+    new_size = max(8, rect.width)
+    DataChannel.resize_buffer(ch, new_size)
+  end
+
+  defp maybe_resize_auto_buffer(%{data_channel: ch}, _rect), do: ch
 end
