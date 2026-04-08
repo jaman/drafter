@@ -429,8 +429,10 @@ defmodule Drafter.Runtime.AppLoop do
     has_app_callback = Enum.any?(actions, &match?({:app_callback, _, _}, &1))
     post_widget_state = maybe_passthrough_mouse(app_module, event, new_app_state, raw_mouse_event?, has_app_callback)
 
+    divider_mode = find_divider_mode(actions)
+
     cond do
-      :divider_move in actions ->
+      divider_mode == :quick ->
         moved_hierarchy = move_divider_rect(new_hierarchy)
         Renderer.render_hierarchy(moved_hierarchy, screen_rect)
         app_event_loop(app_module, post_widget_state, screen_rect, timers, moved_hierarchy, session_stack)
@@ -885,6 +887,13 @@ defmodule Drafter.Runtime.AppLoop do
     else
       hierarchy
     end
+  end
+
+  defp find_divider_mode(actions) do
+    Enum.find_value(actions, nil, fn
+      {:divider_move, mode} -> mode
+      _ -> nil
+    end)
   end
 
   defp clear_divider_origins do

@@ -122,7 +122,7 @@ defmodule Drafter.Widget.SplitPaneDivider do
   def handle_drag(x, y, state) do
     delta = if state.orientation == :horizontal, do: x, else: y
     new_pos = clamp_pos(effective_pos(state) + delta, state.total_size)
-    {:ok, %{state | fixed_pos: new_pos}, [:divider_move]}
+    {:ok, %{state | fixed_pos: new_pos}, [{:divider_move, state.resize_mode}]}
   end
 
   @spec handle_mouse_up(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}, list()}
@@ -131,7 +131,7 @@ defmodule Drafter.Widget.SplitPaneDivider do
   end
 
   def handle_mouse_up(_x, _y, state) do
-    {:ok, %{state | dragging: false}, [{:widget_layout_needed, :all}]}
+    {:ok, %{state | dragging: false, drag_start_pos: nil}, [{:widget_layout_needed, :all}]}
   end
 
   @spec effective_pos(%__MODULE__{}) :: integer()
