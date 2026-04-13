@@ -48,7 +48,7 @@ defmodule Drafter.Widget.TextArea do
 
   use Drafter.Widget,
     traits: [:focusable],
-    handles: [:keyboard, :char]
+    handles: [:keyboard, :char, :scroll]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
@@ -258,6 +258,19 @@ defmodule Drafter.Widget.TextArea do
         ]
 
     strips
+  end
+
+  @impl Drafter.Widget
+  def handle_scroll(:up, state) do
+    new_offset = max(0, state.scroll_offset - 3)
+    {:ok, %{state | scroll_offset: new_offset}}
+  end
+
+  def handle_scroll(:down, state) do
+    content_height = max(1, state.height - 2)
+    max_offset = max(0, length(state.lines) - content_height)
+    new_offset = min(max_offset, state.scroll_offset + 3)
+    {:ok, %{state | scroll_offset: new_offset}}
   end
 
   @impl Drafter.Widget
