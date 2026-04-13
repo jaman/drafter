@@ -173,34 +173,24 @@ defmodule Drafter do
   @doc """
   Set an interval timer.
 
-  The first argument specifies the rate — accepts:
-    * integer milliseconds: `set_interval(500)` or `set_interval(500, :my_timer)`
-    * fps string: `set_interval("24fps")` or `set_interval("24fps", :my_timer)`
-    * fps atom shorthand: `set_interval(24, :fps)` (legacy, equivalent to `"24fps"`)
+  The first argument is the value, the second is the unit or timer ID.
 
-  The optional second argument is the timer ID used in `on_timer/2`.
-  Defaults to `:tick` when omitted or when a unit atom (`:fps`, `:ms`) is given.
+    * `set_interval(500, :my_timer)` — fire every 500ms as `:my_timer`
+    * `set_interval(24, :fps)` — fire at 24 frames/sec as `:fps`
+    * `set_interval(100, :ms)` — fire every 100ms as `:ms`
+    * `set_interval(500)` — fire every 500ms as `:tick`
 
-      set_interval("30fps")
+      set_interval(24, :fps)
       set_interval(500, :poll)
-      set_interval("10fps", :animation)
   """
-  @spec set_interval(pos_integer() | String.t(), atom()) :: :ok
-  def set_interval(rate, timer_id \\ :tick)
-
-  def set_interval(rate, timer_id) when is_binary(rate) do
-    do_set_interval(parse_rate(rate), timer_id)
-  end
+  @spec set_interval(pos_integer(), atom()) :: :ok
+  def set_interval(value, timer_id \\ :tick)
 
   def set_interval(value, :fps) do
-    do_set_interval(round(1000 / value), :tick)
+    do_set_interval(round(1000 / value), :fps)
   end
 
-  def set_interval(value, :ms) do
-    do_set_interval(value, :tick)
-  end
-
-  def set_interval(value, timer_id) when is_integer(value) do
+  def set_interval(value, timer_id) do
     do_set_interval(value, timer_id)
   end
 
@@ -211,30 +201,6 @@ defmodule Drafter do
     end
 
     :ok
-  end
-
-  defp parse_rate(s) when is_binary(s) do
-    cond do
-      Regex.match?(~r/^\d+(\.\d+)?\s*fps$/i, s) ->
-        [fps_str] = Regex.run(~r/[\d.]+/, s)
-
-        fps =
-          if String.contains?(fps_str, "."),
-            do: String.to_float(fps_str),
-            else: String.to_integer(fps_str)
-
-        round(1000 / fps)
-
-      Regex.match?(~r/^\d+(\.\d+)?\s*ms$/i, s) ->
-        [ms_str] = Regex.run(~r/[\d.]+/, s)
-
-        if String.contains?(ms_str, "."),
-          do: round(String.to_float(ms_str)),
-          else: String.to_integer(ms_str)
-
-      true ->
-        raise ArgumentError, "invalid interval rate: #{inspect(s)}. Use integer ms, \"24fps\", or \"500ms\""
-    end
   end
 
   @doc "Set a one-time timeout timer"

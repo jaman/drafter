@@ -37,11 +37,11 @@ defmodule NewWidgetsDemo do
   end
 
   def on_ready(state) do
-    Drafter.set_interval("5fps")
+    Drafter.set_interval(5, :fps)
     state
   end
 
-  def on_timer(:tick, state) do
+  def on_timer(:fps, state) do
     cpu = clamp(Process.get(:cpu_val, 0.5) + (:rand.uniform() - 0.5) * 0.08, 0.05, 0.95)
     mem = clamp(Process.get(:mem_val, 0.6) + (:rand.uniform() - 0.5) * 0.03, 0.3, 0.95)
     disk = clamp(Process.get(:disk_val, 0.78) + (:rand.uniform() - 0.5) * 0.01, 0.5, 0.99)

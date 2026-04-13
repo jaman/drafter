@@ -11,6 +11,7 @@ defmodule Charts do
 
     %{
       data: data,
+      scope_data: generate_scope_data(200, 0),
       candlestick_data: candlestick_data,
       timestamp: 0,
       current_candle: %{
@@ -46,6 +47,7 @@ defmodule Charts do
       %{
         state
         | timestamp: state.timestamp + 1,
+          scope_data: generate_scope_data(200, state.timestamp + 1),
           candlestick_data: state.candlestick_data ++ [finalized],
           current_candle: %{
             open: new_close,
@@ -60,6 +62,7 @@ defmodule Charts do
       %{
         state
         | timestamp: state.timestamp + 1,
+          scope_data: generate_scope_data(200, state.timestamp + 1),
           current_candle: %{
             candle
             | close: new_close,
@@ -90,6 +93,31 @@ defmodule Charts do
             color: {100, 200, 255},
             animated: true,
             animation_speed: 150,
+            _render_timestamp: state.timestamp
+          ),
+          label(""),
+          label("Smooth Line Chart (Catmull-Rom, thickness: 2)", style: %{fg: {100, 150, 255}, bold: true}),
+          chart(state.data,
+            chart_type: :line,
+            height: 6,
+            color: {80, 255, 180},
+            smooth: true,
+            line_thickness: 2,
+            animated: true,
+            animation_speed: 150,
+            _render_timestamp: state.timestamp
+          ),
+          label(""),
+          label("Oscilloscope (multi-series, smooth, connected)", style: %{fg: {100, 150, 255}, bold: true}),
+          chart(state.scope_data,
+            chart_type: :line,
+            height: 10,
+            smooth: true,
+            line_thickness: 2,
+            connect_lines: true,
+            colors: [{0, 255, 120}, {255, 220, 0}, {0, 180, 255}, {255, 80, 200}],
+            min_value: -1.5,
+            max_value: 1.5,
             _render_timestamp: state.timestamp
           ),
           label(""),
@@ -185,6 +213,36 @@ defmodule Charts do
       x = i * 0.2
       :math.sin(x) * 30 + 50 + :math.sin(x * 3) * 15 + :rand.uniform() * 5
     end
+  end
+
+  defp generate_scope_data(count, phase) do
+    phase_shift = phase * 0.08
+
+    sine =
+      for i <- 0..(count - 1) do
+        x = i * 0.12 + phase_shift
+        :math.sin(x)
+      end
+
+    square =
+      for i <- 0..(count - 1) do
+        x = i * 0.12 + phase_shift
+        if :math.sin(x * 0.7) >= 0, do: 0.7, else: -0.7
+      end
+
+    triangle =
+      for i <- 0..(count - 1) do
+        x = i * 0.12 + phase_shift * 1.3
+        2.0 / :math.pi() * :math.asin(:math.sin(x * 0.9)) * 0.8
+      end
+
+    harmonic =
+      for i <- 0..(count - 1) do
+        x = i * 0.12 + phase_shift * 0.8
+        (:math.sin(x * 2) + :math.sin(x * 5) * 0.3) * 0.5
+      end
+
+    [sine, square, triangle, harmonic]
   end
 
   defp generate_forex_candlestick_data(count) do

@@ -211,7 +211,11 @@ defmodule Drafter.Widget.Chart do
         y_offset: 0,
         data_tuple: data_tuple,
         data_hash: data_hash,
-        dragging_scrollbar: false
+        dragging_scrollbar: false,
+        smooth: Map.get(props, :smooth, false),
+        line_thickness: Map.get(props, :line_thickness, 1),
+        connect_lines: Map.get(props, :connect_lines, false),
+        raw_data: Map.get(props, :raw_data, false)
       }
     }
   end
@@ -292,6 +296,10 @@ defmodule Drafter.Widget.Chart do
       style: Keyword.get(opts, :style, %{}),
       classes: classes,
       app_module: Keyword.get(opts, :__app_module__),
+      smooth: Keyword.get(opts, :smooth, false),
+      line_thickness: Keyword.get(opts, :line_thickness, 1),
+      connect_lines: Keyword.get(opts, :connect_lines, false),
+      raw_data: Keyword.get(opts, :raw_data, false),
       _render_timestamp: System.monotonic_time(:millisecond)
     }
   end

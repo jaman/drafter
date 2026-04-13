@@ -71,15 +71,15 @@ defmodule Drafter.Widget.DataTable.Rendering do
   end
 
   def render_header(state, column_widths, total_width, focused) do
+    {visible_cols, visible_widths, visible_indices} = visible_columns(state, column_widths, total_width)
+
     segments =
-      Columns.get_ordered_columns(state)
-      |> Enum.zip(column_widths)
-      |> Enum.with_index()
-      |> Enum.map(fn {{column, width}, col_index} ->
+      Enum.zip([visible_cols, visible_widths, visible_indices])
+      |> Enum.map(fn {column, width, col_index} ->
         header_segment(state, column, width, col_index, focused)
       end)
 
-    current_width = Enum.sum(column_widths)
+    current_width = Enum.sum(visible_widths)
 
     segments =
       if current_width < total_width do
@@ -139,18 +139,18 @@ defmodule Drafter.Widget.DataTable.Rendering do
     base_style = row_base_style(state, is_selected, is_zebra)
     focused = Map.get(state, :focused, false)
 
+    {visible_cols, visible_widths, visible_indices} = visible_columns(state, column_widths, total_width)
+
     segments =
-      Columns.get_ordered_columns(state)
-      |> Enum.zip(column_widths)
-      |> Enum.with_index()
-      |> Enum.map(fn {{column, width}, col_index} ->
+      Enum.zip([visible_cols, visible_widths, visible_indices])
+      |> Enum.map(fn {column, width, col_index} ->
         raw_value = Map.get(row, column.key, "")
         formatted_text = Columns.format_cell_content(to_string(raw_value), width, column.align, state.cell_padding)
         style = cell_style(state, base_style, raw_value, column, col_index, is_selected, is_highlighted, focused)
         Segment.new(formatted_text, style)
       end)
 
-    current_width = Enum.sum(column_widths)
+    current_width = Enum.sum(visible_widths)
 
     segments =
       if current_width < total_width do
@@ -161,6 +161,28 @@ defmodule Drafter.Widget.DataTable.Rendering do
       end
 
     Strip.new(segments)
+  end
+
+  def visible_columns(state, column_widths, total_width) do
+    offset_col = get_in(state, [Access.key(:scroll), Access.key(:offset_col)]) || 0
+    all_cols = Columns.get_ordered_columns(state)
+    indexed = Enum.zip([all_cols, column_widths, Enum.to_list(0..(length(all_cols) - 1))])
+    scrolled = Enum.drop(indexed, offset_col)
+
+    {visible, _used} =
+      Enum.reduce_while(scrolled, {[], 0}, fn {col, width, idx}, {acc, used} ->
+        next_used = used + width
+        if next_used > total_width do
+          {:halt, {acc ++ [{col, min(width, total_width - used), idx}], next_used}}
+        else
+          {:cont, {acc ++ [{col, width, idx}], next_used}}
+        end
+      end)
+
+    cols = Enum.map(visible, &elem(&1, 0))
+    widths = Enum.map(visible, &elem(&1, 1))
+    indices = Enum.map(visible, &elem(&1, 2))
+    {cols, widths, indices}
   end
 
   def adjust_color({r, g, b}, adjustment) do

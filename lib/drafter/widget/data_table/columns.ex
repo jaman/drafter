@@ -143,14 +143,44 @@ defmodule Drafter.Widget.DataTable.Columns do
   end
 
   def compute_scroll_offset(state, fixed_cols, num_scrollable, remaining_width) when remaining_width > 0 do
-    avg_col_width = div(remaining_width, num_scrollable)
-    visible_cols = div(remaining_width - 1, avg_col_width + 1) + 1
-    offset = max(0, state.cursor_col - fixed_cols - visible_cols + 1)
-
     if state.cursor_col < fixed_cols do
       0
     else
-      min(offset, max(0, num_scrollable - visible_cols))
+      widths = get_column_widths(state, state.width)
+      scrollable_widths = Enum.drop(widths, fixed_cols)
+      cursor_in_scrollable = state.cursor_col - fixed_cols
+      current_offset = Map.get(state.scroll, :offset_col, 0)
+
+      {visible_end, _} =
+        Enum.reduce_while(
+          Enum.drop(scrollable_widths, current_offset),
+          {current_offset, 0},
+          fn w, {col, used} ->
+            next = used + w + 1
+            if next > remaining_width, do: {:halt, {col, used}}, else: {:cont, {col + 1, next}}
+          end
+        )
+
+      cond do
+        cursor_in_scrollable < current_offset ->
+          cursor_in_scrollable
+
+        cursor_in_scrollable >= visible_end ->
+          {new_offset, _} =
+            Enum.reduce_while(
+              Enum.reverse(Enum.slice(scrollable_widths, 0..cursor_in_scrollable)),
+              {cursor_in_scrollable + 1, 0},
+              fn w, {col, used} ->
+                next = used + w + 1
+                if next > remaining_width, do: {:halt, {col, used}}, else: {:cont, {col - 1, next}}
+              end
+            )
+
+          min(new_offset, max(0, num_scrollable - 1))
+
+        true ->
+          current_offset
+      end
     end
   end
 

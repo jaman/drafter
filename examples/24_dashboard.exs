@@ -70,7 +70,7 @@ defmodule Dashboard do
     skin_keys ++ [{"tab", "focus next"}, {"q", "quit"}]
   end
 
-  def on_timer(:tick, state) do
+  def on_timer(:fps, state) do
     prev_mem = Process.get(:dash_memory, 61)
     cpu = clamp(:rand.uniform(100), 5, 95)
     memory = clamp(prev_mem + :rand.uniform(7) - 3, 30, 90)

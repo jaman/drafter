@@ -427,16 +427,29 @@ defmodule Drafter.Widget.Tree do
   end
 
   defp click_toggle_node(state, %{children: children} = item) when is_list(children) and children != [] do
-    if MapSet.member?(state.expanded_nodes, item.id) do
-      trigger_expand(state, item, false)
-      {:ok, %{state | expanded_nodes: MapSet.delete(state.expanded_nodes, item.id)}}
-    else
-      trigger_expand(state, item, true)
-      {:ok, %{state | expanded_nodes: MapSet.put(state.expanded_nodes, item.id)}}
-    end
+    new_state =
+      if MapSet.member?(state.expanded_nodes, item.id) do
+        trigger_expand(state, item, false)
+        %{state | expanded_nodes: MapSet.delete(state.expanded_nodes, item.id)}
+      else
+        trigger_expand(state, item, true)
+        %{state | expanded_nodes: MapSet.put(state.expanded_nodes, item.id)}
+      end
+
+    select_on_click(new_state, item)
   end
 
-  defp click_toggle_node(state, _item), do: {:ok, state}
+  defp click_toggle_node(state, item), do: select_on_click(state, item)
+
+  defp select_on_click(state, item) do
+    case state.selection_mode do
+      :none -> {:ok, state}
+      _ ->
+        new_state = %{state | selected_nodes: MapSet.new([item.id])}
+        trigger_selection(new_state)
+        {:ok, new_state}
+    end
+  end
 
   # Rendering functions
 
