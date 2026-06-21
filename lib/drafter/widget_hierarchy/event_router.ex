@@ -13,12 +13,30 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
 
   def handle_event(hierarchy, event), do: handle_key_event(hierarchy, event)
 
-  def handle_key_event(hierarchy, {:key, :tab}), do: {Focus.cycle_focus(hierarchy), []}
-  def handle_key_event(hierarchy, {:key, :tab, _}), do: {Focus.cycle_focus_reverse(hierarchy), []}
-  def handle_key_event(hierarchy, {:key, ?\t}), do: {Focus.cycle_focus(hierarchy), []}
+  def handle_key_event(hierarchy, {:key, :tab} = event) do
+    if focused_widget_traps_tab?(hierarchy),
+      do: dispatch_to_focused(hierarchy, event),
+      else: {Focus.cycle_focus(hierarchy), []}
+  end
 
-  def handle_key_event(hierarchy, {:key, ?\t, mods}) when is_list(mods) do
-    if :shift in mods, do: {Focus.cycle_focus_reverse(hierarchy), []}, else: {Focus.cycle_focus(hierarchy), []}
+  def handle_key_event(hierarchy, {:key, :tab, _} = event) do
+    if focused_widget_traps_tab?(hierarchy),
+      do: dispatch_to_focused(hierarchy, event),
+      else: {Focus.cycle_focus_reverse(hierarchy), []}
+  end
+
+  def handle_key_event(hierarchy, {:key, ?\t} = event) do
+    if focused_widget_traps_tab?(hierarchy),
+      do: dispatch_to_focused(hierarchy, event),
+      else: {Focus.cycle_focus(hierarchy), []}
+  end
+
+  def handle_key_event(hierarchy, {:key, ?\t, mods} = event) when is_list(mods) do
+    if focused_widget_traps_tab?(hierarchy) do
+      dispatch_to_focused(hierarchy, event)
+    else
+      if :shift in mods, do: {Focus.cycle_focus_reverse(hierarchy), []}, else: {Focus.cycle_focus(hierarchy), []}
+    end
   end
 
   def handle_key_event(hierarchy, {:key, dir} = event) when dir in [:left, :right, :up, :down] do
@@ -220,5 +238,14 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
 
   def send_event_to_widget(hierarchy, widget_id, event) do
     handle_widget_event(hierarchy, widget_id, event)
+  end
+
+  defp focused_widget_traps_tab?(hierarchy) do
+    with widget_id when not is_nil(widget_id) <- hierarchy.focused_widget,
+         %{state: state} when is_map(state) <- Map.get(hierarchy.widgets, widget_id) do
+      Map.get(state, :focused, false) and Map.get(state, :trap_focus, false) == true
+    else
+      _ -> false
+    end
   end
 end

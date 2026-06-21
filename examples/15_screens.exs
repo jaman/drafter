@@ -6,7 +6,17 @@ defmodule ScreensExample do
 
   def mount(_props), do: %{last_result: nil}
 
-  def keybindings, do: [{"q", "quit"}, {"m", "modal"}, {"t", "toast"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
+
+  keybinding :m, "modal" do
+    {:show_modal, ScreensExample.InfoModal, %{}, [title: "Information", width: 50, height: 12, border: true]}
+  end
+
+  keybinding :t, "toast" do
+    {:show_toast, "Toast via keyboard!", [variant: :info]}
+  end
 
   def render(state) do
     vertical([
@@ -51,11 +61,6 @@ defmodule ScreensExample do
   def handle_event(:modal_result, result, state), do: {:ok, %{state | last_result: result}}
   def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, :m}, _state) do
-    {:show_modal, ScreensExample.InfoModal, %{}, [title: "Information", width: 50, height: 12, border: true]}
-  end
-  def handle_event({:key, :t}, _state), do: {:show_toast, "Toast via keyboard!", [variant: :info]}
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

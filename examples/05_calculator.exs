@@ -11,13 +11,24 @@ defmodule Calculator do
     :/ => {:op, :/, :btn_divide},
     := => {:equals, :btn_equals},
     :. => {:point, :btn_point},
-    :c => {:clear, :btn_clear},
     :% => {:percent, :btn_percent}
   }
 
   def mount(_props), do: %{value: 0, left: 0, op: nil, entering: false, decimal_places: nil}
 
-  def keybindings, do: [{"q", "quit"}, {"enter", "="}, {"c", "clear"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
+
+  keybinding :enter, "=" do
+    Drafter.activate_widget(:btn_equals)
+    {:noreply, state}
+  end
+
+  keybinding :c, "clear" do
+    Drafter.activate_widget(:btn_clear)
+    {:noreply, state}
+  end
 
   def render(state) do
     vertical(
@@ -106,8 +117,6 @@ defmodule Calculator do
     {:noreply, state}
   end
 
-  defp do_handle({:key, :q}, _state), do: {:stop, :normal}
-
   defp do_handle({:key, key}, state) when is_atom(key) do
     case Map.get(@key_mappings, key) do
       {_action, _param, btn_id} ->
@@ -121,11 +130,6 @@ defmodule Calculator do
       nil ->
         {:noreply, state}
     end
-  end
-
-  defp do_handle({:key, :enter}, state) do
-    Drafter.activate_widget(:btn_equals)
-    {:noreply, state}
   end
 
   defp do_handle(_event, state), do: {:noreply, state}

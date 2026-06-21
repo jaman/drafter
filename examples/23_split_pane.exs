@@ -24,13 +24,12 @@ defmodule SplitPaneDemo do
     state
   end
 
-  def keybindings do
-    [
-      {"alt+←/→", "resize horizontal split"},
-      {"alt+↑/↓", "resize vertical split"},
-      {"tab", "focus next"},
-      {"q", "quit"}
-    ]
+  keybinding :tab, "focus next" do
+    {:noreply, state}
+  end
+
+  keybinding :q, "quit" do
+    {:stop, :normal}
   end
 
   def on_timer(:tick, state) do
@@ -91,7 +90,6 @@ defmodule SplitPaneDemo do
     ])
   end
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

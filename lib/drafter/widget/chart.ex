@@ -110,10 +110,12 @@ defmodule Drafter.Widget.Chart do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.Widget.Chart.{Area, Bar, BrailleArea, Candlestick, Line, MultiSeries, Scatter}
+  alias Drafter.Widget.Chart.{Area, Bar, BrailleArea, Bubble, Candlestick, Heatmap, Histogram}
+  alias Drafter.Widget.Chart.{Line, MultiSeries, Scatter, Step}
 
   @type chart_type ::
           :line
+          | :step
           | :bar
           | :clustered_bar
           | :stacked_bar
@@ -121,6 +123,9 @@ defmodule Drafter.Widget.Chart do
           | :candlestick
           | :area
           | :scatter
+          | :histogram
+          | :heatmap
+          | :bubble
           | :braille
           | :braille_area
 
@@ -455,6 +460,10 @@ defmodule Drafter.Widget.Chart do
   defp dispatch_chart_v(:candlestick, s, w, h, bg, fg, _a), do: {Candlestick.render(s, w, h, bg, fg), s}
   defp dispatch_chart_v(:area, s, w, h, bg, fg, a), do: {Area.render(s, w, h, bg, fg, a), s}
   defp dispatch_chart_v(:scatter, s, w, h, bg, fg, _a), do: {Scatter.render(s, w, h, bg, fg), s}
+  defp dispatch_chart_v(:step, s, w, h, bg, fg, a), do: {Step.render(s, w, h, bg, fg, a), s}
+  defp dispatch_chart_v(:histogram, s, w, h, bg, fg, _a), do: {Histogram.render(s, w, h, bg, fg), s}
+  defp dispatch_chart_v(:heatmap, s, w, h, bg, fg, _a), do: {Heatmap.render(s, w, h, bg, fg), s}
+  defp dispatch_chart_v(:bubble, s, w, h, bg, fg, _a), do: {Bubble.render(s, w, h, bg, fg), s}
   defp dispatch_chart_v(:braille, s, w, h, bg, fg, a), do: {Line.render_braille(s, w, h, bg, fg, a), s}
   defp dispatch_chart_v(_type, s, w, h, bg, fg, a), do: {Line.render(s, w, h, bg, fg, a), s}
 

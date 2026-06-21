@@ -8,7 +8,9 @@ defmodule Clock do
     %{time: current_time()}
   end
 
-  def keybindings, do: [{"q", "quit"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def render(state) do
     vertical([
@@ -24,7 +26,6 @@ defmodule Clock do
 
   def on_timer(:tick, state), do: %{state | time: current_time()}
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 
   defp current_time do

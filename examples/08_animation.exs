@@ -16,7 +16,9 @@ defmodule Animation do
 
   def mount(_props), do: %{color_index: 0, mode: :static, tick: 0}
 
-  def keybindings, do: [{"1-6", "color"}, {"q", "quit"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def on_ready(state) do
     Drafter.set_interval(24, :fps)
@@ -108,7 +110,6 @@ defmodule Animation do
     {:ok, %{state | color_index: Atom.to_string(k) |> String.to_integer() |> Kernel.-(1)}}
   end
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 
   defp compute_animation(%{mode: :pulse, tick: tick}, color) do

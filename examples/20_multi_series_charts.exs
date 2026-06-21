@@ -17,7 +17,9 @@ defmodule MultiSeriesCharts do
     %{timestamp: 0, phase: 0.0}
   end
 
-  def keybindings, do: [{"q", "quit"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def on_ready(state) do
     Drafter.set_interval(24, :fps)
@@ -236,7 +238,6 @@ defmodule MultiSeriesCharts do
     ])
   end
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 
   defp section(title) do

@@ -57,16 +57,32 @@ defmodule SkinSandbox do
     state
   end
 
-  def keybindings do
-    [
-      {"1", "graphical skin"},
-      {"2", "wireframe skin"},
-      {"3", "ascii skin"},
-      {"4", "classic skin"},
-      {"5", "retro skin"},
-      {"tab", "focus next"},
-      {"q", "quit"}
-    ]
+  keybinding :"1", "graphical skin" do
+    {:ok, apply_skin(:graphical, state)}
+  end
+
+  keybinding :"2", "wireframe skin" do
+    {:ok, apply_skin(:wireframe, state)}
+  end
+
+  keybinding :"3", "ascii skin" do
+    {:ok, apply_skin(:ascii, state)}
+  end
+
+  keybinding :"4", "classic skin" do
+    {:ok, apply_skin(:classic, state)}
+  end
+
+  keybinding :"5", "retro skin" do
+    {:ok, apply_skin(:retro, state)}
+  end
+
+  keybinding :tab, "focus next" do
+    {:noreply, state}
+  end
+
+  keybinding :q, "quit" do
+    {:stop, :normal}
   end
 
   def on_timer(:sparkline_tick, state) do
@@ -218,12 +234,6 @@ defmodule SkinSandbox do
   end
 
   def handle_event(:skin_selected, skin, state), do: {:ok, apply_skin(skin, state)}
-  def handle_event({:key, :"1"}, state), do: {:ok, apply_skin(:graphical, state)}
-  def handle_event({:key, :"2"}, state), do: {:ok, apply_skin(:wireframe, state)}
-  def handle_event({:key, :"3"}, state), do: {:ok, apply_skin(:ascii, state)}
-  def handle_event({:key, :"4"}, state), do: {:ok, apply_skin(:classic, state)}
-  def handle_event({:key, :"5"}, state), do: {:ok, apply_skin(:retro, state)}
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

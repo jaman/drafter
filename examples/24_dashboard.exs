@@ -65,9 +65,32 @@ defmodule Dashboard do
     Enum.each(Enum.take(@log_messages, 8), &Drafter.push_data(:event_log, &1))
   end
 
-  def keybindings do
-    skin_keys = Enum.map(@skins, fn {_, label, key} -> {key, "#{label} skin"} end)
-    skin_keys ++ [{"tab", "focus next"}, {"q", "quit"}]
+  keybinding :"1", "Graphical skin" do
+    {:ok, apply_skin(:graphical, state)}
+  end
+
+  keybinding :"2", "Classic skin" do
+    {:ok, apply_skin(:classic, state)}
+  end
+
+  keybinding :"3", "Retro skin" do
+    {:ok, apply_skin(:retro, state)}
+  end
+
+  keybinding :"4", "Wireframe skin" do
+    {:ok, apply_skin(:wireframe, state)}
+  end
+
+  keybinding :"5", "ASCII skin" do
+    {:ok, apply_skin(:ascii, state)}
+  end
+
+  keybinding :tab, "focus next" do
+    {:noreply, state}
+  end
+
+  keybinding :q, "quit" do
+    {:stop, :normal}
   end
 
   def on_timer(:fps, state) do
@@ -290,12 +313,6 @@ defmodule Dashboard do
   end
 
   def handle_event(:skin_selected, skin, state), do: {:ok, apply_skin(skin, state)}
-  def handle_event({:key, :"1"}, state), do: {:ok, apply_skin(:graphical, state)}
-  def handle_event({:key, :"2"}, state), do: {:ok, apply_skin(:classic, state)}
-  def handle_event({:key, :"3"}, state), do: {:ok, apply_skin(:retro, state)}
-  def handle_event({:key, :"4"}, state), do: {:ok, apply_skin(:wireframe, state)}
-  def handle_event({:key, :"5"}, state), do: {:ok, apply_skin(:ascii, state)}
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

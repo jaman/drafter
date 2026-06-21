@@ -6,7 +6,9 @@ defmodule HelloWorld do
 
   def mount(_props), do: %{}
 
-  def keybindings, do: [{"q", "quit"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def render(_state) do
     vertical([
@@ -19,7 +21,6 @@ defmodule HelloWorld do
     ])
   end
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

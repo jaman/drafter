@@ -28,6 +28,7 @@ defmodule Drafter.Widget.Footer do
     handles: [:hover, :mouse_up]
 
   alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.Event
   alias Drafter.Style.Computed
 
   defstruct [
@@ -152,14 +153,9 @@ defmodule Drafter.Widget.Footer do
       idx ->
         {key_label, _desc, _s, _e} = Enum.at(regions, idx)
         event = key_label_to_event(key_label)
-        Drafter.Event.Manager.send_event(event)
+        Event.Manager.send_event(event)
         {:ok, state}
     end
-  end
-
-  @impl Drafter.Widget
-  def handle_event(_event, state) do
-    {:noreply, state}
   end
 
   def preferred_height(_args, _opts), do: 1
@@ -252,10 +248,25 @@ defmodule Drafter.Widget.Footer do
         event
 
       :error ->
-        case String.length(label) do
-          1 -> {:char, :binary.first(label)}
-          _ -> {:key, String.to_atom(String.downcase(label))}
-        end
+        parse_key_label(label)
+    end
+  end
+
+  defp parse_key_label(label) do
+    parts = String.split(label, "+")
+
+    case parts do
+      [single] when byte_size(single) == 1 ->
+        {:char, :binary.first(single)}
+
+      [single] ->
+        {:key, String.to_atom(String.downcase(single))}
+
+      modifiers_and_key ->
+        {key_part, mod_parts} = List.pop_at(modifiers_and_key, -1)
+        mods = Enum.map(mod_parts, &String.to_atom(String.downcase(&1)))
+        key = String.to_atom(String.downcase(key_part))
+        {:key, key, mods}
     end
   end
 end

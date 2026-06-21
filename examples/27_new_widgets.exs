@@ -57,8 +57,12 @@ defmodule NewWidgetsDemo do
     state
   end
 
-  def keybindings do
-    [{"tab", "focus next"}, {"q", "quit"}]
+  keybinding :tab, "focus next" do
+    {:noreply, state}
+  end
+
+  keybinding :q, "quit" do
+    {:stop, :normal}
   end
 
   def render(state) do
@@ -199,7 +203,6 @@ defmodule NewWidgetsDemo do
     {:ok, %{state | nav_path: new_path, last_action: "Navigated to: #{id}"}}
   end
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 
   defp default_thresholds do

@@ -4,7 +4,7 @@ defmodule Drafter.Widget.Chart.MultiSeries do
   import Bitwise
 
   alias Drafter.Draw.{Segment, Strip}
-  alias Drafter.Widget.Chart.{Line, Pixels}
+  alias Drafter.Widget.Chart.{Line, Pixels, Step}
 
   @multi_series_default_colors [{255, 100, 100}, {100, 255, 100}, {100, 100, 255}, {255, 255, 100}]
 
@@ -15,6 +15,7 @@ defmodule Drafter.Widget.Chart.MultiSeries do
     thickness = Keyword.get(opts, :line_thickness, 1)
     connect = Keyword.get(opts, :connect_lines, false)
     raw_data = Keyword.get(opts, :raw_data, false)
+    step = Keyword.get(opts, :step, false)
     {min_val, max_val} = resolve_multi_series_range(opts, data_series)
     range = max_val - min_val
     pixel_height = height * 4
@@ -31,6 +32,9 @@ defmodule Drafter.Widget.Chart.MultiSeries do
         cond do
           raw_data ->
             series_to_raw_pixels(series, color, min_val, range, pixel_width, pixel_height, thickness)
+
+          step ->
+            series_to_step_pixels(series, color, min_val, range, pixel_height, thickness)
 
           connect ->
             series_to_line_pixels(series, color, min_val, range, pixel_height, smooth, thickness)
@@ -86,6 +90,24 @@ defmodule Drafter.Widget.Chart.MultiSeries do
     |> Enum.chunk_every(2, 1, :discard)
     |> Enum.flat_map(fn [{x1, y1}, {x2, y2}] ->
       Line.bresenham_line(x1, y1, x2, y2)
+    end)
+  end
+
+  def series_to_step_pixels(series, color, min_val, range, pixel_height, thickness) do
+    points =
+      series
+      |> Enum.with_index()
+      |> Enum.map(fn {value, x} ->
+        normalized = (value - min_val) / range
+        y = round((1 - normalized) * (pixel_height - 1))
+        {x, y}
+      end)
+
+    line_pixels = Step.step_lines(points)
+    thickened = apply_thickness(line_pixels, thickness)
+
+    Enum.map(thickened, fn {x, y} ->
+      {{div(x, 2), div(y, 4)}, {rem(x, 2), rem(y, 4)}, color}
     end)
   end
 

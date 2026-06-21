@@ -127,7 +127,8 @@ defmodule Drafter.App do
     display = build_key_hint(key_spec)
     quote do
       @keybinding_hints [{unquote(display), unquote(hint)} | @keybinding_hints]
-      def handle_event(unquote(pattern), var!(_state)) do
+      def handle_event(unquote(pattern), var!(state)) do
+        _ = var!(state)
         unquote(body)
       end
     end
@@ -157,10 +158,21 @@ defmodule Drafter.App do
   defp key_label(:enter), do: "Enter"
   defp key_label(:tab), do: "Tab"
   defp key_label(:space), do: "Space"
+  defp key_label(:backspace), do: "Backspace"
+  defp key_label(:delete), do: "Delete"
   defp key_label(:up), do: "↑"
   defp key_label(:down), do: "↓"
   defp key_label(:left), do: "←"
   defp key_label(:right), do: "→"
+  defp key_label(:page_up), do: "PageUp"
+  defp key_label(:page_down), do: "PageDown"
+  defp key_label(:home), do: "Home"
+  defp key_label(:end), do: "End"
+
+  for n <- 1..12 do
+    defp key_label(unquote(:"f#{n}")), do: unquote("F#{n}")
+  end
+
   defp key_label(k), do: k |> to_string() |> String.upcase()
 
   def label(text, opts \\ []) do

@@ -25,7 +25,30 @@ defmodule Charts do
     }
   end
 
-  def keybindings, do: [{"q", "quit"}, {"r", "regenerate"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
+
+  keybinding :r, "regenerate" do
+    new_data = generate_wave_data(300)
+    new_candlesticks = generate_forex_candlestick_data(200)
+    [_open, _high, _low, close] = List.last(new_candlesticks)
+
+    {:ok,
+     %{
+       state
+       | data: new_data,
+         candlestick_data: new_candlesticks,
+         current_candle: %{
+           open: close,
+           high: close,
+           low: close,
+           close: close,
+           updates: 0,
+           target_updates: :rand.uniform(11) + 9
+         }
+     }}
+  end
 
   def on_ready(state) do
     Drafter.set_interval(100, :tick)
@@ -148,6 +171,30 @@ defmodule Charts do
           label("Scatter Plot", style: %{fg: {100, 150, 255}, bold: true}),
           chart(state.data, chart_type: :scatter, height: 5, color: {255, 184, 108}),
           label(""),
+          label("Step Plot", style: %{fg: {100, 150, 255}, bold: true}),
+          chart(state.data,
+            chart_type: :step,
+            height: 6,
+            color: {180, 255, 100},
+            _render_timestamp: state.timestamp
+          ),
+          label(""),
+          label("Histogram", style: %{fg: {100, 150, 255}, bold: true}),
+          chart(state.data, chart_type: :histogram, height: 6, color: {100, 200, 180}),
+          label(""),
+          label("Heatmap", style: %{fg: {100, 150, 255}, bold: true}),
+          chart(generate_heatmap_data(),
+            chart_type: :heatmap,
+            height: 8
+          ),
+          label(""),
+          label("Bubble Chart", style: %{fg: {100, 150, 255}, bold: true}),
+          chart(generate_bubble_data(),
+            chart_type: :bubble,
+            height: 6,
+            color: {200, 150, 255}
+          ),
+          label(""),
           label("Pie Charts", style: %{fg: {100, 150, 255}, bold: true}),
           horizontal(
             [
@@ -184,28 +231,6 @@ defmodule Charts do
     ])
   end
 
-  def handle_event({:key, :r}, state) do
-    new_data = generate_wave_data(300)
-    new_candlesticks = generate_forex_candlestick_data(200)
-    [_open, _high, _low, close] = List.last(new_candlesticks)
-
-    {:ok,
-     %{
-       state
-       | data: new_data,
-         candlestick_data: new_candlesticks,
-         current_candle: %{
-           open: close,
-           high: close,
-           low: close,
-           close: close,
-           updates: 0,
-           target_updates: :rand.uniform(11) + 9
-         }
-     }}
-  end
-
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 
   defp generate_wave_data(count) do
@@ -265,6 +290,20 @@ defmodule Charts do
     end)
     |> elem(1)
     |> Enum.reverse()
+  end
+
+  defp generate_heatmap_data do
+    for y <- 0..29 do
+      for x <- 0..119 do
+        :math.sin(x * 0.08 + y * 0.05) * :math.cos(y * 0.12 - x * 0.03) * 50 + 50 + :rand.uniform() * 5
+      end
+    end
+  end
+
+  defp generate_bubble_data do
+    for _ <- 1..30 do
+      {:rand.uniform() * 100, :rand.uniform() * 100, :rand.uniform() * 20 + 2}
+    end
   end
 end
 

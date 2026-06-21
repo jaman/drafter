@@ -166,7 +166,7 @@ defmodule Drafter.Widget.DataTable.Rendering do
   def visible_columns(state, column_widths, total_width) do
     offset_col = get_in(state, [Access.key(:scroll), Access.key(:offset_col)]) || 0
     all_cols = Columns.get_ordered_columns(state)
-    indexed = Enum.zip([all_cols, column_widths, Enum.to_list(0..(length(all_cols) - 1))])
+    indexed = Enum.zip([all_cols, column_widths, Enum.to_list(0..(length(all_cols) - 1)//1)])
     scrolled = Enum.drop(indexed, offset_col)
 
     {visible, _used} =

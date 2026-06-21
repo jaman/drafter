@@ -425,9 +425,9 @@ defmodule Drafter.Widget.OptionList do
     prefix = if is_highlighted, do: "▶ ", else: "  "
 
     text = prefix <> option.label
-    padded_text = String.pad_trailing(text, rect.width)
+    fitted_text = text |> String.slice(0, rect.width) |> String.pad_trailing(rect.width)
 
-    segment = Segment.new(padded_text, style)
+    segment = Segment.new(fitted_text, style)
     Strip.new([segment])
   end
 

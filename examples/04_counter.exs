@@ -6,7 +6,9 @@ defmodule Counter do
 
   def mount(_props), do: %{count: 0}
 
-  def keybindings, do: [{"q", "quit"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def render(state) do
     vertical([
@@ -29,7 +31,6 @@ defmodule Counter do
   def handle_event(:decrement, _data, state), do: {:ok, %{state | count: state.count - 1}}
   def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

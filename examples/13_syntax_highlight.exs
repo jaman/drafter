@@ -9,8 +9,9 @@ defmodule SyntaxHighlight do
     %{source: source}
   end
 
-  def keybindings,
-    do: [{"^Q", "quit"}, {"↑↓", "scroll"}, {"←→", "h-scroll"}, {"PgUp/PgDn", "page"}]
+  keybinding {:q, [:ctrl]}, "quit" do
+    {:stop, :normal}
+  end
 
   def render(state) do
     vertical([
@@ -26,7 +27,6 @@ defmodule SyntaxHighlight do
     ])
   end
 
-  def handle_event({:key, :q, [:ctrl]}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

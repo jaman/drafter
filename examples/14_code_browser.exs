@@ -12,8 +12,8 @@ defmodule CodeBrowser do
     }
   end
 
-  def keybindings do
-    [{"^Q", "quit"}, {"↑↓/Enter", "navigate"}, {"Tab", "switch pane"}]
+  keybinding {:q, [:ctrl]}, "quit" do
+    {:stop, :normal}
   end
 
   def render(state) do
@@ -56,7 +56,6 @@ defmodule CodeBrowser do
     end
   end
 
-  def handle_event({:key, :q, [:ctrl]}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

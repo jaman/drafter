@@ -32,7 +32,9 @@ defmodule DigitsShowcase do
     %{selected: 0, formatted: formatted, options: options}
   end
 
-  def keybindings, do: [{"↑↓", "select"}, {"q", "quit"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def render(state) do
     text = Enum.at(state.formatted, state.selected)
@@ -93,7 +95,6 @@ defmodule DigitsShowcase do
 
   def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 
   defp format(value, :compact), do: Format.compact(value)

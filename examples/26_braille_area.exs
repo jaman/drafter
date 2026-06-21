@@ -15,7 +15,9 @@ defmodule BrailleAreaDemo do
     }
   end
 
-  def keybindings, do: [{"q", "quit"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def on_ready(state) do
     Drafter.set_interval(200, :tick)

@@ -79,18 +79,22 @@ defmodule Drafter.Widget.TextArea.Clipboard do
 
   @spec clipboard_copy(String.t()) :: :ok
   def clipboard_copy(text) do
-    case :os.type() do
-      {:unix, :darwin} ->
-        System.cmd("pbcopy", [], input: text, stderr_to_stdout: true)
+    cmd =
+      case :os.type() do
+        {:unix, :darwin} -> "pbcopy"
+        {:unix, _} -> "xclip -selection clipboard"
+        _ -> nil
+      end
 
-      {:unix, _} ->
-        System.cmd("xclip", ["-selection", "clipboard"], input: text, stderr_to_stdout: true)
-
-      _ ->
-        :ok
+    if cmd do
+      port = Port.open({:spawn, cmd}, [:binary])
+      Port.command(port, text)
+      Port.close(port)
     end
 
     :ok
+  rescue
+    _ -> :ok
   end
 
   @spec clipboard_paste() :: String.t()

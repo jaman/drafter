@@ -6,7 +6,9 @@ defmodule HslColors do
 
   def mount(_props), do: %{hue: 0}
 
-  def keybindings, do: [{"q", "quit"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def on_ready(state) do
     Drafter.set_interval(100, :tick)
@@ -70,7 +72,6 @@ defmodule HslColors do
     ])
   end
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

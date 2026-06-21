@@ -9,7 +9,9 @@ defmodule Themes do
     %{current_theme: "textual-dark", available_themes: themes}
   end
 
-  def keybindings, do: [{"q", "quit"}, {"tab", "next"}, {"enter", "select"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def render(state) do
     vertical([
@@ -38,7 +40,6 @@ defmodule Themes do
     {:ok, %{state | current_theme: theme_name}}
   end
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

@@ -78,7 +78,9 @@ defmodule Drafter.Widget.TextArea.Render do
         build_cursor_segments(line_content, state.cursor_col, content_width, cursor_line_style)
 
       state.language != nil ->
-        Highlight.highlight_line(line_content, state.language, cursor_line_style)
+        line_content
+        |> Highlight.highlight_line(state.language, cursor_line_style)
+        |> pad_segments(content_width, cursor_line_style)
 
       true ->
         [Segment.new(String.pad_trailing(line_content, content_width), cursor_line_style)]
@@ -242,6 +244,17 @@ defmodule Drafter.Widget.TextArea.Render do
       before <> "\u2588" <> after_char
     else
       padded_line <> "\u2588"
+    end
+  end
+
+  @spec pad_segments([Segment.t()], pos_integer(), map()) :: [Segment.t()]
+  def pad_segments(segments, target_width, style) do
+    seg_width = Enum.reduce(segments, 0, fn seg, acc -> acc + String.length(seg.text) end)
+
+    if seg_width < target_width do
+      segments ++ [Segment.new(String.duplicate(" ", target_width - seg_width), style)]
+    else
+      segments
     end
   end
 

@@ -93,7 +93,13 @@ defmodule ThemeSandbox do
     }
   end
 
-  def keybindings, do: [{"tab", "next"}, {"q", "quit"}]
+  keybinding :tab, "next" do
+    {:noreply, state}
+  end
+
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def on_ready(state) do
     Drafter.set_interval(24, :sparkline_tick)
@@ -368,7 +374,6 @@ defmodule ThemeSandbox do
 
   def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 
   defp current_time do

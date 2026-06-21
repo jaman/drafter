@@ -13,7 +13,9 @@ defmodule DataTableDemo do
     }
   end
 
-  def keybindings, do: [{"q", "quit"}, {"tab", "focus"}, {"↑↓", "select"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def render(state) do
     vertical([
@@ -72,7 +74,6 @@ defmodule DataTableDemo do
 
   def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 
   defp generate_sample_data do

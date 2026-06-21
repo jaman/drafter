@@ -152,17 +152,27 @@ defmodule Drafter.WidgetHierarchy.Focus do
   def try_dispatch_arrow_to_widget(hierarchy, event) do
     with widget_id when not is_nil(widget_id) <- hierarchy.focused_widget,
          %{} = widget_info <- Map.get(hierarchy.widgets, widget_id) do
-      case EventRouter.dispatch_widget_event(hierarchy, widget_id, widget_info, event) do
-        {new_hierarchy, []} when new_hierarchy.widgets == hierarchy.widgets ->
-          :not_handled
-
-        result ->
-          {:handled, result}
-      end
+      result = EventRouter.dispatch_widget_event(hierarchy, widget_id, widget_info, event)
+      classify_arrow_result(result, hierarchy, widget_info)
     else
       _ -> :not_handled
     end
   end
+
+  defp classify_arrow_result(result, hierarchy, widget_info) do
+    if widget_traps_arrows?(widget_info), do: {:handled, result}, else: classify_untrapped(result, hierarchy)
+  end
+
+  defp classify_untrapped({new_hierarchy, []}, hierarchy) when new_hierarchy.widgets == hierarchy.widgets,
+    do: :not_handled
+
+  defp classify_untrapped(result, _hierarchy), do: {:handled, result}
+
+  defp widget_traps_arrows?(%{state: state}) when is_map(state) do
+    Map.get(state, :focused, false) and Map.get(state, :trap_focus, false) in [true, :arrows]
+  end
+
+  defp widget_traps_arrows?(_), do: false
 
   def arrow_navigate_with_focus(hierarchy, event, direction, focusable_widgets) do
     case hierarchy.focused_widget do

@@ -17,7 +17,9 @@ defmodule CollapsibleDemo do
     }
   end
 
-  def keybindings, do: [{"^Q", "quit"}]
+  keybinding {:q, [:ctrl]}, "quit" do
+    {:stop, :normal}
+  end
 
   def render(state) do
     vertical([
@@ -150,7 +152,6 @@ defmodule CollapsibleDemo do
     {:ok, %{state | crash_reports: value, last_action: "Crash reports: #{value}"}}
   end
 
-  def handle_event({:key, :q, [:ctrl]}, _, _state), do: {:stop, :normal}
   def handle_event(_, _, state), do: {:noreply, state}
 end
 

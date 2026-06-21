@@ -21,8 +21,21 @@ defmodule ChartPerf do
     }
   end
 
-  def keybindings,
-    do: [{"q", "quit"}, {"1", "500 pts"}, {"2", "5k pts"}, {"3", "50k pts"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
+
+  keybinding :"1", "500 pts" do
+    reload(state, 0)
+  end
+
+  keybinding :"2", "5k pts" do
+    reload(state, 1)
+  end
+
+  keybinding :"3", "50k pts" do
+    reload(state, 2)
+  end
 
   def on_ready(state) do
     Drafter.set_interval(2, :fps)
@@ -135,12 +148,6 @@ defmodule ChartPerf do
       footer()
     ])
   end
-
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
-
-  def handle_event({:key, :"1"}, state), do: reload(state, 0)
-  def handle_event({:key, :"2"}, state), do: reload(state, 1)
-  def handle_event({:key, :"3"}, state), do: reload(state, 2)
 
   def handle_event(_event, state), do: {:noreply, state}
 

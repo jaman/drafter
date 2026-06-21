@@ -151,40 +151,52 @@ defmodule Drafter.Widget.DataTable.Columns do
       cursor_in_scrollable = state.cursor_col - fixed_cols
       current_offset = Map.get(state.scroll, :offset_col, 0)
 
-      {visible_end, _} =
-        Enum.reduce_while(
-          Enum.drop(scrollable_widths, current_offset),
-          {current_offset, 0},
-          fn w, {col, used} ->
-            next = used + w + 1
-            if next > remaining_width, do: {:halt, {col, used}}, else: {:cont, {col + 1, next}}
-          end
-        )
-
-      cond do
-        cursor_in_scrollable < current_offset ->
-          cursor_in_scrollable
-
-        cursor_in_scrollable >= visible_end ->
-          {new_offset, _} =
-            Enum.reduce_while(
-              Enum.reverse(Enum.slice(scrollable_widths, 0..cursor_in_scrollable)),
-              {cursor_in_scrollable + 1, 0},
-              fn w, {col, used} ->
-                next = used + w + 1
-                if next > remaining_width, do: {:halt, {col, used}}, else: {:cont, {col - 1, next}}
-              end
-            )
-
-          min(new_offset, max(0, num_scrollable - 1))
-
-        true ->
-          current_offset
-      end
+      scrollable_offset(scrollable_widths, cursor_in_scrollable, current_offset, remaining_width, num_scrollable)
     end
   end
 
   def compute_scroll_offset(_state, _fixed_cols, _num_scrollable, _remaining_width), do: 0
+
+  defp scrollable_offset(widths, cursor, current_offset, remaining_width, num_scrollable) do
+    visible_end = find_visible_end(widths, current_offset, remaining_width)
+
+    cond do
+      cursor < current_offset ->
+        cursor
+
+      cursor >= visible_end ->
+        new_offset = find_offset_for_cursor(widths, cursor, remaining_width)
+        min(new_offset, max(0, num_scrollable - 1))
+
+      true ->
+        current_offset
+    end
+  end
+
+  defp find_visible_end(widths, offset, remaining_width) do
+    {visible_end, _} =
+      widths
+      |> Enum.drop(offset)
+      |> Enum.reduce_while({offset, 0}, fn w, {col, used} ->
+        next = used + w + 1
+        if next > remaining_width, do: {:halt, {col, used}}, else: {:cont, {col + 1, next}}
+      end)
+
+    visible_end
+  end
+
+  defp find_offset_for_cursor(widths, cursor, remaining_width) do
+    {new_offset, _} =
+      widths
+      |> Enum.slice(0..cursor)
+      |> Enum.reverse()
+      |> Enum.reduce_while({cursor + 1, 0}, fn w, {col, used} ->
+        next = used + w + 1
+        if next > remaining_width, do: {:halt, {col, used}}, else: {:cont, {col - 1, next}}
+      end)
+
+    new_offset
+  end
 
   def adjust_scroll_horizontal(state) do
     fixed_cols = state.fixed_columns

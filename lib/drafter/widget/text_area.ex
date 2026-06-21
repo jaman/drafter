@@ -52,7 +52,7 @@ defmodule Drafter.Widget.TextArea do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.Widget.TextArea.{Clipboard, Cursor, Editing, Highlight, History, Render, Selection}
+  alias Drafter.Widget.TextArea.{Clipboard, Cursor, Editing, History, Render, Selection}
 
   defstruct [
     :text,
@@ -76,6 +76,7 @@ defmodule Drafter.Widget.TextArea do
     :language,
     :selection,
     :read_only,
+    :trap_focus,
     :tab_behavior,
     :tab_size,
     :max_checkpoints,
@@ -108,6 +109,7 @@ defmodule Drafter.Widget.TextArea do
           language: atom() | nil,
           selection: selection(),
           read_only: boolean(),
+          trap_focus: boolean() | :arrows,
           tab_behavior: :focus | :indent,
           tab_size: pos_integer(),
           max_checkpoints: pos_integer(),
@@ -156,6 +158,7 @@ defmodule Drafter.Widget.TextArea do
       language: Map.get(props, :language),
       selection: nil,
       read_only: Map.get(props, :read_only, false),
+      trap_focus: Map.get(props, :trap_focus, false),
       tab_behavior: Map.get(props, :tab_behavior, :focus),
       tab_size: Map.get(props, :tab_size, 2),
       max_checkpoints: Map.get(props, :max_checkpoints, 50),
@@ -224,18 +227,13 @@ defmodule Drafter.Widget.TextArea do
               if segments != nil do
                 segments
               else
-                if String.length(line) > 0 do
-                  if normalized_state.language do
-                    Highlight.highlight_line(line, normalized_state.language, effective_style)
-                  else
-                    [Segment.new(line, effective_style)]
-                  end
-                else
-                  []
-                end
+                [Segment.new(String.pad_trailing(line, content_width), effective_style)]
               end
 
-            padding_width = rect.width - gutter_width - String.length(line) - 2
+            seg_width =
+              Enum.reduce(content_segments, 0, fn seg, acc -> acc + String.length(seg.text) end)
+
+            padding_width = max(0, rect.width - gutter_width - seg_width - 2)
 
             padding_segments =
               if padding_width > 0 do
@@ -276,6 +274,11 @@ defmodule Drafter.Widget.TextArea do
   @impl Drafter.Widget
   def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
+
+  def handle_event({:key, :escape}, %{focused: true, trap_focus: trap} = state)
+      when trap in [true, :arrows] do
+    {:ok, %{state | focused: false}}
+  end
 
   def handle_event({:key, :up}, %{focused: true} = state),
     do: {:ok, state |> Selection.clear_selection() |> Cursor.move_up() |> Cursor.adjust_scroll()}
@@ -323,33 +326,33 @@ defmodule Drafter.Widget.TextArea do
   def handle_event({:key, {:shift, :right}}, %{focused: true} = state),
     do: {:ok, Selection.extend_selection(state, :right)}
 
-  def handle_event({:key, 1}, %{focused: true} = state),
+  def handle_event({:key, :a, [:ctrl]}, %{focused: true} = state),
     do: {:ok, Selection.select_all(state)}
 
-  def handle_event({:key, 3}, %{focused: true} = state) do
+  def handle_event({:key, :c, [:ctrl]}, %{focused: true} = state) do
     Clipboard.copy_selection(state)
     {:ok, state}
   end
 
-  def handle_event({:key, 24}, %{focused: true} = state) do
+  def handle_event({:key, :x, [:ctrl]}, %{focused: true} = state) do
     {tag, new_state} = Clipboard.handle_cut(state)
     trigger_change(new_state)
     {tag, new_state}
   end
 
-  def handle_event({:key, 22}, %{focused: true, read_only: false} = state) do
+  def handle_event({:key, :v, [:ctrl]}, %{focused: true} = state) when state.read_only != true do
     {tag, new_state} = Clipboard.handle_paste(state)
     trigger_change(new_state)
     {tag, new_state}
   end
 
-  def handle_event({:key, 26}, %{focused: true} = state) do
+  def handle_event({:key, :z, [:ctrl]}, %{focused: true} = state) do
     {tag, new_state} = History.handle_undo(state)
     trigger_change(new_state)
     {tag, new_state}
   end
 
-  def handle_event({:key, 25}, %{focused: true} = state) do
+  def handle_event({:key, :y, [:ctrl]}, %{focused: true} = state) do
     {tag, new_state} = History.handle_redo(state)
     trigger_change(new_state)
     {tag, new_state}
@@ -398,6 +401,10 @@ defmodule Drafter.Widget.TextArea do
     handle_printable_char(state, Atom.to_string(key))
   end
 
+  def handle_event({:mouse, %{type: :scroll, direction: dir}}, state) do
+    handle_scroll(dir, state)
+  end
+
   def handle_event(_event, state), do: {:noreply, state}
 
   @impl Drafter.Widget
@@ -433,6 +440,7 @@ defmodule Drafter.Widget.TextArea do
         gutter_width: gutter_width,
         language: Map.get(props, :language, state.language),
         read_only: Map.get(props, :read_only, state.read_only),
+        trap_focus: Map.get(props, :trap_focus, state.trap_focus),
         tab_behavior: Map.get(props, :tab_behavior, state.tab_behavior),
         tab_size: Map.get(props, :tab_size, state.tab_size),
         max_checkpoints: Map.get(props, :max_checkpoints, state.max_checkpoints),
@@ -460,6 +468,7 @@ defmodule Drafter.Widget.TextArea do
       language: Keyword.get(opts, :language),
       style: Keyword.get(opts, :style, %{}),
       read_only: Keyword.get(opts, :read_only, false),
+      trap_focus: Keyword.get(opts, :trap_focus, false),
       tab_behavior: Keyword.get(opts, :tab_behavior, :focus),
       tab_size: Keyword.get(opts, :tab_size, 2),
       highlight_cursor_line: Keyword.get(opts, :highlight_cursor_line, false)
@@ -473,6 +482,7 @@ defmodule Drafter.Widget.TextArea do
       show_line_numbers: mount_props.show_line_numbers,
       language: mount_props.language,
       read_only: mount_props.read_only,
+      trap_focus: mount_props.trap_focus,
       tab_behavior: mount_props.tab_behavior,
       tab_size: mount_props.tab_size,
       highlight_cursor_line: mount_props.highlight_cursor_line

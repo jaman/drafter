@@ -4,7 +4,13 @@ defmodule WidgetsShowcase do
   use Drafter.App
   import Drafter.App
 
-  def keybindings, do: [{"tab", "focus"}, {"q", "quit"}]
+  keybinding :tab, "focus" do
+    {:noreply, state}
+  end
+
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
 
   def mount(_props) do
     %{
@@ -87,7 +93,6 @@ defmodule WidgetsShowcase do
   def handle_event(:option_selected, value, state), do: {:ok, %{state | selected: value}}
   def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

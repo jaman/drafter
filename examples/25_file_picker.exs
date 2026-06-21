@@ -10,8 +10,24 @@ defmodule FilePickerDemo do
     %{result: nil}
   end
 
-  def keybindings do
-    [{"o", "open file"}, {"d", "open dir"}, {"e", "elixir files"}, {"q", "quit"}]
+  keybinding :o, "open file" do
+    handle_event(:open_file, nil, state)
+  end
+
+  keybinding :d, "open dir" do
+    handle_event(:open_dir, nil, state)
+  end
+
+  keybinding :e, "elixir files" do
+    handle_event(:open_filtered, nil, state)
+  end
+
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
+
+  keybinding {:c, [:ctrl]}, "quit" do
+    {:stop, :normal}
   end
 
   def render(state) do
@@ -69,11 +85,6 @@ defmodule FilePickerDemo do
 
   def handle_event(_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, :o}, state), do: handle_event(:open_file, nil, state)
-  def handle_event({:key, :d}, state), do: handle_event(:open_dir, nil, state)
-  def handle_event({:key, :e}, state), do: handle_event(:open_filtered, nil, state)
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
-  def handle_event({:key, :c, [:ctrl]}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
 

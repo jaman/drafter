@@ -9,20 +9,22 @@ defmodule GaugeDemo do
   @min_gauge_height 3
   @max_gauge_height 30
 
-  def keybindings, do: [{"q", "quit"}, {"+", "grow"}, {"-", "shrink"}]
+  keybinding :q, "quit" do
+    {:stop, :normal}
+  end
+
+  keybinding :+, "grow" do
+    {:ok, %{state | gauge_height: min(@max_gauge_height, state.gauge_height + 1)}}
+  end
+
+  keybinding :-, "shrink" do
+    {:ok, %{state | gauge_height: max(@min_gauge_height, state.gauge_height - 1)}}
+  end
 
   def handle_event(:grow_gauge, _data, state),
     do: {:ok, %{state | gauge_height: min(@max_gauge_height, state.gauge_height + 1)}}
 
   def handle_event(:shrink_gauge, _data, state),
-    do: {:ok, %{state | gauge_height: max(@min_gauge_height, state.gauge_height - 1)}}
-
-  def handle_event({:key, :q}, _state), do: {:stop, :normal}
-
-  def handle_event({:key, :+}, state),
-    do: {:ok, %{state | gauge_height: min(@max_gauge_height, state.gauge_height + 1)}}
-
-  def handle_event({:key, :-}, state),
     do: {:ok, %{state | gauge_height: max(@min_gauge_height, state.gauge_height - 1)}}
 
   def handle_event(_event, state), do: {:noreply, state}
