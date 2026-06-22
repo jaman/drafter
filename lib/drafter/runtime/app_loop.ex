@@ -7,6 +7,7 @@ defmodule Drafter.Runtime.AppLoop do
   """
 
   alias Drafter.{Compositor, Event, RenderCache, SkinManager, Terminal, ThemeManager}
+  alias Drafter.Runtime
   alias Drafter.Runtime.Renderer
   alias Drafter.Widget.SplitPaneDivider
 
@@ -48,7 +49,7 @@ defmodule Drafter.Runtime.AppLoop do
     Compositor.clear_screen()
 
     initial_props = %{}
-    app_state = app_module.mount(initial_props)
+    app_state = Runtime.for_app(app_module).mount(app_module, initial_props)
 
     {width, height} = Compositor.get_screen_size()
     screen_rect = make_screen_rect(width, height)
@@ -56,7 +57,7 @@ defmodule Drafter.Runtime.AppLoop do
     {_, hierarchy} = Renderer.render_app(app_module, app_state, screen_rect)
 
     Process.put(:pending_intervals, [])
-    ready_app_state = app_module.on_ready(app_state)
+    ready_app_state = Runtime.for_app(app_module).ready(app_module, app_state)
     initial_timers = collect_pending_intervals()
     {_, hierarchy} = Renderer.render_app(app_module, ready_app_state, screen_rect, hierarchy)
 
@@ -86,7 +87,7 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg({:app_event, name, data}, {app_module, app_state, rect, timers, wh, ss}) do
-    result = app_module.handle_event(name, data, app_state)
+    result = Runtime.for_app(app_module).handle_message(app_module, name, data, app_state)
 
     case result do
       {:stop, reason} -> handle_stop(reason, app_module, app_state, rect, timers, wh, ss)
@@ -110,7 +111,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg({:theme_updated, theme}, {app_module, app_state, rect, timers, wh, ss}) do
     new_state =
-      case app_module.handle_event({:theme_updated, theme}, app_state) do
+      case Runtime.for_app(app_module).handle_input(app_module, {:theme_updated, theme}, app_state) do
         {:ok, s} -> s
         {:noreply, s} -> s
         s when is_map(s) -> s
@@ -141,7 +142,7 @@ defmodule Drafter.Runtime.AppLoop do
     if is_parent do
       app_event_loop(app_module, app_state, rect, timers, wh, ss)
     else
-      new_state = app_module.on_timer(timer_id, app_state)
+      new_state = Runtime.for_app(app_module).timer(app_module, timer_id, app_state)
 
       if new_state === app_state do
         app_event_loop(app_module, app_state, rect, timers, wh, ss)
@@ -343,10 +344,10 @@ defmodule Drafter.Runtime.AppLoop do
     setup_frame_rate(new_module, opts)
     prev_handlers = Drafter.ActionRegistry.collect()
     Drafter.ActionRegistry.init(action_handlers)
-    new_state = new_module.mount(mount_props)
+    new_state = Runtime.for_app(new_module).mount(new_module, mount_props)
     {_, new_wh} = Renderer.render_app(new_module, new_state, rect)
     Process.put(:pending_intervals, [])
-    ready_state = new_module.on_ready(new_state)
+    ready_state = Runtime.for_app(new_module).ready(new_module, new_state)
     initial_timers = collect_pending_intervals()
     drain_stale_events()
     {_, new_wh} = Renderer.render_app(new_module, ready_state, rect, new_wh)
@@ -364,6 +365,8 @@ defmodule Drafter.Runtime.AppLoop do
   defp dispatch_loop_msg({:EXIT, _pid, _reason}, {app_module, app_state, rect, timers, wh, ss}) do
     handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
   end
+
+  defp dispatch_loop_msg(:shutdown, _ctx), do: :ok
 
   defp dispatch_loop_msg(other, {app_module, app_state, rect, timers, wh, ss}) do
     new_state = maybe_on_message(app_module, other, app_state)
@@ -457,7 +460,7 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp maybe_passthrough_mouse(app_module, event, app_state, true = _raw_mouse, false = _has_callback) do
-    case app_module.handle_event(event, app_state) do
+    case Runtime.for_app(app_module).handle_input(app_module, event, app_state) do
       {:ok, s} -> s
       {:noreply, s} -> s
       _ -> app_state
@@ -467,7 +470,7 @@ defmodule Drafter.Runtime.AppLoop do
   defp maybe_passthrough_mouse(_app_module, _event, app_state, _raw_mouse, _has_callback), do: app_state
 
   defp dispatch_app_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event) do
-    result = app_module.handle_event(event, app_state)
+    result = Runtime.for_app(app_module).handle_input(app_module, event, app_state)
     apply_app_event_result(result, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event)
   end
 
@@ -591,7 +594,7 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_app_callback(app_module, callback, data, acc_state) do
-    result = app_module.handle_event(callback, data, acc_state)
+    result = Runtime.for_app(app_module).handle_message(app_module, callback, data, acc_state)
     dispatch_app_callback_result(result, acc_state)
   end
 
@@ -730,11 +733,7 @@ defmodule Drafter.Runtime.AppLoop do
   defp scroll_optimization_enabled?, do: Process.get(:scroll_optimization, true) != false
 
   defp maybe_on_message(app_module, msg, app_state) do
-    if function_exported?(app_module, :on_message, 2) do
-      app_module.on_message(msg, app_state)
-    else
-      app_state
-    end
+    Runtime.for_app(app_module).on_message(app_module, msg, app_state)
   end
 
   defp maybe_scroll_active(app_module, app_state) do
@@ -742,23 +741,13 @@ defmodule Drafter.Runtime.AppLoop do
       app_state
     else
       Process.put(:scroll_gesture_active, true)
-
-      if function_exported?(app_module, :on_scroll_active, 1) do
-        app_module.on_scroll_active(app_state)
-      else
-        app_state
-      end
+      Runtime.for_app(app_module).scroll_active(app_module, app_state)
     end
   end
 
   defp maybe_scroll_idle(app_module, app_state) do
     Process.delete(:scroll_gesture_active)
-
-    if function_exported?(app_module, :on_scroll_idle, 1) do
-      app_module.on_scroll_idle(app_state)
-    else
-      app_state
-    end
+    Runtime.for_app(app_module).scroll_idle(app_module, app_state)
   end
 
   defp make_screen_rect(width, height) do
@@ -768,7 +757,7 @@ defmodule Drafter.Runtime.AppLoop do
   defp setup_frame_rate(app_module, opts) do
     rate =
       Keyword.get(opts, :refresh_rate) ||
-        (function_exported?(app_module, :refresh_rate, 0) && app_module.refresh_rate()) ||
+        Runtime.for_app(app_module).refresh_rate(app_module) ||
         "30fps"
 
     interval = parse_refresh_rate(rate)

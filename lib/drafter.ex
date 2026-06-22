@@ -52,6 +52,27 @@ defmodule Drafter do
   @scroll_debounce_ms 150
 
   @doc """
+  Flat client entry point. `use Drafter` is equivalent to `use Drafter.App` plus the
+  declarative `state/1` helper, so apps need not navigate the `Drafter.App` namespace.
+
+  Accepts the same options as `Drafter.App`, e.g. `use Drafter, runtime: :reducer`.
+  """
+  defmacro __using__(opts) do
+    quote do
+      use Drafter.App, unquote(opts)
+      import Drafter, only: [state: 1]
+    end
+  end
+
+  @doc "Declare the application's initial state — a flat alternative to defining `mount/1`."
+  defmacro state(initial) do
+    quote do
+      def mount(_props), do: unquote(initial)
+      defoverridable mount: 1
+    end
+  end
+
+  @doc """
   Start a TUI application.
 
   Options:

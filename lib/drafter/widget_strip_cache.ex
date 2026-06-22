@@ -8,11 +8,14 @@ defmodule Drafter.WidgetStripCache do
     case :ets.whereis(@table) do
       :undefined ->
         :ets.new(@table, [:named_table, :public, :set, {:read_concurrency, true}])
+
       _ ->
         :ok
     end
 
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   @spec put(term(), map(), list()) :: true

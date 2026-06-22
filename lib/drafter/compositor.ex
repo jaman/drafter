@@ -51,6 +51,12 @@ defmodule Drafter.Compositor do
     GenServer.call(resolve(), :get_screen_size)
   end
 
+  @doc "Returns the current composited screen buffer (one `Strip` per row) for the given compositor."
+  @spec get_buffer(pid()) :: [Drafter.Draw.Strip.t()]
+  def get_buffer(pid) do
+    GenServer.call(pid, :get_buffer)
+  end
+
   @impl GenServer
   def init(opts) do
     terminal_driver = Keyword.get(opts, :terminal_driver, Terminal.Driver)
@@ -77,6 +83,10 @@ defmodule Drafter.Compositor do
   @impl GenServer
   def handle_call(:get_screen_size, _from, state) do
     {:reply, state.screen_size, state}
+  end
+
+  def handle_call(:get_buffer, _from, state) do
+    {:reply, state.screen_buffer, state}
   end
 
   @impl GenServer

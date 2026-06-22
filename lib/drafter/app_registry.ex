@@ -1,14 +1,15 @@
 defmodule Drafter.AppRegistry do
   @moduledoc """
-  Session-scoped registration for the active app loop process.
+  Session-scoped registration for active app-loop processes.
 
-  Replaces the global `:tui_app_loop` atom with a named ETS-backed lookup
-  keyed by the calling process's group leader, preparing the foundation for
-  true multi-session support.
+  Each session registers its loop under its compositor pid — the session id present in
+  the session process dictionary — so concurrent sessions never collide on a single
+  global key. A caller running inside a session resolves its own loop directly; a caller
+  with no session context (e.g. external introspection of a single-session app) falls
+  back to the sole registered loop, keeping the common single-session case plumbing-free.
 
-  For the current single-session implementation the table always holds at
-  most one entry; the multi-session architecture will extend this with proper
-  session-id scoping.
+  The render frame interval is also tracked here, read by per-widget render processes to
+  throttle their own re-renders to the app's frame rate.
   """
 
   @table :drafter_app_registry
@@ -23,39 +24,28 @@ defmodule Drafter.AppRegistry do
       _ ->
         :ok
     end
+  rescue
+    ArgumentError -> :ok
   end
 
   @spec register() :: true
   def register do
     ensure_table()
-    :ets.insert(@table, {:app_loop, self()})
+    :ets.insert(@table, {{:loop, session_key()}, self()})
   end
 
   @spec unregister() :: true
   def unregister do
     ensure_table()
-    :ets.delete(@table, :app_loop)
+    :ets.delete(@table, {:loop, session_key()})
   end
 
   @spec whereis() :: pid() | nil
   def whereis do
-    @table
-    |> :ets.whereis()
-    |> lookup_app_pid()
-  end
-
-  defp lookup_app_pid(:undefined), do: nil
-  defp lookup_app_pid(_) do
-    @table
-    |> :ets.lookup(:app_loop)
-    |> resolve_pid()
-  end
-
-  defp resolve_pid([{:app_loop, pid}]) when is_pid(pid), do: alive_or_nil(pid)
-  defp resolve_pid(_), do: nil
-
-  defp alive_or_nil(pid) do
-    if Process.alive?(pid), do: pid, else: nil
+    case :ets.whereis(@table) do
+      :undefined -> nil
+      _ -> resolve_loop()
+    end
   end
 
   @spec send_to_loop(term()) :: term()
@@ -84,5 +74,32 @@ defmodule Drafter.AppRegistry do
           _ -> nil
         end
     end
+  end
+
+  defp session_key, do: Process.get(:drafter_compositor)
+
+  defp resolve_loop do
+    case :ets.lookup(@table, {:loop, session_key()}) do
+      [{_, pid}] -> alive_or_nil(pid)
+      [] -> sole_loop()
+    end
+  end
+
+  defp sole_loop do
+    case live_loops() do
+      [pid] -> pid
+      _ -> nil
+    end
+  end
+
+  defp live_loops do
+    @table
+    |> :ets.match({{:loop, :_}, :"$1"})
+    |> List.flatten()
+    |> Enum.filter(&Process.alive?/1)
+  end
+
+  defp alive_or_nil(pid) do
+    if Process.alive?(pid), do: pid, else: nil
   end
 end

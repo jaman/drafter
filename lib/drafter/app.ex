@@ -86,12 +86,12 @@ defmodule Drafter.App do
       @css_path Keyword.get(unquote(opts), :css_path)
       @inline_styles Keyword.get(unquote(opts), :styles, %{})
       @mouse_hover Keyword.get(unquote(opts), :mouse_hover, true)
+      @runtime_backend Keyword.get(unquote(opts), :runtime, Drafter.Runtime.Callback)
       @keybinding_hints []
 
       def mount(_props), do: %{}
       def render(_state), do: []
       def handle_event(_event, state), do: {:noreply, state}
-      def update(_props, state), do: state
       def on_ready(state), do: state
       def on_timer(_timer_id, state), do: state
       def unmount(_state), do: :ok
@@ -101,12 +101,12 @@ defmodule Drafter.App do
       def __css_path__, do: @css_path
       def __inline_styles__, do: @inline_styles
       def __mouse_hover__, do: @mouse_hover
+      def __runtime__, do: @runtime_backend
       def __theme__(action) when action == :get, do: Drafter.ThemeManager.get_current_theme()
 
       defoverridable mount: 1,
                      render: 1,
                      handle_event: 2,
-                     update: 2,
                      on_ready: 1,
                      on_timer: 2,
                      unmount: 1

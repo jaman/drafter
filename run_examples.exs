@@ -6,9 +6,9 @@ defmodule ExamplesLauncher do
 
   def mount(_props) do
     examples =
-      Path.wildcard(Path.join(__DIR__, "examples/*.exs"))
+      Path.wildcard(Path.join(__DIR__, "examples/**/*.exs"))
       |> Enum.sort()
-      |> Enum.map(fn path -> {humanize(Path.basename(path, ".exs")), path} end)
+      |> Enum.map(fn path -> {label_for(path), path} end)
 
     %{examples: examples}
   end
@@ -38,6 +38,11 @@ defmodule ExamplesLauncher do
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event({:key, :q, [:ctrl]}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
+
+  defp label_for(path) do
+    style = path |> Path.dirname() |> Path.basename() |> String.capitalize()
+    "#{style}  ·  #{humanize(Path.basename(path, ".exs"))}"
+  end
 
   defp humanize(name) do
     name

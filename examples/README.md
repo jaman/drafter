@@ -1,10 +1,29 @@
 # Drafter Examples
 
+Examples are grouped by the API style they use:
+
+- **`spark/`** — the flat, Phoenix-like surface: `use Drafter`, declarative `state`,
+  unqualified widgets, and named callbacks via `handle_event/3`. The recommended style.
+- **`reducer/`** — the Elm-style runtime: `use Drafter, runtime: :reducer`. Define a single
+  `update/2` message handler returning new state (or `{:stop, reason}` to quit) — see
+  `04_counter`, `02_ticker`, `03_form`, `05_settings` for the idiomatic style. Every other
+  example here is the same app as in `internal/` run under the reducer runtime unchanged:
+  the reducer **falls back to the callback API** when an app doesn't define `update/2`, so any
+  app runs either way and `update/2` is adopted incrementally. (That's the point — there's no
+  app the reducer runtime can't run.)
+- **`internal/`** — the original `use Drafter.App` examples (the lower-level surface the
+  flat DSL is built on). Kept for reference and full feature coverage.
+
 Run any example with:
 
 ```bash
-elixir examples/<name>.exs
+elixir examples/spark/04_counter.exs
+elixir examples/reducer/04_counter.exs
 ```
+
+Or browse them all in the gallery: `elixir run_examples.exs`.
+
+## `internal/` index
 
 | Example | Description |
 |---------|-------------|
