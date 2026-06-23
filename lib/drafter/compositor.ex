@@ -15,7 +15,8 @@ defmodule Drafter.Compositor do
     screen_size: {80, 24},
     rendering: false,
     image_regions: %{},
-    painted_images: %{}
+    painted_images: %{},
+    pending_image_clears: []
   ]
 
   @type screen_buffer :: [Strip.t()]
@@ -52,12 +53,15 @@ defmodule Drafter.Compositor do
   Store the terminal-graphics bytes (kitty/iTerm2/sixel) for an image region.
 
   Called once per generation (from the widget's async render task) — the bytes never
-  travel through the render loop. `dx`/`dy` offset the image within the placed cell, and
-  `cols`/`rows` are its cell size. Paint happens via `place_image/3`.
+  travel through the render loop. `paint` draws the image, `clear` removes it (a kitty
+  delete for the persistent-layer protocol; empty for cell-grid protocols that re-blank).
+  `dx`/`dy` offset the image within the placed cell, and `cols`/`rows` are its cell size.
+  Paint happens via `place_image/3`.
   """
-  @spec put_image(term(), iodata(), integer(), integer(), pos_integer(), pos_integer()) :: :ok
-  def put_image(id, bytes, dx, dy, cols, rows) do
-    GenServer.cast(resolve(), {:put_image, id, bytes, dx, dy, cols, rows})
+  @spec put_image(term(), iodata(), iodata(), integer(), integer(), pos_integer(), pos_integer()) ::
+          :ok
+  def put_image(id, paint, clear, dx, dy, cols, rows) do
+    GenServer.cast(resolve(), {:put_image, id, paint, clear, dx, dy, cols, rows})
   end
 
   @doc """
@@ -139,9 +143,20 @@ defmodule Drafter.Compositor do
     schedule_render(new_state)
   end
 
-  def handle_cast({:put_image, id, bytes, dx, dy, cols, rows}, state) do
-    base = Map.get(state.image_regions, id, %{x: 0, y: 0, visible: false, version: 0})
-    region = Map.merge(base, %{bytes: bytes, dx: dx, dy: dy, cols: cols, rows: rows, version: base.version + 1})
+  def handle_cast({:put_image, id, paint, clear, dx, dy, cols, rows}, state) do
+    base = Map.get(state.image_regions, id, %{x: 0, y: 0, visible: false, version: 0, clear: ""})
+
+    region =
+      Map.merge(base, %{
+        bytes: paint,
+        clear: clear,
+        dx: dx,
+        dy: dy,
+        cols: cols,
+        rows: rows,
+        version: base.version + 1
+      })
+
     schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
   end
 
@@ -151,7 +166,7 @@ defmodule Drafter.Compositor do
         {:noreply, state}
 
       nil ->
-        region = %{bytes: nil, dx: 0, dy: 0, cols: 0, rows: 0, x: x, y: y, visible: true, version: 0}
+        region = %{bytes: nil, clear: "", dx: 0, dy: 0, cols: 0, rows: 0, x: x, y: y, visible: true, version: 0}
         schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
 
       region ->
@@ -168,6 +183,7 @@ defmodule Drafter.Compositor do
           state
           | image_regions: Map.put(state.image_regions, id, hidden),
             painted_images: Map.delete(state.painted_images, id),
+            pending_image_clears: [region.clear | state.pending_image_clears],
             dirty_regions: [image_rect(region) | state.dirty_regions],
             rendered_buffer: invalidate_rows(state.rendered_buffer, region.y + region.dy, region.rows)
         })
@@ -196,7 +212,8 @@ defmodule Drafter.Compositor do
   end
 
   def handle_info(:render_frame, state) do
-    if Enum.empty?(state.dirty_regions) and not images_pending?(state) do
+    if Enum.empty?(state.dirty_regions) and state.pending_image_clears == [] and
+         not images_pending?(state) do
       {:noreply, %{state | rendering: false}}
     else
       {new_rendered, new_painted} = render_to_terminal(state)
@@ -207,6 +224,7 @@ defmodule Drafter.Compositor do
          | rendered_buffer: new_rendered,
            painted_images: new_painted,
            dirty_regions: [],
+           pending_image_clears: [],
            rendering: false
        }}
     end
@@ -305,9 +323,9 @@ defmodule Drafter.Compositor do
     {text_rows, changed_lines} = build_terminal_output(state.screen_buffer, state.rendered_buffer)
 
     {image_rows, new_painted} =
-      build_image_output(state.image_regions, state.painted_images, changed_lines)
+      build_image_output(state.image_regions, state.painted_images, changed_lines, state.screen_size)
 
-    output = wrap_output(text_rows ++ image_rows)
+    output = wrap_output(Enum.reverse(state.pending_image_clears) ++ text_rows ++ image_rows)
     if output != [], do: driver_write(state.terminal_driver, output)
     {state.screen_buffer, new_painted}
   end
@@ -330,11 +348,11 @@ defmodule Drafter.Compositor do
     {Enum.reverse(rows), changed}
   end
 
-  defp build_image_output(image_regions, painted, changed_lines) do
+  defp build_image_output(image_regions, painted, changed_lines, screen_size) do
     changed_set = MapSet.new(changed_lines)
 
     Enum.reduce(image_regions, {[], painted}, fn {id, region}, {rows, painted_acc} ->
-      if paintable?(region) and
+      if paintable?(region, screen_size) and
            (needs_paint?(region, Map.get(painted_acc, id)) or image_overlaps?(region, changed_set)) do
         cmd = [Terminal.ANSI.cursor_to(region.x + region.dx + 1, region.y + region.dy + 1), region.bytes]
         {[cmd | rows], Map.put(painted_acc, id, {region.version, {region.x, region.y}})}
@@ -344,14 +362,22 @@ defmodule Drafter.Compositor do
     end)
   end
 
-  defp paintable?(region), do: region.visible and not is_nil(region.bytes)
+  defp paintable?(region, screen_size) do
+    region.visible and not is_nil(region.bytes) and on_screen?(region, screen_size)
+  end
+
+  defp on_screen?(region, {width, height}) do
+    left = region.x + region.dx
+    top = region.y + region.dy
+    left >= 0 and top >= 0 and left + region.cols <= width and top + region.rows <= height
+  end
 
   defp needs_paint?(_region, nil), do: true
   defp needs_paint?(region, {version, pos}), do: region.version != version or {region.x, region.y} != pos
 
   defp image_overlaps?(region, changed_set) do
     top = region.y + region.dy
-    Enum.any?(top..(top + region.rows - 1), &MapSet.member?(changed_set, &1))
+    Enum.any?(top..(top + region.rows - 1)//1, &MapSet.member?(changed_set, &1))
   end
 
   defp image_rect(region) do
@@ -372,7 +398,8 @@ defmodule Drafter.Compositor do
 
   defp images_pending?(state) do
     Enum.any?(state.image_regions, fn {id, region} ->
-      paintable?(region) and needs_paint?(region, Map.get(state.painted_images, id))
+      paintable?(region, state.screen_size) and
+        needs_paint?(region, Map.get(state.painted_images, id))
     end)
   end
 

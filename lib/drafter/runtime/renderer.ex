@@ -405,7 +405,22 @@ defmodule Drafter.Runtime.Renderer do
          false <- offscreen?(hierarchy, widget_id, widget_rect) do
       render_widget_layer(hierarchy, widget_id, widget_info, widget_rect, z_base)
     else
-      _ -> []
+      _ ->
+        ensure_image_cleared(hierarchy, widget_id)
+        []
+    end
+  end
+
+  defp ensure_image_cleared(hierarchy, widget_id) do
+    case Map.get(hierarchy.widgets, widget_id) do
+      %{module: module} ->
+        if function_exported?(module, :image, 3) do
+          WidgetStripCache.mark_visible(widget_id, false)
+          Drafter.Compositor.clear_image(widget_id)
+        end
+
+      _ ->
+        :ok
     end
   end
 
@@ -469,7 +484,7 @@ defmodule Drafter.Runtime.Renderer do
   end
 
   defp overlay_image(widget_id, %{module: module} = widget_info, rect, paint?) do
-    if function_exported?(module, :image, 2) do
+    if function_exported?(module, :image, 3) do
       WidgetStripCache.mark_visible(widget_id, paint?)
       do_overlay_image(widget_id, widget_info, rect, paint?)
     else

@@ -19,6 +19,8 @@ defmodule BrailleAreaDemo do
     {:stop, :normal}
   end
 
+  def handle_event(_event, state), do: {:noreply, state}
+
   def on_ready(state) do
     Drafter.set_interval(200, :tick)
     state
@@ -42,7 +44,7 @@ defmodule BrailleAreaDemo do
       rule(),
       chart(
         [state.disk_read, state.disk_write, state.disk_seek],
-        chart_type: :braille_area,
+        chart_type: :braille_area, renderer: :pixel,
         colors: [{80, 200, 80}, {200, 180, 40}, {220, 60, 60}],
         show_baseline: true,
         height: 10
@@ -58,7 +60,7 @@ defmodule BrailleAreaDemo do
       rule(),
       chart(
         [state.disk_read |> Enum.map(&(&1 - 55)), state.disk_write |> Enum.map(&(&1 * -1))],
-        chart_type: :braille_area,
+        chart_type: :braille_area, renderer: :pixel,
         colors: [{80, 180, 220}, {220, 100, 80}],
         show_baseline: true,
         show_axes: true,
@@ -74,7 +76,7 @@ defmodule BrailleAreaDemo do
       rule(),
       chart(
         [state.disk_read |> Enum.map(&(&1 - 55)), state.disk_write |> Enum.map(&(&1 * -1))],
-        chart_type: :braille_area,
+        chart_type: :braille_area, renderer: :pixel,
         colors: [{80, 180, 220}, {220, 100, 80}],
         show_baseline: true,
         show_axes: true,

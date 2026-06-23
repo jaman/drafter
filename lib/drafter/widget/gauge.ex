@@ -79,13 +79,13 @@ defmodule Drafter.Widget.Gauge do
   end
 
   @doc false
-  def image(state, rect) do
+  def image(state, rect, id) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
     if gauge_pixel?(state) do
       label_rows = if state.label, do: 1, else: 0
       arc_rows = max(1, rect.height - label_rows - 1)
-      gauge_image(state, rect.width, arc_rows, label_rows)
+      gauge_image(state, rect.width, arc_rows, label_rows, id)
     else
       nil
     end
@@ -108,12 +108,12 @@ defmodule Drafter.Widget.Gauge do
     {r, g, b}
   end
 
-  defp gauge_image(state, cols, rows, label_rows) do
+  defp gauge_image(state, cols, rows, label_rows, id) do
     spec = %{type: :gauge, value: state.value, fill: gauge_fill(state), track: to_rgba(state.track_color)}
 
-    case Pixel.image(spec, Pixel.protocol(state.renderer), {cols, rows}) do
+    case Pixel.image(spec, Pixel.protocol(state.renderer), {cols, rows}, id) do
       nil -> nil
-      bytes -> {bytes, %{dx: 0, dy: label_rows, cols: cols, rows: rows}}
+      {paint, clear} -> {paint, clear, %{dx: 0, dy: label_rows, cols: cols, rows: rows}}
     end
   end
 

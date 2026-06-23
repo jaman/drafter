@@ -7,6 +7,8 @@ defmodule Drafter.WidgetServer do
   alias Drafter.Widget.Trait.Pipeline
   alias Drafter.WidgetStripCache
 
+  @default_image_throttle_ms 90
+
   defstruct [
     :id,
     :module,
@@ -17,10 +19,9 @@ defmodule Drafter.WidgetServer do
     last_event_render_at: 0,
     image_task: nil,
     image_hash: nil,
-    last_image_ms: nil
+    last_image_ms: nil,
+    image_throttle_ms: @default_image_throttle_ms
   ]
-
-  @image_throttle_ms 90
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -100,7 +101,8 @@ defmodule Drafter.WidgetServer do
       state: widget_state,
       rect: rect,
       data_channel: data_channel,
-      auto_buffer: auto_buffer?(opts)
+      auto_buffer: auto_buffer?(opts),
+      image_throttle_ms: Keyword.get(opts, :image_throttle_ms, @default_image_throttle_ms)
     }
 
     strips = module.render(widget_state, rect)
@@ -402,12 +404,12 @@ defmodule Drafter.WidgetServer do
   end
 
   defp request_image(module) do
-    if function_exported?(module, :image, 2), do: GenServer.cast(self(), :maybe_generate_image)
+    if function_exported?(module, :image, 3), do: GenServer.cast(self(), :maybe_generate_image)
   end
 
   defp schedule_image(%{module: module} = state) do
     cond do
-      not function_exported?(module, :image, 2) -> state
+      not function_exported?(module, :image, 3) -> state
       not WidgetStripCache.visible?(state.id) -> state
       state.image_task != nil -> state
       not image_due?(state) -> state
@@ -418,7 +420,7 @@ defmodule Drafter.WidgetServer do
   defp image_due?(%{last_image_ms: nil}), do: true
 
   defp image_due?(state) do
-    System.monotonic_time(:millisecond) - state.last_image_ms >= @image_throttle_ms
+    System.monotonic_time(:millisecond) - state.last_image_ms >= state.image_throttle_ms
   end
 
   defp maybe_start_image(state) do
@@ -437,25 +439,21 @@ defmodule Drafter.WidgetServer do
 
     spawn(fn ->
       Enum.each(ctx, fn {key, val} -> Process.put(key, val) end)
-      store_image(id, safe_image(module, widget_state, rect), rect)
+      store_image(id, safe_image(module, widget_state, rect, id))
       send(parent, :image_task_done)
     end)
   end
 
-  defp store_image(id, {bytes, %{dx: dx, dy: dy, cols: cols, rows: rows}}, _rect) do
-    Drafter.Compositor.put_image(id, bytes, dx, dy, cols, rows)
+  defp store_image(id, {paint, clear, %{dx: dx, dy: dy, cols: cols, rows: rows}}) do
+    Drafter.Compositor.put_image(id, paint, clear, dx, dy, cols, rows)
   end
 
-  defp store_image(id, bytes, rect) when is_binary(bytes) or is_list(bytes) do
-    Drafter.Compositor.put_image(id, bytes, 0, 0, rect.width, rect.height)
-  end
-
-  defp store_image(id, _other, _rect) do
+  defp store_image(id, _other) do
     Drafter.Compositor.clear_image(id)
   end
 
-  defp safe_image(module, widget_state, rect) do
-    module.image(widget_state, rect)
+  defp safe_image(module, widget_state, rect, id) do
+    module.image(widget_state, rect, id)
   rescue
     _ -> nil
   catch

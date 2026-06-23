@@ -5,7 +5,7 @@ defmodule Drafter.Regression.PixelChartTest do
   alias Drafter.Widget.{Chart, Gauge, PieChart}
   alias Drafter.Widget.Chart.Pixel
 
-  test "image/2 produces image bytes for an explicit pixel protocol" do
+  test "image/3 produces paint/clear bytes for an explicit pixel protocol" do
     state =
       Chart.mount(%{
         data: [1, 3, 2, 5, 4, 6, 3, 7, 5, 8],
@@ -14,14 +14,17 @@ defmodule Drafter.Regression.PixelChartTest do
         color: {120, 200, 255}
       })
 
-    bytes = Chart.image(state, %{x: 0, y: 0, width: 24, height: 10})
-    assert is_binary(bytes) or is_list(bytes)
-    assert IO.iodata_length(bytes) > 0
+    assert {paint, clear, %{dx: 0, dy: 0, cols: 24, rows: 10}} =
+             Chart.image(state, %{x: 0, y: 0, width: 24, height: 10}, :chart_a)
+
+    assert is_binary(paint) or is_list(paint)
+    assert IO.iodata_length(paint) > 0
+    assert clear == ""
   end
 
-  test "image/2 returns nil for the default text renderer" do
+  test "image/3 returns nil for the default text renderer" do
     state = Chart.mount(%{data: [1, 2, 3], chart_type: :line})
-    assert Chart.image(state, %{x: 0, y: 0, width: 10, height: 4}) == nil
+    assert Chart.image(state, %{x: 0, y: 0, width: 10, height: 4}, :chart_b) == nil
   end
 
   test "renderer: :braille falls back to braille strips (no image)" do
@@ -33,7 +36,7 @@ defmodule Drafter.Regression.PixelChartTest do
     text = Enum.map_join(strips, "", &Strip.to_plain_text/1)
     assert String.match?(text, ~r/[\x{2800}-\x{28FF}]/u)
 
-    assert Chart.image(state, rect) == nil
+    assert Chart.image(state, rect, :chart_c) == nil
   end
 
   test "every supported chart type rasterizes to image bytes and braille strips" do
@@ -50,8 +53,9 @@ defmodule Drafter.Regression.PixelChartTest do
 
     for {type, data} <- cases do
       pixel = Chart.mount(%{data: data, chart_type: type, renderer: :iterm2})
-      bytes = Chart.image(pixel, rect)
-      assert (is_binary(bytes) or is_list(bytes)) and IO.iodata_length(bytes) > 0,
+
+      assert {paint, "", %{cols: _, rows: _}} = Chart.image(pixel, rect, type)
+      assert (is_binary(paint) or is_list(paint)) and IO.iodata_length(paint) > 0,
              "no image bytes for #{type}"
 
       braille = Chart.mount(%{data: data, chart_type: type, renderer: :braille})
@@ -89,32 +93,53 @@ defmodule Drafter.Regression.PixelChartTest do
     ]
 
     for spec <- specs do
-      img = Pixel.image(spec, :iterm2, {24, 10})
-      assert img && IO.iodata_length(img) > 0, "no image bytes for #{spec.type}"
+      assert {img, ""} = Pixel.image(spec, :iterm2, {24, 10}, spec.type)
+      assert IO.iodata_length(img) > 0, "no image bytes for #{spec.type}"
 
       strips = Pixel.braille_strips(spec, {24, 10})
       assert strips && length(strips) == 10, "no braille strips for #{spec.type}"
     end
   end
 
+  test "kitty protocol emits a transmit+place paint and a delete clear keyed by id" do
+    spec = %{
+      type: :line,
+      data: [1, 3, 2, 5, 4],
+      color: {120, 200, 255, 255},
+      smooth: false,
+      fill_opacity: 0.5
+    }
+
+    assert {paint, clear} = Pixel.image(spec, :kitty, {24, 10}, :w_kitty)
+    paint = IO.iodata_to_binary(paint)
+    clear = IO.iodata_to_binary(clear)
+
+    assert paint =~ "a=t,i="
+    assert paint =~ "a=p,i="
+    assert clear =~ "a=d,d=i,i="
+
+    assert {other_paint, _} = Pixel.image(spec, :kitty, {24, 10}, :w_other)
+    refute IO.iodata_to_binary(other_paint) == paint
+  end
+
   test "pie chart rasterizes to a positioned (sub-rect) image, text by default" do
     state = PieChart.mount(%{data: [{"A", 30}, {"B", 50}, {"C", 20}], renderer: :iterm2})
     rect = %{x: 0, y: 0, width: 40, height: 12}
 
-    assert {bytes, %{dx: 0, dy: 0, cols: cols, rows: 12}} = PieChart.image(state, rect)
-    assert (is_binary(bytes) or is_list(bytes)) and IO.iodata_length(bytes) > 0
+    assert {paint, "", %{dx: 0, dy: 0, cols: cols, rows: 12}} = PieChart.image(state, rect, :pie_a)
+    assert (is_binary(paint) or is_list(paint)) and IO.iodata_length(paint) > 0
     assert cols <= 40
 
-    assert PieChart.image(PieChart.mount(%{data: [{"A", 1}]}), rect) == nil
+    assert PieChart.image(PieChart.mount(%{data: [{"A", 1}]}), rect, :pie_b) == nil
   end
 
   test "gauge renders a positioned pixel arc below its label, text by default" do
     state = Gauge.mount(%{value: 0.7, label: "CPU", renderer: :iterm2})
     rect = %{x: 0, y: 0, width: 20, height: 6}
 
-    assert {bytes, %{dx: 0, dy: 1, cols: 20, rows: 4}} = Gauge.image(state, rect)
-    assert IO.iodata_length(bytes) > 0
+    assert {paint, "", %{dx: 0, dy: 1, cols: 20, rows: 4}} = Gauge.image(state, rect, :gauge_a)
+    assert IO.iodata_length(paint) > 0
 
-    assert Gauge.image(Gauge.mount(%{value: 0.5}), rect) == nil
+    assert Gauge.image(Gauge.mount(%{value: 0.5}), rect, :gauge_b) == nil
   end
 end

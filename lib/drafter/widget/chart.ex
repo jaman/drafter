@@ -91,6 +91,14 @@ defmodule Drafter.Widget.Chart do
     * `:animation_speed` — milliseconds per animation frame (default `100`)
     * `:style` — map of style properties
     * `:classes` — list of theme class atoms
+    * `:renderer` — rendering backend: `:text` (default, ASCII/block), `:braille`
+      (anti-aliased braille), or `:pixel` (best terminal graphics available — kitty/iTerm2/
+      sixel image, falling back to braille then text). `:iterm2` / `:kitty` / `:sixel` force
+      a specific protocol.
+    * `:image_throttle_ms` — for `:pixel` charts, the minimum milliseconds between image
+      regenerations (default `90`). Lower means smoother animation but more terminal load.
+    * `:image_scale` — for `:pixel` charts, pixels generated per terminal cell column
+      (rows use `2×`); default `8`. Higher is sharper but produces larger images.
 
   ## Usage
 
@@ -221,7 +229,8 @@ defmodule Drafter.Widget.Chart do
         line_thickness: Map.get(props, :line_thickness, 1),
         connect_lines: Map.get(props, :connect_lines, false),
         raw_data: Map.get(props, :raw_data, false),
-        renderer: Map.get(props, :renderer, :text)
+        renderer: Map.get(props, :renderer, :text),
+        image_scale: Map.get(props, :image_scale, 8)
       }
     }
   end
@@ -307,6 +316,7 @@ defmodule Drafter.Widget.Chart do
       connect_lines: Keyword.get(opts, :connect_lines, false),
       raw_data: Keyword.get(opts, :raw_data, false),
       renderer: Keyword.get(opts, :renderer, :text),
+      image_scale: Keyword.get(opts, :image_scale, 8),
       _render_timestamp: System.monotonic_time(:millisecond)
     }
   end
@@ -347,12 +357,17 @@ defmodule Drafter.Widget.Chart do
   end
 
   @doc false
-  def image(state, rect) do
+  def image(state, rect, id) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    cols = max(1, rect.width)
+    rows = max(1, rect.height)
 
     case Pixel.mode(renderer(state), state.chart_type) do
       :pixel ->
-        Pixel.image(pixel_spec(state), Pixel.protocol(renderer(state)), {max(1, rect.width), max(1, rect.height)})
+        case Pixel.image(pixel_spec(state), Pixel.protocol(renderer(state)), {cols, rows}, id) do
+          nil -> nil
+          {paint, clear} -> {paint, clear, %{dx: 0, dy: 0, cols: cols, rows: rows}}
+        end
 
       _ ->
         nil
@@ -410,7 +425,8 @@ defmodule Drafter.Widget.Chart do
       smooth: Map.get(state._internal, :smooth, true),
       fill_opacity: state.fill_opacity,
       min: state.min_value,
-      max: state.max_value
+      max: state.max_value,
+      scale: Map.get(state._internal, :image_scale, 8)
     }
   end
 

@@ -5,8 +5,9 @@ defmodule Drafter.Widget.Chart.Pixel do
   Two outputs from a single rasterisation path: a true-image escape sequence for
   terminals that support a pixel protocol (kitty / iTerm2 / sixel), or anti-aliased
   braille `Strip`s for any other truecolor terminal. Callers pick the mode with
-  `mode/2` ("best available" for `:pixel`) and pass a chart `spec` to `image/3`
-  (pixel bytes) or `braille_strips/2`.
+  `mode/2` ("best available" for `:pixel`) and pass a chart `spec` to `image/4`
+  (a `{paint, clear}` pair — `clear` is a kitty delete for the persistent-layer
+  protocol, empty for cell-grid protocols) or `braille_strips/2`.
 
   A `spec` is `%{type, values, color: {r,g,b,a}, smooth, fill_opacity, min, max}`.
   Add a `raster/3` clause to support a new chart type; `supported/0` gates which
@@ -14,6 +15,7 @@ defmodule Drafter.Widget.Chart.Pixel do
   """
 
   alias Drafter.Draw.{Segment, Strip}
+  alias FrenchCurve.Backend.Kitty
   alias FrenchCurve.{Chart, Draw, Raster}
 
   @pixel_protocols [:iterm2, :kitty, :sixel]
@@ -78,15 +80,38 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   defp env?(name), do: System.get_env(name) not in [nil, ""]
 
-  @spec image(map(), atom(), {pos_integer(), pos_integer()}) :: iodata() | nil
-  def image(spec, protocol, {cols, rows}) do
-    case raster(spec, min(cols * 8, 512), min(rows * 16, 288)) do
+  @default_image_scale 8
+
+  @spec image(map(), atom(), {pos_integer(), pos_integer()}, term()) ::
+          {iodata(), iodata()} | nil
+  def image(spec, protocol, {cols, rows}, id) do
+    scale = Map.get(spec, :scale, @default_image_scale)
+
+    case raster(spec, min(cols * scale, 512), min(rows * scale * 2, 288)) do
       nil -> nil
-      r -> FrenchCurve.to_terminal(r, protocol, fit: {cols, rows})
+      r -> encode(r, protocol, {cols, rows}, id)
     end
   rescue
     _ -> nil
   end
+
+  defp encode(raster, :kitty, {cols, rows}, id) do
+    kid = kitty_id(id)
+    clear = Kitty.delete(id: kid, placement: 1)
+
+    paint =
+      clear <>
+        Kitty.transmit(raster, kid) <>
+        Kitty.place(kid, placement: 1, fit: {cols, rows})
+
+    {paint, clear}
+  end
+
+  defp encode(raster, protocol, {cols, rows}, _id) do
+    {FrenchCurve.to_terminal(raster, protocol, fit: {cols, rows}), ""}
+  end
+
+  defp kitty_id(id), do: :erlang.phash2(id, 4_000_000_000) + 1
 
   @spec braille_strips(map(), {pos_integer(), pos_integer()}) :: [Strip.t()] | nil
   def braille_strips(spec, {cols, rows}) do

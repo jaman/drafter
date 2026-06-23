@@ -108,7 +108,7 @@ defmodule Drafter.Widget.PieChart do
   end
 
   @doc false
-  def image(state, rect) do
+  def image(state, rect, id) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
     if pie_pixel?(state) do
@@ -118,9 +118,9 @@ defmodule Drafter.Widget.PieChart do
       chart_height = rect.height
       spec = %{type: :pie, slices: pie_slices(slices)}
 
-      case Pixel.image(spec, Pixel.protocol(state.renderer), {chart_width, chart_height}) do
+      case Pixel.image(spec, Pixel.protocol(state.renderer), {chart_width, chart_height}, id) do
         nil -> nil
-        bytes -> {bytes, %{dx: 0, dy: 0, cols: chart_width, rows: chart_height}}
+        {paint, clear} -> {paint, clear, %{dx: 0, dy: 0, cols: chart_width, rows: chart_height}}
       end
     else
       nil
