@@ -331,11 +331,14 @@ defmodule Drafter.Compositor do
   end
 
   defp build_terminal_output(screen_buffer, rendered_buffer) do
+    prev_tuple = List.to_tuple(rendered_buffer)
+    prev_count = tuple_size(prev_tuple)
+
     {rows, changed} =
       screen_buffer
       |> Enum.with_index()
       |> Enum.reduce({[], []}, fn {strip, line_index}, {rows, changed} ->
-        prev_strip = Enum.at(rendered_buffer, line_index)
+        prev_strip = if line_index < prev_count, do: elem(prev_tuple, line_index), else: nil
 
         if prev_strip && prev_strip.cache_key == strip.cache_key do
           {rows, changed}

@@ -127,15 +127,18 @@ defmodule Drafter.LayerCompositor do
   defp composite_layer(canvas, layer, viewport) do
     bounds = layer.bounds
     layer_strips = layer.strips || []
+    layer_count = length(layer_strips)
+    layer_tuple = List.to_tuple(layer_strips)
 
-    Enum.with_index(canvas)
+    canvas
+    |> Enum.with_index()
     |> Enum.map(fn {canvas_strip, row_index} ->
       layer_row = row_index - bounds.y
 
-      if layer_row >= 0 and layer_row < length(layer_strips) and
+      if layer_row >= 0 and layer_row < layer_count and
            row_index >= bounds.y and row_index < bounds.y + bounds.height and
            bounds.x < viewport.width do
-        layer_strip = Enum.at(layer_strips, layer_row)
+        layer_strip = elem(layer_tuple, layer_row)
         composite_strips_at_position(canvas_strip, layer_strip, bounds.x, viewport.width)
       else
         canvas_strip
@@ -398,28 +401,30 @@ defmodule Drafter.LayerCompositor do
   defp composite_layer_rows(canvas, layer, viewport, dirty_rows) do
     bounds = layer.bounds
     layer_strips = layer.strips || []
+    layer_count = length(layer_strips)
+    layer_tuple = List.to_tuple(layer_strips)
 
     canvas
     |> Enum.with_index()
     |> Enum.map(fn {canvas_strip, row_index} ->
       if MapSet.member?(dirty_rows, row_index) do
-        composite_layer_row(canvas_strip, layer_strips, bounds, row_index, viewport)
+        composite_layer_row(canvas_strip, layer_tuple, layer_count, bounds, row_index, viewport)
       else
         canvas_strip
       end
     end)
   end
 
-  defp composite_layer_row(canvas_strip, layer_strips, bounds, row_index, viewport) do
+  defp composite_layer_row(canvas_strip, layer_tuple, layer_count, bounds, row_index, viewport) do
     layer_row = row_index - bounds.y
 
     in_bounds =
-      layer_row >= 0 and layer_row < length(layer_strips) and
+      layer_row >= 0 and layer_row < layer_count and
         row_index >= bounds.y and row_index < bounds.y + bounds.height and
         bounds.x < viewport.width
 
     if in_bounds do
-      layer_strip = Enum.at(layer_strips, layer_row)
+      layer_strip = elem(layer_tuple, layer_row)
       composite_strips_at_position(canvas_strip, layer_strip, bounds.x, viewport.width)
     else
       canvas_strip
@@ -427,13 +432,16 @@ defmodule Drafter.LayerCompositor do
   end
 
   defp merge_with_previous(partial_composite, previous_composite, dirty_rows) do
+    prev_tuple = List.to_tuple(previous_composite)
+    prev_count = tuple_size(prev_tuple)
+
     partial_composite
     |> Enum.with_index()
     |> Enum.map(fn {strip, row_index} ->
-      if MapSet.member?(dirty_rows, row_index) do
-        strip
-      else
-        Enum.at(previous_composite, row_index) || strip
+      cond do
+        MapSet.member?(dirty_rows, row_index) -> strip
+        row_index < prev_count -> elem(prev_tuple, row_index) || strip
+        true -> strip
       end
     end)
   end
