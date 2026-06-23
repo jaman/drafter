@@ -28,6 +28,7 @@ defmodule Drafter.Widget.PieChart do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.Widget.Chart.Pixel
 
   @default_palette [
     {100, 180, 255},
@@ -59,7 +60,8 @@ defmodule Drafter.Widget.PieChart do
     :colors,
     :style,
     :classes,
-    :app_module
+    :app_module,
+    renderer: :text
   ]
 
   @impl Drafter.Widget
@@ -71,7 +73,8 @@ defmodule Drafter.Widget.PieChart do
       colors: Map.get(props, :colors, @default_palette),
       style: Map.get(props, :style, %{}),
       classes: Map.get(props, :classes, []),
-      app_module: Map.get(props, :app_module)
+      app_module: Map.get(props, :app_module),
+      renderer: Map.get(props, :renderer, :text)
     }
   end
 
@@ -104,6 +107,38 @@ defmodule Drafter.Widget.PieChart do
     end
   end
 
+  @doc false
+  def image(state, rect) do
+    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+
+    if pie_pixel?(state) do
+      slices = build_slices(state)
+      legend_width = if state.show_legend, do: compute_legend_width(slices, state), else: 0
+      chart_width = max(1, rect.width - legend_width)
+      chart_height = rect.height
+      spec = %{type: :pie, slices: pie_slices(slices)}
+
+      case Pixel.image(spec, Pixel.protocol(state.renderer), {chart_width, chart_height}) do
+        nil -> nil
+        bytes -> {bytes, %{dx: 0, dy: 0, cols: chart_width, rows: chart_height}}
+      end
+    else
+      nil
+    end
+  end
+
+  defp pie_pixel?(state) do
+    state.renderer != :text and Pixel.protocol(state.renderer) != nil
+  end
+
+  defp pie_slices(slices) do
+    Enum.map(slices, fn %{value: value, color: color} -> {value, to_rgba(color)} end)
+  end
+
+  defp to_rgba({r, g, b}), do: {r, g, b, 255}
+  defp to_rgba({r, g, b, a}), do: {r, g, b, a}
+  defp to_rgba(_color), do: {150, 150, 150, 255}
+
   @impl Drafter.Widget
   def handle_event(_event, state), do: {:bubble, state}
 
@@ -116,7 +151,8 @@ defmodule Drafter.Widget.PieChart do
       colors: Map.get(props, :colors, state.colors),
       style: Map.get(props, :style, state.style),
       classes: Map.get(props, :classes, state.classes),
-      app_module: Map.get(props, :app_module, state.app_module)
+      app_module: Map.get(props, :app_module, state.app_module),
+      renderer: Map.get(props, :renderer, state.renderer)
     }
   end
 
@@ -155,7 +191,8 @@ defmodule Drafter.Widget.PieChart do
       colors: Keyword.get(opts, :colors, @default_palette),
       style: Keyword.get(opts, :style, %{}),
       classes: classes,
-      app_module: Keyword.get(opts, :__app_module__)
+      app_module: Keyword.get(opts, :__app_module__),
+      renderer: Keyword.get(opts, :renderer, :text)
     }
   end
 

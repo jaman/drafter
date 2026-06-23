@@ -29,6 +29,7 @@ defmodule Drafter.Widget.Gauge do
   import Bitwise, only: [bor: 2]
 
   alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.Widget.Chart.Pixel
 
   @braille_base 0x2800
   @braille_dots %{
@@ -53,7 +54,8 @@ defmodule Drafter.Widget.Gauge do
     :low_color,
     :mid_color,
     :high_color,
-    :track_color
+    :track_color,
+    renderer: :text
   ]
 
   @impl Drafter.Widget
@@ -66,12 +68,68 @@ defmodule Drafter.Widget.Gauge do
       low_color: Map.get(props, :low_color, {80, 200, 80}),
       mid_color: Map.get(props, :mid_color, {220, 140, 0}),
       high_color: Map.get(props, :high_color, {220, 60, 60}),
-      track_color: Map.get(props, :track_color, {55, 55, 55})
+      track_color: Map.get(props, :track_color, {55, 55, 55}),
+      renderer: Map.get(props, :renderer, :text)
     }
   end
 
   @impl Drafter.Widget
   def render(state, rect) do
+    if gauge_pixel?(state), do: render_pixel_base(state, rect), else: render_text(state, rect)
+  end
+
+  @doc false
+  def image(state, rect) do
+    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+
+    if gauge_pixel?(state) do
+      label_rows = if state.label, do: 1, else: 0
+      arc_rows = max(1, rect.height - label_rows - 1)
+      gauge_image(state, rect.width, arc_rows, label_rows)
+    else
+      nil
+    end
+  end
+
+  defp gauge_pixel?(state) do
+    state.renderer != :text and Pixel.protocol(state.renderer) != nil
+  end
+
+  defp render_pixel_base(state, rect) do
+    label_strips = if state.label, do: [center_strip(state.label, rect.width, {160, 160, 160})], else: []
+    arc_rows = max(0, rect.height - length(label_strips) - 1)
+    blank = Strip.new([Segment.new(String.duplicate(" ", rect.width))])
+    value_strip = center_strip(format_value(state.value), rect.width, fill_rgb(state))
+    label_strips ++ List.duplicate(blank, arc_rows) ++ [value_strip]
+  end
+
+  defp fill_rgb(state) do
+    {r, g, b, _a} = gauge_fill(state)
+    {r, g, b}
+  end
+
+  defp gauge_image(state, cols, rows, label_rows) do
+    spec = %{type: :gauge, value: state.value, fill: gauge_fill(state), track: to_rgba(state.track_color)}
+
+    case Pixel.image(spec, Pixel.protocol(state.renderer), {cols, rows}) do
+      nil -> nil
+      bytes -> {bytes, %{dx: 0, dy: label_rows, cols: cols, rows: rows}}
+    end
+  end
+
+  defp gauge_fill(state) do
+    cond do
+      state.value >= state.high_threshold -> to_rgba(state.high_color)
+      state.value >= state.low_threshold -> to_rgba(state.mid_color)
+      true -> to_rgba(state.low_color)
+    end
+  end
+
+  defp to_rgba({r, g, b}), do: {r, g, b, 255}
+  defp to_rgba({r, g, b, a}), do: {r, g, b, a}
+  defp to_rgba(_color), do: {180, 180, 180, 255}
+
+  defp render_text(state, rect) do
     w = rect.width
     h = rect.height
     dots_w = w * 2
@@ -114,7 +172,8 @@ defmodule Drafter.Widget.Gauge do
   def update(props, state) do
     %{state |
       value: Map.get(props, :value, state.value),
-      label: Map.get(props, :label, state.label)
+      label: Map.get(props, :label, state.label),
+      renderer: Map.get(props, :renderer, state.renderer)
     }
   end
 
@@ -131,7 +190,8 @@ defmodule Drafter.Widget.Gauge do
       low_color: Keyword.get(opts, :low_color, {80, 200, 80}),
       mid_color: Keyword.get(opts, :mid_color, {220, 140, 0}),
       high_color: Keyword.get(opts, :high_color, {220, 60, 60}),
-      track_color: Keyword.get(opts, :track_color, {55, 55, 55})
+      track_color: Keyword.get(opts, :track_color, {55, 55, 55}),
+      renderer: Keyword.get(opts, :renderer, :text)
     }
   end
 

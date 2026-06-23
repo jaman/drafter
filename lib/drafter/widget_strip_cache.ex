@@ -2,15 +2,19 @@ defmodule Drafter.WidgetStripCache do
   @moduledoc false
 
   @table :drafter_widget_strips
+  @visible_table :drafter_widget_visible
 
   @spec create() :: :ok
   def create do
-    case :ets.whereis(@table) do
-      :undefined ->
-        :ets.new(@table, [:named_table, :public, :set, {:read_concurrency, true}])
+    ensure_table(@table)
+    ensure_table(@visible_table)
+    :ok
+  end
 
-      _ ->
-        :ok
+  defp ensure_table(name) do
+    case :ets.whereis(name) do
+      :undefined -> :ets.new(name, [:named_table, :public, :set, {:read_concurrency, true}])
+      _ -> :ok
     end
 
     :ok
@@ -38,17 +42,37 @@ defmodule Drafter.WidgetStripCache do
     :ets.delete(@table, session_key(widget_id))
   end
 
+  @spec mark_visible(term(), boolean()) :: true
+  def mark_visible(widget_id, visible?) do
+    :ets.insert(@visible_table, {session_key(widget_id), visible?})
+  rescue
+    ArgumentError -> true
+  end
+
+  @spec visible?(term()) :: boolean()
+  def visible?(widget_id) do
+    key = session_key(widget_id)
+
+    case :ets.lookup(@visible_table, key) do
+      [{^key, visible?}] -> visible?
+      [] -> false
+    end
+  rescue
+    ArgumentError -> false
+  end
+
   @spec clear() :: :ok
   def clear do
     session = session_id()
+    clear_session(@table, {{:"$1", :_, :_}, [match_session(session)], [true]})
+    clear_session(@visible_table, {{:"$1", :_}, [match_session(session)], [true]})
+    :ok
+  end
 
-    case :ets.whereis(@table) do
-      :undefined ->
-        :ok
-
-      _ ->
-        :ets.select_delete(@table, [{{:"$1", :_, :_}, [match_session(session)], [true]}])
-        :ok
+  defp clear_session(table, match_spec) do
+    case :ets.whereis(table) do
+      :undefined -> :ok
+      _ -> :ets.select_delete(table, [match_spec])
     end
   end
 

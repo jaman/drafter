@@ -110,7 +110,7 @@ defmodule Drafter.Widget.Chart do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.Widget.Chart.{Area, Bar, BrailleArea, Bubble, Candlestick, Heatmap, Histogram}
+  alias Drafter.Widget.Chart.{Area, Bar, BrailleArea, Bubble, Candlestick, Heatmap, Histogram, Pixel}
   alias Drafter.Widget.Chart.{Line, MultiSeries, Scatter, Step}
 
   @type chart_type ::
@@ -220,7 +220,8 @@ defmodule Drafter.Widget.Chart do
         smooth: Map.get(props, :smooth, false),
         line_thickness: Map.get(props, :line_thickness, 1),
         connect_lines: Map.get(props, :connect_lines, false),
-        raw_data: Map.get(props, :raw_data, false)
+        raw_data: Map.get(props, :raw_data, false),
+        renderer: Map.get(props, :renderer, :text)
       }
     }
   end
@@ -305,12 +306,17 @@ defmodule Drafter.Widget.Chart do
       line_thickness: Keyword.get(opts, :line_thickness, 1),
       connect_lines: Keyword.get(opts, :connect_lines, false),
       raw_data: Keyword.get(opts, :raw_data, false),
+      renderer: Keyword.get(opts, :renderer, :text),
       _render_timestamp: System.monotonic_time(:millisecond)
     }
   end
 
   def update_props_from_mount(mount_props, _existing_state, _opts) do
-    Map.put(mount_props, :_render_timestamp, System.monotonic_time(:millisecond))
+    if Map.get(mount_props, :renderer, :text) == :text do
+      Map.put(mount_props, :_render_timestamp, System.monotonic_time(:millisecond))
+    else
+      mount_props
+    end
   end
 
   @impl Drafter.Widget
@@ -328,6 +334,32 @@ defmodule Drafter.Widget.Chart do
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
+    case Pixel.mode(renderer(state), state.chart_type) do
+      :pixel -> blank_strips(rect)
+      :braille -> braille_render(state, rect)
+      :text -> render_text(state, rect)
+    end
+  end
+
+  defp blank_strips(rect) do
+    blank = Strip.new([Segment.new(String.duplicate(" ", max(1, rect.width)))])
+    List.duplicate(blank, max(1, rect.height))
+  end
+
+  @doc false
+  def image(state, rect) do
+    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+
+    case Pixel.mode(renderer(state), state.chart_type) do
+      :pixel ->
+        Pixel.image(pixel_spec(state), Pixel.protocol(renderer(state)), {max(1, rect.width), max(1, rect.height)})
+
+      _ ->
+        nil
+    end
+  end
+
+  defp render_text(state, rect) do
     computed =
       Computed.for_widget(:chart, state,
         classes: state.classes,
@@ -358,6 +390,38 @@ defmodule Drafter.Widget.Chart do
     |> then(&apply_axes(strips, &1, rect, bg, fg))
     |> apply_title(state, rect, bg, fg)
     |> pad_strips(rect.height)
+  end
+
+  defp renderer(state), do: Map.get(state._internal, :renderer, :text)
+
+  defp braille_render(state, rect) do
+    case Pixel.braille_strips(pixel_spec(state), {max(1, rect.width), max(1, rect.height)}) do
+      nil -> render_text(state, rect)
+      strips -> strips
+    end
+  end
+
+  defp pixel_spec(state) do
+    %{
+      type: state.chart_type,
+      data: state.data,
+      color: pixel_color(state),
+      colors: state.colors,
+      smooth: Map.get(state._internal, :smooth, true),
+      fill_opacity: state.fill_opacity,
+      min: state.min_value,
+      max: state.max_value
+    }
+  end
+
+  defp pixel_color(state) do
+    base = state.color || List.first(state.colors) || {120, 200, 255}
+
+    case base do
+      {r, g, b} -> {r, g, b, 255}
+      {r, g, b, a} -> {r, g, b, a}
+      _ -> {120, 200, 255, 255}
+    end
   end
 
   @impl Drafter.Widget

@@ -14,8 +14,13 @@ defmodule Drafter.WidgetServer do
     :rect,
     :data_channel,
     auto_buffer: false,
-    last_event_render_at: 0
+    last_event_render_at: 0,
+    image_task: nil,
+    image_hash: nil,
+    last_image_ms: nil
   ]
+
+  @image_throttle_ms 90
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -100,6 +105,7 @@ defmodule Drafter.WidgetServer do
 
     strips = module.render(widget_state, rect)
     WidgetStripCache.put(id, rect, strips)
+    request_image(module)
 
     {:ok, state}
   end
@@ -189,6 +195,10 @@ defmodule Drafter.WidgetServer do
 
   def handle_cast(:resume_data, state), do: {:noreply, state}
 
+  def handle_cast(:maybe_generate_image, state) do
+    {:noreply, schedule_image(state)}
+  end
+
   @impl true
   def handle_call({:update_rect, rect}, _from, state) do
     new_widget_state =
@@ -218,6 +228,7 @@ defmodule Drafter.WidgetServer do
           render_state = maybe_apply_buffer(state)
           strips = state.module.render(render_state, state.rect)
           WidgetStripCache.put(state.id, state.rect, strips)
+          request_image(state.module)
           {state.rect, strips}
 
         cached ->
@@ -235,12 +246,14 @@ defmodule Drafter.WidgetServer do
         new_state = %{state | state: new_widget_state}
         strips = new_state.module.render(new_state.state, new_state.rect)
         WidgetStripCache.put(new_state.id, new_state.rect, strips)
+        request_image(new_state.module)
         {:reply, {:ok, new_widget_state}, new_state}
 
       {:ok, new_widget_state, actions} ->
         new_state = %{state | state: new_widget_state}
         strips = new_state.module.render(new_state.state, new_state.rect)
         WidgetStripCache.put(new_state.id, new_state.rect, strips)
+        request_image(new_state.module)
         {:reply, {:ok, new_widget_state, actions}, new_state}
 
       {:noreply, new_state} ->
@@ -256,6 +269,7 @@ defmodule Drafter.WidgetServer do
     strips = new_state.module.render(new_state.state, new_state.rect)
     WidgetStripCache.put(new_state.id, new_state.rect, strips)
     notify_render_needed(new_state.id)
+    request_image(new_state.module)
     {:reply, :ok, new_state}
   end
 
@@ -302,6 +316,11 @@ defmodule Drafter.WidgetServer do
 
   def handle_info(:data_channel_tick, state), do: {:noreply, state}
 
+  def handle_info(:image_task_done, state) do
+    done = %{state | image_task: nil, last_image_ms: System.monotonic_time(:millisecond)}
+    {:noreply, schedule_image(done)}
+  end
+
   def handle_info(msg, state) do
     result =
       if function_exported?(state.module, :handle_info, 2) do
@@ -327,6 +346,22 @@ defmodule Drafter.WidgetServer do
       _ ->
         {:noreply, state}
     end
+  end
+
+  @impl true
+  def terminate(_reason, %{id: id}) when not is_nil(id) do
+    clear_compositor_image(id)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
+
+  defp clear_compositor_image(id) do
+    Drafter.Compositor.clear_image(id)
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp event_priority({:key, _}), do: :high
@@ -363,6 +398,80 @@ defmodule Drafter.WidgetServer do
 
     WidgetStripCache.put(server_state.id, server_state.rect, final_strips)
     notify_render_needed(server_state.id)
+    request_image(server_state.module)
+  end
+
+  defp request_image(module) do
+    if function_exported?(module, :image, 2), do: GenServer.cast(self(), :maybe_generate_image)
+  end
+
+  defp schedule_image(%{module: module} = state) do
+    cond do
+      not function_exported?(module, :image, 2) -> state
+      not WidgetStripCache.visible?(state.id) -> state
+      state.image_task != nil -> state
+      not image_due?(state) -> state
+      true -> maybe_start_image(state)
+    end
+  end
+
+  defp image_due?(%{last_image_ms: nil}), do: true
+
+  defp image_due?(state) do
+    System.monotonic_time(:millisecond) - state.last_image_ms >= @image_throttle_ms
+  end
+
+  defp maybe_start_image(state) do
+    hash = :erlang.phash2({state.state, state.rect})
+
+    if hash == state.image_hash do
+      state
+    else
+      %{state | image_task: spawn_image_task(state), image_hash: hash}
+    end
+  end
+
+  defp spawn_image_task(%{module: module, state: widget_state, rect: rect, id: id}) do
+    parent = self()
+    ctx = session_context()
+
+    spawn(fn ->
+      Enum.each(ctx, fn {key, val} -> Process.put(key, val) end)
+      store_image(id, safe_image(module, widget_state, rect), rect)
+      send(parent, :image_task_done)
+    end)
+  end
+
+  defp store_image(id, {bytes, %{dx: dx, dy: dy, cols: cols, rows: rows}}, _rect) do
+    Drafter.Compositor.put_image(id, bytes, dx, dy, cols, rows)
+  end
+
+  defp store_image(id, bytes, rect) when is_binary(bytes) or is_list(bytes) do
+    Drafter.Compositor.put_image(id, bytes, 0, 0, rect.width, rect.height)
+  end
+
+  defp store_image(id, _other, _rect) do
+    Drafter.Compositor.clear_image(id)
+  end
+
+  defp safe_image(module, widget_state, rect) do
+    module.image(widget_state, rect)
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
+  end
+
+  defp session_context do
+    for key <- [
+          :drafter_compositor,
+          :drafter_event_manager,
+          :drafter_theme_manager,
+          :drafter_screen_manager,
+          :drafter_event_handler
+        ],
+        value = Process.get(key),
+        do: {key, value}
   end
 
   defp maybe_apply_buffer(%{data_channel: nil, state: widget_state}), do: widget_state

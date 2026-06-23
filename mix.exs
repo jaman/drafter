@@ -105,6 +105,7 @@ defmodule Drafter.MixProject do
     [
       {:elixir_make, "~> 0.9"},
       {:spark, "~> 2.6"},
+      {:french_curve, path: "../french_curve"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:phoenix_pubsub, "~> 2.1"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}

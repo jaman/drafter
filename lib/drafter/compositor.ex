@@ -13,7 +13,9 @@ defmodule Drafter.Compositor do
     rendered_buffer: [],
     dirty_regions: [],
     screen_size: {80, 24},
-    rendering: false
+    rendering: false,
+    image_regions: %{},
+    painted_images: %{}
   ]
 
   @type screen_buffer :: [Strip.t()]
@@ -44,6 +46,34 @@ defmodule Drafter.Compositor do
   @spec refresh() :: :ok
   def refresh do
     GenServer.cast(resolve(), :refresh)
+  end
+
+  @doc """
+  Store the terminal-graphics bytes (kitty/iTerm2/sixel) for an image region.
+
+  Called once per generation (from the widget's async render task) — the bytes never
+  travel through the render loop. `dx`/`dy` offset the image within the placed cell, and
+  `cols`/`rows` are its cell size. Paint happens via `place_image/3`.
+  """
+  @spec put_image(term(), iodata(), integer(), integer(), pos_integer(), pos_integer()) :: :ok
+  def put_image(id, bytes, dx, dy, cols, rows) do
+    GenServer.cast(resolve(), {:put_image, id, bytes, dx, dy, cols, rows})
+  end
+
+  @doc """
+  Position an image region at a cell and mark it visible — a cheap, byte-free per-frame
+  update from the render loop. The image is (re)painted after the text frame only when
+  its bytes or position changed, or a text row under it was redrawn.
+  """
+  @spec place_image(term(), non_neg_integer(), non_neg_integer()) :: :ok
+  def place_image(id, x, y) do
+    GenServer.cast(resolve(), {:place_image, id, x, y})
+  end
+
+  @doc "Hide an image region and re-blank the cells it occupied."
+  @spec clear_image(term()) :: :ok
+  def clear_image(id) do
+    GenServer.cast(resolve(), {:clear_image, id})
   end
 
   @spec get_screen_size() :: {pos_integer(), pos_integer()}
@@ -109,6 +139,47 @@ defmodule Drafter.Compositor do
     schedule_render(new_state)
   end
 
+  def handle_cast({:put_image, id, bytes, dx, dy, cols, rows}, state) do
+    base = Map.get(state.image_regions, id, %{x: 0, y: 0, visible: false, version: 0})
+    region = Map.merge(base, %{bytes: bytes, dx: dx, dy: dy, cols: cols, rows: rows, version: base.version + 1})
+    schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
+  end
+
+  def handle_cast({:place_image, id, x, y}, state) do
+    case Map.get(state.image_regions, id) do
+      %{x: ^x, y: ^y, visible: true} ->
+        {:noreply, state}
+
+      nil ->
+        region = %{bytes: nil, dx: 0, dy: 0, cols: 0, rows: 0, x: x, y: y, visible: true, version: 0}
+        schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
+
+      region ->
+        schedule_render(%{state | image_regions: Map.put(state.image_regions, id, %{region | x: x, y: y, visible: true})})
+    end
+  end
+
+  def handle_cast({:clear_image, id}, state) do
+    case Map.get(state.image_regions, id) do
+      %{visible: true, bytes: bytes} = region when not is_nil(bytes) ->
+        hidden = %{region | visible: false}
+
+        schedule_render(%{
+          state
+          | image_regions: Map.put(state.image_regions, id, hidden),
+            painted_images: Map.delete(state.painted_images, id),
+            dirty_regions: [image_rect(region) | state.dirty_regions],
+            rendered_buffer: invalidate_rows(state.rendered_buffer, region.y + region.dy, region.rows)
+        })
+
+      %{} = region ->
+        {:noreply, %{state | image_regions: Map.put(state.image_regions, id, %{region | visible: false})}}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
   @impl GenServer
   def handle_info({:tui_event, {:resize, {width, height}}}, state) do
     new_buffer = create_empty_buffer(width, height)
@@ -125,11 +196,19 @@ defmodule Drafter.Compositor do
   end
 
   def handle_info(:render_frame, state) do
-    if Enum.empty?(state.dirty_regions) do
+    if Enum.empty?(state.dirty_regions) and not images_pending?(state) do
       {:noreply, %{state | rendering: false}}
     else
-      new_rendered = render_to_terminal(state)
-      {:noreply, %{state | rendered_buffer: new_rendered, dirty_regions: [], rendering: false}}
+      {new_rendered, new_painted} = render_to_terminal(state)
+
+      {:noreply,
+       %{
+         state
+         | rendered_buffer: new_rendered,
+           painted_images: new_painted,
+           dirty_regions: [],
+           rendering: false
+       }}
     end
   end
 
@@ -223,37 +302,87 @@ defmodule Drafter.Compositor do
   end
 
   defp render_to_terminal(state) do
-    output = build_terminal_output(state.screen_buffer, state.rendered_buffer)
-    driver_write(state.terminal_driver, output)
-    state.screen_buffer
+    {text_rows, changed_lines} = build_terminal_output(state.screen_buffer, state.rendered_buffer)
+
+    {image_rows, new_painted} =
+      build_image_output(state.image_regions, state.painted_images, changed_lines)
+
+    output = wrap_output(text_rows ++ image_rows)
+    if output != [], do: driver_write(state.terminal_driver, output)
+    {state.screen_buffer, new_painted}
   end
 
   defp build_terminal_output(screen_buffer, rendered_buffer) do
-    rows =
+    {rows, changed} =
       screen_buffer
       |> Enum.with_index()
-      |> Enum.flat_map(fn {strip, line_index} ->
+      |> Enum.reduce({[], []}, fn {strip, line_index}, {rows, changed} ->
         prev_strip = Enum.at(rendered_buffer, line_index)
 
         if prev_strip && prev_strip.cache_key == strip.cache_key do
-          []
+          {rows, changed}
         else
-          [Terminal.ANSI.cursor_to(1, line_index + 1), Strip.to_ansi(strip)]
+          {[[Terminal.ANSI.cursor_to(1, line_index + 1), Strip.to_ansi(strip)] | rows],
+           [line_index | changed]}
         end
       end)
 
-    case rows do
-      [] ->
-        []
+    {Enum.reverse(rows), changed}
+  end
 
-      _ ->
-        [Terminal.ANSI.sync_start()] ++
-          rows ++
-          [
-            Terminal.ANSI.cursor_to(1, 1),
-            Terminal.ANSI.hide_cursor(),
-            Terminal.ANSI.sync_end()
-          ]
-    end
+  defp build_image_output(image_regions, painted, changed_lines) do
+    changed_set = MapSet.new(changed_lines)
+
+    Enum.reduce(image_regions, {[], painted}, fn {id, region}, {rows, painted_acc} ->
+      if paintable?(region) and
+           (needs_paint?(region, Map.get(painted_acc, id)) or image_overlaps?(region, changed_set)) do
+        cmd = [Terminal.ANSI.cursor_to(region.x + region.dx + 1, region.y + region.dy + 1), region.bytes]
+        {[cmd | rows], Map.put(painted_acc, id, {region.version, {region.x, region.y}})}
+      else
+        {rows, painted_acc}
+      end
+    end)
+  end
+
+  defp paintable?(region), do: region.visible and not is_nil(region.bytes)
+
+  defp needs_paint?(_region, nil), do: true
+  defp needs_paint?(region, {version, pos}), do: region.version != version or {region.x, region.y} != pos
+
+  defp image_overlaps?(region, changed_set) do
+    top = region.y + region.dy
+    Enum.any?(top..(top + region.rows - 1), &MapSet.member?(changed_set, &1))
+  end
+
+  defp image_rect(region) do
+    %{x: region.x + region.dx, y: region.y + region.dy, width: region.cols, height: region.rows}
+  end
+
+  defp wrap_output([]), do: []
+
+  defp wrap_output(body) do
+    [Terminal.ANSI.sync_start()] ++
+      body ++
+      [
+        Terminal.ANSI.cursor_to(1, 1),
+        Terminal.ANSI.hide_cursor(),
+        Terminal.ANSI.sync_end()
+      ]
+  end
+
+  defp images_pending?(state) do
+    Enum.any?(state.image_regions, fn {id, region} ->
+      paintable?(region) and needs_paint?(region, Map.get(state.painted_images, id))
+    end)
+  end
+
+  defp invalidate_rows([], _y, _rows), do: []
+
+  defp invalidate_rows(buffer, y, rows) do
+    buffer
+    |> Enum.with_index()
+    |> Enum.map(fn {strip, index} ->
+      if index >= y and index < y + rows, do: nil, else: strip
+    end)
   end
 end

@@ -441,6 +441,13 @@ defmodule Drafter.Runtime.Renderer do
         {render_rect, widget_strips}
       end
 
+    overlay_image(
+      widget_id,
+      widget_info,
+      final_rect,
+      fully_visible?(widget_strips, final_strips) and not scroll_active?()
+    )
+
     if final_strips != [] do
       [LayerCompositor.widget_layer(widget_id, final_strips, final_rect, z_base, widget_info.module)]
     else
@@ -448,12 +455,39 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
+  defp fully_visible?(full_strips, final_strips) do
+    final_strips != [] and length(final_strips) == length(full_strips)
+  end
+
+  defp scroll_active?, do: Process.get(:scroll_gesture_active, false)
+
   defp fetch_widget_strips(widget_id, widget_info, widget_rect) do
     case WidgetStripCache.get(widget_id) do
       {cached_rect, strips} -> {cached_rect, strips}
       nil -> fetch_uncached_strips(widget_id, widget_info, widget_rect)
     end
   end
+
+  defp overlay_image(widget_id, %{module: module} = widget_info, rect, paint?) do
+    if function_exported?(module, :image, 2) do
+      WidgetStripCache.mark_visible(widget_id, paint?)
+      do_overlay_image(widget_id, widget_info, rect, paint?)
+    else
+      :ok
+    end
+  end
+
+  defp do_overlay_image(widget_id, _widget_info, _rect, false) do
+    Drafter.Compositor.clear_image(widget_id)
+  end
+
+  defp do_overlay_image(widget_id, widget_info, rect, true) do
+    Drafter.Compositor.place_image(widget_id, rect.x, rect.y)
+    request_image_gen(widget_info)
+  end
+
+  defp request_image_gen(%{pid: pid}) when is_pid(pid), do: GenServer.cast(pid, :maybe_generate_image)
+  defp request_image_gen(_widget_info), do: :ok
 
   defp fetch_uncached_strips(_widget_id, %{pid: pid}, _widget_rect) when is_pid(pid) do
     WidgetServer.get_render(pid)
