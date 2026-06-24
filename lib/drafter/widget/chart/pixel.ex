@@ -19,6 +19,7 @@ defmodule Drafter.Widget.Chart.Pixel do
   alias FrenchCurve.{Chart, Draw, Raster}
 
   @pixel_protocols [:iterm2, :kitty, :sixel]
+  @modes [:auto, :pixel, :kitty, :iterm2, :sixel, :braille, :text]
   @supported [
     :line,
     :step,
@@ -51,22 +52,74 @@ defmodule Drafter.Widget.Chart.Pixel do
   @spec supported() :: [atom()]
   def supported, do: @supported
 
-  @spec mode(atom(), atom()) :: :pixel | :braille | :text
-  def mode(:text, _type), do: :text
+  @doc """
+  The list of mode atoms accepted by `:renderer`, `DRAFTER_MODE`, and the `mode:`
+  run option: `#{inspect(@modes)}`.
+  """
+  @spec modes() :: [atom()]
+  def modes, do: @modes
 
-  def mode(renderer, type) do
-    cond do
-      type not in @supported -> :text
-      renderer == :braille -> :braille
-      protocol(renderer) != nil -> :pixel
-      true -> :braille
+  @spec mode(atom() | nil, atom()) :: :pixel | :braille | :text
+  def mode(renderer, type), do: to_mode(resolve(renderer), type)
+
+  defp to_mode(_effective, type) when type not in @supported, do: :text
+  defp to_mode(:text, _type), do: :text
+  defp to_mode(:braille, _type), do: :braille
+
+  defp to_mode(effective, _type) when effective in [:auto, :pixel] do
+    if detect(), do: :pixel, else: :braille
+  end
+
+  defp to_mode(proto, _type) when proto in @pixel_protocols, do: :pixel
+
+  @spec protocol(atom() | nil) :: atom() | nil
+  def protocol(renderer), do: protocol_for(resolve(renderer))
+
+  defp protocol_for(effective) when effective in [:auto, :pixel], do: detect()
+  defp protocol_for(proto) when proto in @pixel_protocols, do: proto
+  defp protocol_for(_effective), do: nil
+
+  @doc """
+  Resolve an effective mode from precedence: the `DRAFTER_MODE` env var forces and
+  wins over everything; otherwise an explicit per-widget `renderer` (any mode atom),
+  then the runtime `:drafter` `:render_mode` application env, then `:text`.
+  """
+  @spec resolve(atom() | nil) :: atom()
+  def resolve(renderer), do: env_mode() || widget_mode(renderer) || runtime_mode() || :text
+
+  defp widget_mode(renderer) when renderer in @modes, do: renderer
+  defp widget_mode(_renderer), do: nil
+
+  defp env_mode do
+    case System.get_env("DRAFTER_MODE") do
+      blank when blank in [nil, ""] -> legacy_mode()
+      value -> parse_mode(value)
     end
   end
 
-  @spec protocol(atom()) :: atom() | nil
-  def protocol(:pixel), do: detect()
-  def protocol(proto) when proto in @pixel_protocols, do: proto
-  def protocol(_), do: nil
+  defp legacy_mode do
+    if System.get_env("DRAFTER_NO_PIXEL") not in [nil, ""], do: :text
+  end
+
+  defp runtime_mode do
+    case Application.get_env(:drafter, :render_mode) do
+      mode when mode in @modes -> mode
+      _ -> nil
+    end
+  end
+
+  defp parse_mode(value) do
+    case value |> String.trim() |> String.downcase() do
+      "auto" -> :auto
+      "pixel" -> :pixel
+      "kitty" -> :kitty
+      "iterm2" -> :iterm2
+      "sixel" -> :sixel
+      "braille" -> :braille
+      "text" -> :text
+      _ -> nil
+    end
+  end
 
   defp detect do
     cond do
@@ -80,7 +133,7 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   defp env?(name), do: System.get_env(name) not in [nil, ""]
 
-  @default_image_scale 8
+  @default_image_scale 4
 
   @spec image(map(), atom(), {pos_integer(), pos_integer()}, term()) ::
           {iodata(), iodata()} | nil
@@ -573,11 +626,24 @@ defmodule Drafter.Widget.Chart.Pixel do
   defp classify(data) do
     cond do
       not is_list(data) or data == [] -> :empty
-      is_number(hd(data)) -> {:single, data}
-      number_list?(hd(data)) -> {:multi, Enum.filter(data, &number_list?/1)}
+      value?(hd(data)) -> {:single, Enum.map(data, &to_value/1)}
+      value_list?(hd(data)) -> {:multi, data |> Enum.filter(&value_list?/1) |> Enum.map(&to_values/1)}
       true -> :empty
     end
   end
+
+  defp value?(n) when is_number(n), do: true
+  defp value?({v, _weight}) when is_number(v), do: true
+  defp value?(_other), do: false
+
+  defp to_value(n) when is_number(n), do: n
+  defp to_value({v, _weight}) when is_number(v), do: v
+  defp to_value(_other), do: 0
+
+  defp value_list?([head | _]), do: value?(head)
+  defp value_list?(_other), do: false
+
+  defp to_values(list), do: Enum.map(list, &to_value/1)
 
   defp number_list?([n | _]) when is_number(n), do: true
   defp number_list?(_other), do: false

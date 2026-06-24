@@ -491,7 +491,7 @@ defmodule Drafter.ComponentRenderer do
     []
     |> maybe_add_opt(opts, :buffer)
     |> maybe_add_opt(opts, :refresh)
-    |> maybe_add_opt(opts, :image_throttle_ms)
+    |> maybe_add_opt(opts, :image_throttle)
   end
 
   defp maybe_add_opt(acc, opts, key) do

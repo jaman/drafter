@@ -9,6 +9,7 @@ defmodule Drafter.Compositor do
   defstruct [
     :terminal_driver,
     :event_manager,
+    :paced_tty,
     screen_buffer: [],
     rendered_buffer: [],
     dirty_regions: [],
@@ -16,6 +17,7 @@ defmodule Drafter.Compositor do
     rendering: false,
     image_regions: %{},
     painted_images: %{},
+    image_stamps: %{},
     pending_image_clears: []
   ]
 
@@ -57,11 +59,23 @@ defmodule Drafter.Compositor do
   delete for the persistent-layer protocol; empty for cell-grid protocols that re-blank).
   `dx`/`dy` offset the image within the placed cell, and `cols`/`rows` are its cell size.
   Paint happens via `place_image/3`.
+
+  `stamp` is the per-widget data-time captured when generation was requested. A frame
+  whose stamp is not strictly greater than the highest stamp already displayed for `id`
+  is dropped (out-of-order or superseded), keeping the animation locked to real time.
   """
-  @spec put_image(term(), iodata(), iodata(), integer(), integer(), pos_integer(), pos_integer()) ::
-          :ok
-  def put_image(id, paint, clear, dx, dy, cols, rows) do
-    GenServer.cast(resolve(), {:put_image, id, paint, clear, dx, dy, cols, rows})
+  @spec put_image(
+          term(),
+          iodata(),
+          iodata(),
+          integer(),
+          integer(),
+          pos_integer(),
+          pos_integer(),
+          integer()
+        ) :: :ok
+  def put_image(id, paint, clear, dx, dy, cols, rows, stamp \\ 0) do
+    GenServer.cast(resolve(), {:put_image, id, paint, clear, dx, dy, cols, rows, stamp})
   end
 
   @doc """
@@ -93,6 +107,7 @@ defmodule Drafter.Compositor do
 
   @impl GenServer
   def init(opts) do
+    Drafter.Trace.ensure_started()
     terminal_driver = Keyword.get(opts, :terminal_driver, Terminal.Driver)
     event_manager = Keyword.get(opts, :event_manager, Event.Manager)
 
@@ -105,6 +120,7 @@ defmodule Drafter.Compositor do
     state = %__MODULE__{
       terminal_driver: terminal_driver,
       event_manager: event_manager,
+      paced_tty: open_paced_tty(terminal_driver),
       screen_buffer: empty_buffer,
       dirty_regions: [],
       screen_size: {width, height},
@@ -132,7 +148,7 @@ defmodule Drafter.Compositor do
   def handle_cast(:clear_screen, state) do
     {width, height} = state.screen_size
     empty_buffer = create_empty_buffer(width, height)
-    new_state = %{state | screen_buffer: empty_buffer, rendered_buffer: []}
+    new_state = discard_image_state(%{state | screen_buffer: empty_buffer, rendered_buffer: []})
     schedule_render(new_state)
   end
 
@@ -143,21 +159,31 @@ defmodule Drafter.Compositor do
     schedule_render(new_state)
   end
 
-  def handle_cast({:put_image, id, paint, clear, dx, dy, cols, rows}, state) do
-    base = Map.get(state.image_regions, id, %{x: 0, y: 0, visible: false, version: 0, clear: ""})
+  def handle_cast({:put_image, id, paint, clear, dx, dy, cols, rows, stamp}, state) do
+    if stale_stamp?(state.image_stamps, id, stamp) do
+      {:noreply, state}
+    else
+      base = Map.get(state.image_regions, id, %{x: 0, y: 0, visible: false, version: 0, clear: ""})
 
-    region =
-      Map.merge(base, %{
-        bytes: paint,
-        clear: clear,
-        dx: dx,
-        dy: dy,
-        cols: cols,
-        rows: rows,
-        version: base.version + 1
+      region =
+        Map.merge(base, %{
+          bytes: paint,
+          clear: clear,
+          dx: dx,
+          dy: dy,
+          cols: cols,
+          rows: rows,
+          version: base.version + 1
+        })
+
+      state = if covers?(base, region), do: state, else: invalidate_region(state, base)
+
+      schedule_render(%{
+        state
+        | image_regions: Map.put(state.image_regions, id, region),
+          image_stamps: Map.put(state.image_stamps, id, stamp)
       })
-
-    schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
+    end
   end
 
   def handle_cast({:place_image, id, x, y}, state) do
@@ -170,7 +196,14 @@ defmodule Drafter.Compositor do
         schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
 
       region ->
-        schedule_render(%{state | image_regions: Map.put(state.image_regions, id, %{region | x: x, y: y, visible: true})})
+        moved = %{region | x: x, y: y, visible: true}
+
+        state =
+          if (region.x != x or region.y != y) and not is_nil(region.bytes),
+            do: invalidate_region(state, region),
+            else: state
+
+        schedule_render(%{state | image_regions: Map.put(state.image_regions, id, moved)})
     end
   end
 
@@ -183,13 +216,19 @@ defmodule Drafter.Compositor do
           state
           | image_regions: Map.put(state.image_regions, id, hidden),
             painted_images: Map.delete(state.painted_images, id),
+            image_stamps: Map.delete(state.image_stamps, id),
             pending_image_clears: [region.clear | state.pending_image_clears],
             dirty_regions: [image_rect(region) | state.dirty_regions],
             rendered_buffer: invalidate_rows(state.rendered_buffer, region.y + region.dy, region.rows)
         })
 
       %{} = region ->
-        {:noreply, %{state | image_regions: Map.put(state.image_regions, id, %{region | visible: false})}}
+        {:noreply,
+         %{
+           state
+           | image_regions: Map.put(state.image_regions, id, %{region | visible: false}),
+             image_stamps: Map.delete(state.image_stamps, id)
+         }}
 
       nil ->
         {:noreply, state}
@@ -200,13 +239,14 @@ defmodule Drafter.Compositor do
   def handle_info({:tui_event, {:resize, {width, height}}}, state) do
     new_buffer = create_empty_buffer(width, height)
 
-    new_state = %{
-      state
-      | screen_size: {width, height},
-        screen_buffer: new_buffer,
-        rendered_buffer: [],
-        dirty_regions: [%{x: 0, y: 0, width: width, height: height}]
-    }
+    new_state =
+      discard_image_state(%{
+        state
+        | screen_size: {width, height},
+          screen_buffer: new_buffer,
+          rendered_buffer: [],
+          dirty_regions: [%{x: 0, y: 0, width: width, height: height}]
+      })
 
     schedule_render(new_state)
   end
@@ -233,6 +273,14 @@ defmodule Drafter.Compositor do
   def handle_info(_msg, state) do
     {:noreply, state}
   end
+
+  @impl GenServer
+  def terminate(_reason, %__MODULE__{paced_tty: tty}) when tty != nil do
+    :file.close(tty)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   defp resize_event?({:resize, _}), do: true
   defp resize_event?(_), do: false
@@ -325,9 +373,52 @@ defmodule Drafter.Compositor do
     {image_rows, new_painted} =
       build_image_output(state.image_regions, state.painted_images, changed_lines, state.screen_size)
 
-    output = wrap_output(Enum.reverse(state.pending_image_clears) ++ text_rows ++ image_rows)
-    if output != [], do: driver_write(state.terminal_driver, output)
+    image_block = Enum.reverse(state.pending_image_clears) ++ image_rows
+    output = compose_output(text_rows, image_block)
+
+    if output != [] do
+      trace_frame(text_rows, image_rows)
+      write_output(state, output)
+    end
+
     {state.screen_buffer, new_painted}
+  end
+
+  defp write_output(%__MODULE__{paced_tty: tty}, output) when tty != nil do
+    :file.write(tty, output)
+  end
+
+  defp write_output(%__MODULE__{terminal_driver: driver}, output) do
+    driver_write(driver, output)
+  end
+
+  defp open_paced_tty(Terminal.Driver) do
+    if paced_write?() do
+      case :file.open(~c"/dev/tty", [:write, :raw, :binary]) do
+        {:ok, tty} -> tty
+        {:error, _} -> nil
+      end
+    end
+  end
+
+  defp open_paced_tty(_driver), do: nil
+
+  defp paced_write?, do: System.get_env("DRAFTER_NO_PACED_WRITE") in [nil, ""]
+
+  defp trace_frame(text_rows, image_rows) do
+    Drafter.Trace.log([
+      "F ",
+      Drafter.Trace.ts(),
+      " t",
+      Integer.to_string(length(text_rows)),
+      " i",
+      Integer.to_string(length(image_rows)),
+      "\n"
+    ])
+  end
+
+  defp trace_paint(id, reason) do
+    Drafter.Trace.log(["P ", Drafter.Trace.ts(), " ", inspect(id), " ", reason, "\n"])
   end
 
   defp build_terminal_output(screen_buffer, rendered_buffer) do
@@ -355,14 +446,24 @@ defmodule Drafter.Compositor do
     changed_set = MapSet.new(changed_lines)
 
     Enum.reduce(image_regions, {[], painted}, fn {id, region}, {rows, painted_acc} ->
-      if paintable?(region, screen_size) and
-           (needs_paint?(region, Map.get(painted_acc, id)) or image_overlaps?(region, changed_set)) do
-        cmd = [Terminal.ANSI.cursor_to(region.x + region.dx + 1, region.y + region.dy + 1), region.bytes]
-        {[cmd | rows], Map.put(painted_acc, id, {region.version, {region.x, region.y}})}
+      if should_paint?(region, Map.get(painted_acc, id), changed_set, screen_size) do
+        paint_region(id, region, rows, painted_acc)
       else
         {rows, painted_acc}
       end
     end)
+  end
+
+  defp should_paint?(region, painted, changed_set, screen_size) do
+    paintable?(region, screen_size) and
+      (needs_paint?(region, painted) or image_overlaps?(region, changed_set))
+  end
+
+  defp paint_region(id, region, rows, painted_acc) do
+    reason = if needs_paint?(region, Map.get(painted_acc, id)), do: "v", else: "o"
+    trace_paint(id, reason)
+    cmd = [Terminal.ANSI.cursor_to(region.x + region.dx + 1, region.y + region.dy + 1), region.bytes]
+    {[cmd | rows], Map.put(painted_acc, id, {region.version, {region.x, region.y}})}
   end
 
   defp paintable?(region, screen_size) do
@@ -387,16 +488,17 @@ defmodule Drafter.Compositor do
     %{x: region.x + region.dx, y: region.y + region.dy, width: region.cols, height: region.rows}
   end
 
-  defp wrap_output([]), do: []
+  defp compose_output([], []), do: []
 
-  defp wrap_output(body) do
-    [Terminal.ANSI.sync_start()] ++
-      body ++
-      [
-        Terminal.ANSI.cursor_to(1, 1),
-        Terminal.ANSI.hide_cursor(),
-        Terminal.ANSI.sync_end()
-      ]
+  defp compose_output(text_rows, image_block) do
+    synced_text(text_rows) ++
+      image_block ++ [Terminal.ANSI.cursor_to(1, 1), Terminal.ANSI.hide_cursor()]
+  end
+
+  defp synced_text([]), do: []
+
+  defp synced_text(text_rows) do
+    [Terminal.ANSI.sync_start()] ++ text_rows ++ [Terminal.ANSI.sync_end()]
   end
 
   defp images_pending?(state) do
@@ -404,6 +506,46 @@ defmodule Drafter.Compositor do
       paintable?(region, state.screen_size) and
         needs_paint?(region, Map.get(state.painted_images, id))
     end)
+  end
+
+  defp stale_stamp?(stamps, id, stamp) do
+    case Map.get(stamps, id) do
+      nil -> false
+      last -> stamp <= last
+    end
+  end
+
+  defp covers?(old, new) do
+    is_nil(Map.get(old, :bytes)) or
+      (Map.get(old, :x) == new.x and Map.get(old, :y) == new.y and
+         Map.get(old, :dx) == new.dx and Map.get(old, :dy) == new.dy and
+         Map.get(old, :cols, 0) <= new.cols and Map.get(old, :rows, 0) <= new.rows)
+  end
+
+  defp invalidate_region(state, %{bytes: bytes} = region) when not is_nil(bytes) do
+    %{
+      state
+      | dirty_regions: [image_rect(region) | state.dirty_regions],
+        rendered_buffer: invalidate_rows(state.rendered_buffer, region.y + region.dy, region.rows)
+    }
+  end
+
+  defp invalidate_region(state, _region), do: state
+
+  defp discard_image_state(state) do
+    clears =
+      state.image_regions
+      |> Map.values()
+      |> Enum.map(&Map.get(&1, :clear, ""))
+      |> Enum.reject(&(&1 == ""))
+
+    %{
+      state
+      | image_regions: %{},
+        painted_images: %{},
+        image_stamps: %{},
+        pending_image_clears: clears ++ state.pending_image_clears
+    }
   end
 
   defp invalidate_rows([], _y, _rows), do: []

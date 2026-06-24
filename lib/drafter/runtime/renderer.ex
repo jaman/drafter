@@ -321,15 +321,36 @@ defmodule Drafter.Runtime.Renderer do
             {layer_acc, dirty_acc, stale_acc}
 
           widget_layers ->
-            {new_dirty, new_stale} = track_widget_dirty(widget_id, hd(widget_layers), dirty_acc, stale_acc)
+            {new_dirty, new_stale} =
+              if simple_render?() do
+                {dirty_acc, stale_acc}
+              else
+                track_widget_dirty(widget_id, hd(widget_layers), dirty_acc, stale_acc)
+              end
+
             {layer_acc ++ widget_layers, new_dirty, new_stale}
         end
       end)
 
-    visible_ids = layers |> Enum.map(& &1.id) |> MapSet.new()
-    vanished_bounds = collect_vanished_bounds(visible_ids)
+    if simple_render?() do
+      {layers, [], []}
+    else
+      visible_ids = layers |> Enum.map(& &1.id) |> MapSet.new()
+      vanished_bounds = collect_vanished_bounds(visible_ids)
+      {layers, dirty_ids, stale_bounds ++ vanished_bounds}
+    end
+  end
 
-    {layers, dirty_ids, stale_bounds ++ vanished_bounds}
+  defp simple_render? do
+    case Process.get(:drafter_simple_render) do
+      nil ->
+        v = System.get_env("DRAFTER_SIMPLE_RENDER") not in [nil, ""]
+        Process.put(:drafter_simple_render, v)
+        v
+
+      v ->
+        v
+    end
   end
 
   defp track_widget_dirty(widget_id, layer, dirty_acc, stale_acc) do
@@ -357,6 +378,14 @@ defmodule Drafter.Runtime.Renderer do
   end
 
   defp incremental_composite_or_full(all_layers, viewport, dirty_ids, stale_bounds) do
+    if simple_render?() do
+      LayerCompositor.composite(all_layers, viewport)
+    else
+      full_or_incremental(all_layers, viewport, dirty_ids, stale_bounds)
+    end
+  end
+
+  defp full_or_incremental(all_layers, viewport, dirty_ids, stale_bounds) do
     previous = RenderCache.get_composited()
     prev_layer_count = RenderCache.get_layer_count()
 
@@ -460,7 +489,7 @@ defmodule Drafter.Runtime.Renderer do
       widget_id,
       widget_info,
       final_rect,
-      fully_visible?(widget_strips, final_strips) and not scroll_active?()
+      fully_visible?(widget_strips, final_strips) and not scroll_active?() and not resize_active?()
     )
 
     if final_strips != [] do
@@ -475,6 +504,13 @@ defmodule Drafter.Runtime.Renderer do
   end
 
   defp scroll_active?, do: Process.get(:scroll_gesture_active, false)
+
+  defp resize_active? do
+    case Process.get(:last_resize_ms) do
+      nil -> false
+      ms -> System.monotonic_time(:millisecond) - ms < 200
+    end
+  end
 
   defp fetch_widget_strips(widget_id, widget_info, widget_rect) do
     case WidgetStripCache.get(widget_id) do

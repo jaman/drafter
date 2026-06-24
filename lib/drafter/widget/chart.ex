@@ -91,14 +91,20 @@ defmodule Drafter.Widget.Chart do
     * `:animation_speed` — milliseconds per animation frame (default `100`)
     * `:style` — map of style properties
     * `:classes` — list of theme class atoms
-    * `:renderer` — rendering backend: `:text` (default, ASCII/block), `:braille`
-      (anti-aliased braille), or `:pixel` (best terminal graphics available — kitty/iTerm2/
-      sixel image, falling back to braille then text). `:iterm2` / `:kitty` / `:sixel` force
-      a specific protocol.
-    * `:image_throttle_ms` — for `:pixel` charts, the minimum milliseconds between image
-      regenerations (default `90`). Lower means smoother animation but more terminal load.
+    * `:renderer` — rendering backend for this chart: `:text` (ASCII/block), `:braille`
+      (anti-aliased braille), `:pixel` / `:auto` (best terminal graphics available —
+      kitty/iTerm2/sixel image, falling back to braille), or `:iterm2` / `:kitty` /
+      `:sixel` to force a protocol. Overrides the runtime `mode:` config, but the
+      `DRAFTER_MODE` env var still forces over it. When unset, the global mode applies:
+      `DRAFTER_MODE`, then the `mode:` run option (`Drafter.run(App, mode: :pixel)` /
+      `Drafter.render_mode/1`), then `:text`.
+    * `:image_throttle` — for `:pixel` charts, the minimum gap between image regenerations,
+      in Drafter's timing units: `{n, :fps}`, `{n, :ms}`, `{n, :tick}` (every `n` render
+      frames — the default, frame-aligned so it can't beat against the render clock), or a
+      bare integer (milliseconds). Default `{2, :tick}`. Lower means smoother animation but
+      more terminal load.
     * `:image_scale` — for `:pixel` charts, pixels generated per terminal cell column
-      (rows use `2×`); default `8`. Higher is sharper but produces larger images.
+      (rows use `2×`); default `4`. Higher is sharper but produces larger images.
 
   ## Usage
 
@@ -229,8 +235,8 @@ defmodule Drafter.Widget.Chart do
         line_thickness: Map.get(props, :line_thickness, 1),
         connect_lines: Map.get(props, :connect_lines, false),
         raw_data: Map.get(props, :raw_data, false),
-        renderer: Map.get(props, :renderer, :text),
-        image_scale: Map.get(props, :image_scale, 8)
+        renderer: Map.get(props, :renderer),
+        image_scale: Map.get(props, :image_scale, 4)
       }
     }
   end
@@ -315,14 +321,17 @@ defmodule Drafter.Widget.Chart do
       line_thickness: Keyword.get(opts, :line_thickness, 1),
       connect_lines: Keyword.get(opts, :connect_lines, false),
       raw_data: Keyword.get(opts, :raw_data, false),
-      renderer: Keyword.get(opts, :renderer, :text),
-      image_scale: Keyword.get(opts, :image_scale, 8),
+      renderer: Keyword.get(opts, :renderer),
+      image_scale: Keyword.get(opts, :image_scale, 4),
       _render_timestamp: System.monotonic_time(:millisecond)
     }
   end
 
   def update_props_from_mount(mount_props, _existing_state, _opts) do
-    if Map.get(mount_props, :renderer, :text) == :text do
+    renderer = Map.get(mount_props, :renderer)
+    chart_type = Map.get(mount_props, :chart_type, :line)
+
+    if Pixel.mode(renderer, chart_type) == :text do
       Map.put(mount_props, :_render_timestamp, System.monotonic_time(:millisecond))
     else
       mount_props
@@ -407,7 +416,7 @@ defmodule Drafter.Widget.Chart do
     |> pad_strips(rect.height)
   end
 
-  defp renderer(state), do: Map.get(state._internal, :renderer, :text)
+  defp renderer(state), do: Map.get(state._internal, :renderer)
 
   defp braille_render(state, rect) do
     case Pixel.braille_strips(pixel_spec(state), {max(1, rect.width), max(1, rect.height)}) do
@@ -426,7 +435,7 @@ defmodule Drafter.Widget.Chart do
       fill_opacity: state.fill_opacity,
       min: state.min_value,
       max: state.max_value,
-      scale: Map.get(state._internal, :image_scale, 8)
+      scale: Map.get(state._internal, :image_scale, 4)
     }
   end
 

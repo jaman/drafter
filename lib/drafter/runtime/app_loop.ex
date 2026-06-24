@@ -73,13 +73,17 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg({:tui_event, {:resize, {w, h}}}, {app_module, app_state, _rect, timers, wh, ss}) do
-    rect = make_screen_rect(w, h)
+    {fw, fh} = drain_pending_resizes(w, h)
+    Process.put(:last_resize_ms, System.monotonic_time(:millisecond))
+    rect = make_screen_rect(fw, fh)
     RenderCache.invalidate()
     {_, new_wh} = immediate_render(app_module, app_state, rect, wh)
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
 
   defp dispatch_loop_msg({:tui_event, event}, {app_module, app_state, rect, timers, wh, ss}) do
+    Drafter.Trace.log_sync(["I ", Drafter.Trace.ts(), " ", inspect(event), "\n"])
+
     case check_global_quit(event) do
       :quit -> handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
       :continue -> handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
@@ -524,8 +528,11 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp handle_stop(reason, _app_module, _app_state, _screen_rect, timers, widget_hierarchy, []) do
+    Drafter.Trace.log_sync(["Q stop_start ", Drafter.Trace.ts(), "\n"])
     cleanup_timers(timers)
+    Drafter.Trace.log_sync(["Q timers_done ", Drafter.Trace.ts(), "\n"])
     Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
+    Drafter.Trace.log_sync(["Q servers_stopped ", Drafter.Trace.ts(), "\n"])
     if reason == :normal, do: :ok, else: {:error, reason}
   end
 
@@ -688,6 +695,14 @@ defmodule Drafter.Runtime.AppLoop do
 
     new_ref = Process.send_after(self(), :scroll_debounce_render, @scroll_debounce_ms)
     Process.put(:scroll_debounce_ref, new_ref)
+  end
+
+  defp drain_pending_resizes(w, h) do
+    receive do
+      {:tui_event, {:resize, {nw, nh}}} -> drain_pending_resizes(nw, nh)
+    after
+      0 -> {w, h}
+    end
   end
 
   defp drain_stale_events do

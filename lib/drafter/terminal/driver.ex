@@ -167,6 +167,7 @@ defmodule Drafter.Terminal.Driver do
 
   @impl GenServer
   def handle_info({:stdin, data}, state) do
+    Drafter.Trace.log(["S ", Drafter.Trace.ts(), " ", Base.encode16(data), "\n"])
     new_buffer = state.buffer <> data
     {events, remaining_buffer} = ANSI.parse_sequence(new_buffer)
 

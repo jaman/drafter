@@ -61,15 +61,48 @@ defmodule Drafter.LayerCompositor do
   @spec composite_incremental([map()], viewport(), [Strip.t()], MapSet.t(non_neg_integer())) ::
           [Strip.t()]
   def composite_incremental(layers, viewport, previous_composite, dirty_rows) do
-    sorted_layers = Enum.sort_by(layers, & &1.z_index)
-    canvas = initialize_canvas(viewport)
+    prepared = layers |> Enum.sort_by(& &1.z_index) |> Enum.map(&prepare_layer/1)
+    blank = blank_strip(viewport)
+    prev_tuple = List.to_tuple(previous_composite)
+    prev_count = tuple_size(prev_tuple)
 
-    full_composite =
-      Enum.reduce(sorted_layers, canvas, fn layer, current_canvas ->
-        composite_layer_rows(current_canvas, layer, viewport, dirty_rows)
+    new_rows =
+      Enum.reduce(dirty_rows, %{}, fn row, acc ->
+        Map.put(acc, row, compose_row(prepared, viewport, row, blank))
       end)
 
-    merge_with_previous(full_composite, previous_composite, dirty_rows)
+    Enum.map(0..(viewport.height - 1), fn row ->
+      pick_row(Map.get(new_rows, row), row, prev_tuple, prev_count, blank)
+    end)
+  end
+
+  defp pick_row(nil, row, prev_tuple, prev_count, _blank) when row < prev_count,
+    do: elem(prev_tuple, row)
+
+  defp pick_row(nil, _row, _prev_tuple, _prev_count, blank), do: blank
+  defp pick_row(strip, _row, _prev_tuple, _prev_count, _blank), do: strip
+
+  defp prepare_layer(layer) do
+    strips = layer.strips || []
+    %{tuple: List.to_tuple(strips), count: length(strips), bounds: layer.bounds}
+  end
+
+  defp compose_row(prepared, viewport, row, blank) do
+    Enum.reduce(prepared, blank, fn %{tuple: tuple, count: count, bounds: bounds}, acc ->
+      layer_row = row - bounds.y
+
+      if layer_row >= 0 and layer_row < count and
+           row >= bounds.y and row < bounds.y + bounds.height and
+           bounds.x < viewport.width do
+        composite_strips_at_position(acc, elem(tuple, layer_row), bounds.x, viewport.width)
+      else
+        acc
+      end
+    end)
+  end
+
+  defp blank_strip(viewport) do
+    Strip.new([Segment.new(String.duplicate(" ", viewport.width), %{})])
   end
 
   @doc """
@@ -147,29 +180,35 @@ defmodule Drafter.LayerCompositor do
   end
 
   defp composite_strips_at_position(canvas_strip, layer_strip, x_offset, viewport_width) do
-    canvas_segments = canvas_strip.segments || []
     layer_segments = layer_strip.segments || []
 
-    if layer_segments == [] or x_offset < 0 or x_offset >= viewport_width do
+    cond do
+      layer_segments == [] or x_offset < 0 or x_offset >= viewport_width ->
+        canvas_strip
+
+      x_offset == 0 and Strip.width(layer_strip) >= viewport_width ->
+        Strip.crop(layer_strip, viewport_width)
+
+      true ->
+        composite_overlay(canvas_strip, layer_strip, layer_segments, x_offset, viewport_width)
+    end
+  end
+
+  defp composite_overlay(canvas_strip, layer_strip, layer_segments, x_offset, viewport_width) do
+    layer_width = Strip.width(layer_strip)
+    actual_layer_width = min(x_offset + layer_width, viewport_width) - x_offset
+    canvas_width = Strip.width(canvas_strip)
+
+    if x_offset >= canvas_width or actual_layer_width <= 0 do
       canvas_strip
     else
-      layer_width = Strip.width(layer_strip)
-      layer_end = min(x_offset + layer_width, viewport_width)
-      actual_layer_width = layer_end - x_offset
-
-      canvas_width = Strip.width(canvas_strip)
-
-      if x_offset >= canvas_width or actual_layer_width <= 0 do
-        canvas_strip
-      else
-        composite_segments_properly(
-          canvas_segments,
-          layer_segments,
-          x_offset,
-          actual_layer_width,
-          viewport_width
-        )
-      end
+      composite_segments_properly(
+        canvas_strip.segments || [],
+        layer_segments,
+        x_offset,
+        actual_layer_width,
+        viewport_width
+      )
     end
   end
 
@@ -264,17 +303,27 @@ defmodule Drafter.LayerCompositor do
     )
   end
 
-  defp build_grapheme_list(segments) do
-    ansi_pattern = ~r/\e\[[0-9;]*m/
+  @ansi_pattern ~r/\e\[[0-9;]*m/
 
+  defp build_grapheme_list(segments) do
     {graphemes, _col} =
       Enum.reduce(segments, {[], 0}, fn segment, {acc, col} ->
-        parts = Regex.split(ansi_pattern, segment.text, include_captures: true)
-        {part_acc, part_col, _} = process_ansi_parts(parts, acc, col, segment.style, ansi_pattern)
+        {part_acc, part_col, _} = add_segment_graphemes(segment, acc, col)
         {part_acc, part_col}
       end)
 
     Enum.reverse(graphemes)
+  end
+
+  defp add_segment_graphemes(%{text: text, style: style}, acc, col) do
+    case :binary.match(text, "\e") do
+      :nomatch ->
+        expand_graphemes(text, acc, col, style)
+
+      _ ->
+        parts = Regex.split(@ansi_pattern, text, include_captures: true)
+        process_ansi_parts(parts, acc, col, style, @ansi_pattern)
+    end
   end
 
   defp process_ansi_parts(parts, acc, col, style, ansi_pattern) do
@@ -398,51 +447,4 @@ defmodule Drafter.LayerCompositor do
 
   defp char_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
 
-  defp composite_layer_rows(canvas, layer, viewport, dirty_rows) do
-    bounds = layer.bounds
-    layer_strips = layer.strips || []
-    layer_count = length(layer_strips)
-    layer_tuple = List.to_tuple(layer_strips)
-
-    canvas
-    |> Enum.with_index()
-    |> Enum.map(fn {canvas_strip, row_index} ->
-      if MapSet.member?(dirty_rows, row_index) do
-        composite_layer_row(canvas_strip, layer_tuple, layer_count, bounds, row_index, viewport)
-      else
-        canvas_strip
-      end
-    end)
-  end
-
-  defp composite_layer_row(canvas_strip, layer_tuple, layer_count, bounds, row_index, viewport) do
-    layer_row = row_index - bounds.y
-
-    in_bounds =
-      layer_row >= 0 and layer_row < layer_count and
-        row_index >= bounds.y and row_index < bounds.y + bounds.height and
-        bounds.x < viewport.width
-
-    if in_bounds do
-      layer_strip = elem(layer_tuple, layer_row)
-      composite_strips_at_position(canvas_strip, layer_strip, bounds.x, viewport.width)
-    else
-      canvas_strip
-    end
-  end
-
-  defp merge_with_previous(partial_composite, previous_composite, dirty_rows) do
-    prev_tuple = List.to_tuple(previous_composite)
-    prev_count = tuple_size(prev_tuple)
-
-    partial_composite
-    |> Enum.with_index()
-    |> Enum.map(fn {strip, row_index} ->
-      cond do
-        MapSet.member?(dirty_rows, row_index) -> strip
-        row_index < prev_count -> elem(prev_tuple, row_index) || strip
-        true -> strip
-      end
-    end)
-  end
 end

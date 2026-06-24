@@ -82,25 +82,39 @@ defmodule Drafter do
       trigger a full `render_app` on every scroll tick — maximum freshness at the
       cost of higher CPU during scroll.
     * `:syntax_highlighting` - `true` to enable tree-sitter syntax highlighting.
+    * `:mode` - global chart rendering mode (`:auto`, `:pixel`, `:kitty`, `:iterm2`,
+      `:sixel`, `:braille`, `:text`). The lowest-precedence layer: a per-widget
+      `:renderer` overrides it, and the `DRAFTER_MODE` env var forces over both. See
+      `render_mode/1`.
+    * `:halt_on_exit` - `true` (default) calls `System.halt/1` once the app exits,
+      giving an immediate quit instead of the BEAM's graceful application shutdown
+      (which can take 1-2s under `Mix.install`). Only applies to a standalone run;
+      a nested session always returns to its parent. Set to `false` when embedding
+      a run inside a longer-lived VM so the caller regains control instead.
   """
-  @spec run(module(), keyword()) :: :ok
+  @spec run(module(), keyword()) :: :ok | {:error, term()}
   def run(app_module, opts \\ []) when is_atom(app_module) do
+    apply_render_mode(opts)
+
     case Drafter.AppRegistry.whereis() do
       nil ->
         _ = Drafter.Logging.setup()
 
         mouse_hover = app_mouse_hover(app_module)
 
-        with :ok <- start_system(mouse_hover: mouse_hover),
-             :ok <- maybe_start_tree_sitter(opts),
-             :ok <- register_widget_libraries(opts),
-             :ok <- run_app(app_module, opts) do
-          :ok
-        else
-          {:error, reason} ->
-            IO.puts("Failed to start TUI application: #{inspect(reason)}")
-            {:error, reason}
-        end
+        result =
+          with :ok <- start_system(mouse_hover: mouse_hover),
+               :ok <- maybe_start_tree_sitter(opts),
+               :ok <- register_widget_libraries(opts),
+               :ok <- run_app(app_module, opts) do
+            :ok
+          else
+            {:error, reason} ->
+              IO.puts("Failed to start TUI application: #{inspect(reason)}")
+              {:error, reason}
+          end
+
+        maybe_halt(result, opts)
 
       loop_pid ->
         maybe_start_tree_sitter(opts)
@@ -1063,12 +1077,48 @@ defmodule Drafter do
 
     receive do
       {:DOWN, ^ref, :process, ^app_pid, reason} ->
+        Drafter.Trace.log_sync(["Q down ", Drafter.Trace.ts(), "\n"])
         Event.Manager.drain_queue()
         Terminal.Driver.cleanup()
+        Drafter.Trace.log_sync(["Q cleanup_done ", Drafter.Trace.ts(), "\n"])
         Event.Manager.drain_queue()
+        Drafter.Trace.log_sync(["Q run_returns ", Drafter.Trace.ts(), "\n"])
         if reason == :normal, do: :ok, else: {:error, reason}
     end
   end
+
+  @doc """
+  Set the global chart rendering mode at runtime. Accepts any atom in
+  `Drafter.Widget.Chart.Pixel.modes/0`; an unknown value is ignored. A per-widget
+  `:renderer` and the `DRAFTER_MODE` env var both take precedence over this.
+  """
+  @spec render_mode(atom()) :: :ok
+  def render_mode(mode) do
+    if mode in Drafter.Widget.Chart.Pixel.modes() do
+      Application.put_env(:drafter, :render_mode, mode)
+    end
+
+    :ok
+  end
+
+  defp apply_render_mode(opts) do
+    case Keyword.get(opts, :mode) do
+      nil -> :ok
+      mode -> render_mode(mode)
+    end
+  end
+
+  defp maybe_halt(result, opts) do
+    if Keyword.get(opts, :halt_on_exit, true) do
+      Drafter.Trace.log_sync(["Q before_halt ", Drafter.Trace.ts(), "\n"])
+      System.halt(exit_code(result))
+    end
+
+    result
+  end
+
+  defp exit_code(:ok), do: 0
+  defp exit_code(_), do: 1
 
   defp make_screen_rect(width, height), do: %{x: 0, y: 0, width: width, height: height}
 

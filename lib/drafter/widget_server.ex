@@ -7,7 +7,7 @@ defmodule Drafter.WidgetServer do
   alias Drafter.Widget.Trait.Pipeline
   alias Drafter.WidgetStripCache
 
-  @default_image_throttle_ms 90
+  @default_image_throttle {2, :tick}
 
   defstruct [
     :id,
@@ -19,8 +19,9 @@ defmodule Drafter.WidgetServer do
     last_event_render_at: 0,
     image_task: nil,
     image_hash: nil,
+    image_stamp: 0,
     last_image_ms: nil,
-    image_throttle_ms: @default_image_throttle_ms
+    image_throttle_ms: 50
   ]
 
   def start_link(opts) do
@@ -102,7 +103,7 @@ defmodule Drafter.WidgetServer do
       rect: rect,
       data_channel: data_channel,
       auto_buffer: auto_buffer?(opts),
-      image_throttle_ms: Keyword.get(opts, :image_throttle_ms, @default_image_throttle_ms)
+      image_throttle_ms: resolve_throttle(Keyword.get(opts, :image_throttle, @default_image_throttle))
     }
 
     strips = module.render(widget_state, rect)
@@ -423,32 +424,55 @@ defmodule Drafter.WidgetServer do
     System.monotonic_time(:millisecond) - state.last_image_ms >= state.image_throttle_ms
   end
 
+  defp resolve_throttle({n, :fps}) when is_integer(n) and n > 0, do: round(1000 / n)
+  defp resolve_throttle({n, :ms}) when is_integer(n) and n > 0, do: n
+  defp resolve_throttle({n, :tick}) when is_integer(n) and n > 0, do: tick_to_ms(n)
+  defp resolve_throttle(n) when is_integer(n) and n > 0, do: n
+  defp resolve_throttle(_), do: tick_to_ms(2)
+
+  defp tick_to_ms(n) do
+    frame = Drafter.AppRegistry.get_frame_interval() || 33
+    max(1, round((n - 0.5) * frame))
+  end
+
   defp maybe_start_image(state) do
     hash = :erlang.phash2({state.state, state.rect})
 
     if hash == state.image_hash do
       state
     else
-      %{state | image_task: spawn_image_task(state), image_hash: hash}
+      stamp = state.image_stamp + 1
+      %{state | image_task: spawn_image_task(state, stamp), image_hash: hash, image_stamp: stamp}
     end
   end
 
-  defp spawn_image_task(%{module: module, state: widget_state, rect: rect, id: id}) do
+  defp spawn_image_task(%{module: module, state: widget_state, rect: rect, id: id}, stamp) do
     parent = self()
     ctx = session_context()
 
+    priority = gen_priority()
+
     spawn(fn ->
+      Process.flag(:priority, priority)
       Enum.each(ctx, fn {key, val} -> Process.put(key, val) end)
-      store_image(id, safe_image(module, widget_state, rect, id))
+      store_image(id, safe_image(module, widget_state, rect, id), stamp)
       send(parent, :image_task_done)
     end)
   end
 
-  defp store_image(id, {paint, clear, %{dx: dx, dy: dy, cols: cols, rows: rows}}) do
-    Drafter.Compositor.put_image(id, paint, clear, dx, dy, cols, rows)
+  defp gen_priority do
+    case System.get_env("DRAFTER_GEN_PRIORITY") do
+      "normal" -> :normal
+      "high" -> :high
+      _ -> :low
+    end
   end
 
-  defp store_image(id, _other) do
+  defp store_image(id, {paint, clear, %{dx: dx, dy: dy, cols: cols, rows: rows}}, stamp) do
+    Drafter.Compositor.put_image(id, paint, clear, dx, dy, cols, rows, stamp)
+  end
+
+  defp store_image(id, _other, _stamp) do
     Drafter.Compositor.clear_image(id)
   end
 
