@@ -52,6 +52,8 @@ defmodule Drafter.Widget.TextArea do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.ThemeManager
+  alias Drafter.Widget.Scrollbar
   alias Drafter.Widget.TextArea.{Clipboard, Cursor, Editing, History, Render, Selection}
 
   defstruct [
@@ -205,8 +207,14 @@ defmodule Drafter.Widget.TextArea do
           ""
         end <> String.duplicate("─", content_width) <> "┘"
 
+    scrollbar_thumb =
+      Scrollbar.thumb_rows(normalized_state.scroll_offset, length(normalized_state.lines), content_height)
+
+    inner_width = if scrollbar_thumb, do: max(1, content_width - 1), else: content_width
+    scrollbar_styles = Scrollbar.styles(ThemeManager.get_current_theme())
+
     content_lines =
-      Render.render_content(normalized_state, content_width, content_height, effective_style)
+      Render.render_content(normalized_state, inner_width, content_height, effective_style)
 
     strips =
       [
@@ -230,13 +238,19 @@ defmodule Drafter.Widget.TextArea do
               if segments != nil do
                 segments
               else
-                [Segment.new(String.pad_trailing(line, content_width), effective_style)]
+                [Segment.new(String.pad_trailing(line, inner_width), effective_style)]
               end
 
             seg_width =
               Enum.reduce(content_segments, 0, fn seg, acc -> acc + Segment.width(seg) end)
 
-            padding_width = max(0, rect.width - gutter_width - seg_width - 2)
+            scrollbar_segment =
+              if scrollbar_thumb,
+                do: [Scrollbar.segment(idx, scrollbar_thumb, scrollbar_styles)],
+                else: []
+
+            padding_width =
+              max(0, rect.width - gutter_width - seg_width - 2 - length(scrollbar_segment))
 
             padding_segments =
               if padding_width > 0 do
@@ -247,7 +261,8 @@ defmodule Drafter.Widget.TextArea do
 
             all_segments =
               gutter_segment ++
-                content_segments ++ padding_segments ++ [Segment.new("│", border_style)]
+                content_segments ++
+                padding_segments ++ scrollbar_segment ++ [Segment.new("│", border_style)]
 
             Strip.new(all_segments)
           end)

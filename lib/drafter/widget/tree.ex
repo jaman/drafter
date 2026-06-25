@@ -63,11 +63,13 @@ defmodule Drafter.Widget.Tree do
   """
 
   use Drafter.Widget,
-    traits: [:focusable]
+    traits: [:focusable],
+    handles: [:scroll]
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.ThemeManager
   alias Drafter.Widget.Callback
+  alias Drafter.Widget.Scrollbar
 
   defstruct [
     :data,
@@ -175,14 +177,20 @@ defmodule Drafter.Widget.Tree do
     content_width = rect.width
     content_height = rect.height
 
+    all_items = flatten_for_display(normalized_state)
+    thumb = Scrollbar.thumb_rows(normalized_state.scroll_offset, length(all_items), content_height)
+    item_width = if thumb, do: max(1, content_width - 1), else: content_width
+    sb_styles = Scrollbar.styles(theme)
+
     strips =
-      normalized_state
-      |> flatten_for_display()
+      all_items
       |> Enum.slice(normalized_state.scroll_offset, content_height)
-      |> Enum.with_index(normalized_state.scroll_offset)
-      |> Enum.map(fn {item, index} ->
-        render_tree_item(normalized_state, item, index, content_width)
-        |> Strip.crop(content_width)
+      |> Enum.with_index()
+      |> Enum.map(fn {item, row} ->
+        normalized_state
+        |> render_tree_item(item, normalized_state.scroll_offset + row, item_width)
+        |> Strip.crop(item_width)
+        |> Scrollbar.append(row, thumb, sb_styles)
       end)
 
     current_height = length(strips)
@@ -196,6 +204,17 @@ defmodule Drafter.Widget.Tree do
     else
       strips
     end
+  end
+
+  @impl Drafter.Widget
+  def handle_scroll(:up, state) do
+    {:ok, %{state | scroll_offset: max(0, state.scroll_offset - 3)}}
+  end
+
+  def handle_scroll(:down, state) do
+    total = length(flatten_for_display(state))
+    max_offset = max(0, total - state.height)
+    {:ok, %{state | scroll_offset: min(max_offset, state.scroll_offset + 3)}}
   end
 
   @impl Drafter.Widget

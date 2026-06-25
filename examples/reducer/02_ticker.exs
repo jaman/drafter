@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
 
 # Elm-style timer: `on_ready` arms a recurring timer; each tick is delivered to `update/2`
 # as `{:timer, id}`, just like every other message. Pure transitions, one handler.
