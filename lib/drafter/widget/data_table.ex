@@ -317,20 +317,6 @@ defmodule Drafter.Widget.DataTable do
     st = state |> Rendering.normalize_state() |> Rendering.apply_theme_styles(ThemeManager.get_current_theme())
     st = %{st | viewport_height: rect.height}
 
-    if Drafter.Trace.enabled?() do
-      Drafter.Trace.log([
-        "DT ",
-        Drafter.Trace.ts(),
-        " rect_h=",
-        Integer.to_string(rect.height),
-        " data_h=",
-        Integer.to_string(get_data_height(st)),
-        " rows=",
-        Integer.to_string(length(st.data)),
-        "\n"
-      ])
-    end
-
     content_width = min(st.width, rect.width)
     content_height = rect.height
     data_height = get_data_height(st)

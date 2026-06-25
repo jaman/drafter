@@ -3,40 +3,58 @@ defmodule Drafter.Logging do
 
   require Logger
 
-  @doc "Set up logging to a file in the system temp dir (or provided path)."
-  @spec setup(keyword()) :: :ok | {:error, term()}
-  def setup(opts \\ []) do
-    level = Keyword.get(opts, :level, :debug)
-    path = Keyword.get(opts, :path, default_log_path())
+  @doc """
+  Configure logging for a TUI run.
 
+  By default the console (`:default`) handler is removed so `Logger` output cannot
+  paint over the rendered TUI, and **no log file is written** — file logging is the
+  application's choice.
+
+  Options:
+    * `:log` — `false` (default) silences the console only; `true` writes to
+      `drafter.log` in the current directory; a string path writes to that path.
+    * `:level` — log level for the file handler when one is enabled (default `:debug`).
+  """
+  @spec setup(keyword()) :: :ok
+  def setup(opts \\ []) do
+    case plan(opts) do
+      :silence -> silence_console()
+      {:file, path, level} -> file_logging(path, level)
+    end
+  end
+
+  @doc false
+  @spec plan(keyword()) :: :silence | {:file, String.t(), atom()}
+  def plan(opts) do
+    case Keyword.get(opts, :log, false) do
+      false -> :silence
+      true -> {:file, default_log_path(), Keyword.get(opts, :level, :debug)}
+      path when is_binary(path) -> {:file, path, Keyword.get(opts, :level, :debug)}
+      _ -> :silence
+    end
+  end
+
+  defp silence_console do
     _ = :logger.remove_handler(:default)
+    :ok
+  end
+
+  defp file_logging(path, level) do
+    silence_console()
 
     handler_id = :tui_file_logger
-    file_charlist = String.to_charlist(path)
-
     _ = :logger.remove_handler(handler_id)
 
-    formatter =
-      {:logger_formatter,
-       %{
-         template: [:time, " [", :level, "] ", :msg, "\n"]
-       }}
-
     config = %{
-      formatter: formatter,
+      formatter: {:logger_formatter, %{template: [:time, " [", :level, "] ", :msg, "\n"]}},
       level: level,
       filter_default: :log,
       filters: [],
-      config: %{type: :file, file: file_charlist}
+      config: %{type: :file, file: String.to_charlist(path)}
     }
 
-    case :logger.add_handler(handler_id, :logger_std_h, config) do
-      :ok ->
-        :ok
-
-      {:error, _reason} ->
-        :error
-    end
+    _ = :logger.add_handler(handler_id, :logger_std_h, config)
+    :ok
   end
 
   defp default_log_path do

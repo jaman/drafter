@@ -86,6 +86,9 @@ defmodule Drafter do
       `:sixel`, `:braille`, `:text`). The lowest-precedence layer: a per-widget
       `:renderer` overrides it, and the `DRAFTER_MODE` env var forces over both. See
       `render_mode/1`.
+    * `:log` - file logging, off by default. `false` (default) silences the console
+      handler so logs can't corrupt the TUI but writes no file; `true` writes to
+      `drafter.log` in the current directory; a path string writes there instead.
     * `:halt_on_exit` - `true` (default) calls `System.halt/1` once the app exits,
       giving an immediate quit instead of the BEAM's graceful application shutdown
       (which can take 1-2s under `Mix.install`). Only applies to a standalone run;
@@ -98,7 +101,7 @@ defmodule Drafter do
 
     case Drafter.AppRegistry.whereis() do
       nil ->
-        _ = Drafter.Logging.setup()
+        _ = Drafter.Logging.setup(opts)
 
         mouse_hover = app_mouse_hover(app_module)
 
