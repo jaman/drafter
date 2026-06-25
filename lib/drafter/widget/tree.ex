@@ -231,6 +231,7 @@ defmodule Drafter.Widget.Tree do
   def handle_event({:key, "*"}, %{focused: true} = state), do: expand_all_nodes(state)
   def handle_event({:key, "/"}, %{focused: true} = state), do: collapse_all_nodes(state)
   def handle_event({:mouse, %{type: :mouse_up, x: _x, y: y}}, state), do: handle_mouse_click(state, y)
+  def handle_event({:mouse, %{type: :scroll, direction: dir}}, state), do: handle_scroll(dir, state)
   def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
   def handle_event(_event, state), do: {:noreply, state}
