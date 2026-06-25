@@ -223,9 +223,6 @@ defmodule Drafter.Widget.DataTable do
   def get_data_height(%{viewport_height: vh}) when is_integer(vh) and vh > 0, do: vh
   def get_data_height(%{height: height}), do: height
 
-  defp resolve_viewport_height(vh, _rect_height) when is_integer(vh) and vh > 0, do: vh
-  defp resolve_viewport_height(_vh, rect_height), do: rect_height
-
   defp normalize_height(height) when is_integer(height) and height > 0, do: height
   defp normalize_height(_height), do: 20
 
@@ -318,10 +315,24 @@ defmodule Drafter.Widget.DataTable do
   @impl Drafter.Widget
   def render(state, rect) do
     st = state |> Rendering.normalize_state() |> Rendering.apply_theme_styles(ThemeManager.get_current_theme())
-    st = %{st | viewport_height: resolve_viewport_height(st.viewport_height, rect.height)}
+    st = %{st | viewport_height: rect.height}
+
+    if Drafter.Trace.enabled?() do
+      Drafter.Trace.log([
+        "DT ",
+        Drafter.Trace.ts(),
+        " rect_h=",
+        Integer.to_string(rect.height),
+        " data_h=",
+        Integer.to_string(get_data_height(st)),
+        " rows=",
+        Integer.to_string(length(st.data)),
+        "\n"
+      ])
+    end
 
     content_width = min(st.width, rect.width)
-    content_height = st.viewport_height
+    content_height = rect.height
     data_height = get_data_height(st)
     tbl_width = Rendering.table_width(st, content_width, data_height)
     column_widths = Columns.get_column_widths(st, tbl_width)
