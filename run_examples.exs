@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: "."}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([{:drafter, path: "."}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
 
 defmodule ExamplesLauncher do
   use Drafter.App

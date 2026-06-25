@@ -91,10 +91,47 @@ defmodule Drafter.Widget.TextArea.Highlight do
     sql: "--", kdb: "/", q: "/"
   }
 
+  @cache :drafter_textarea_token_cache
+  @cache_limit 5000
+
   @spec tokenize_line(String.t(), atom()) :: [{atom(), String.t()}]
   def tokenize_line(line, language) do
+    ensure_cache()
+    key = {language, line}
+
+    case :ets.lookup(@cache, key) do
+      [{^key, tokens}] ->
+        tokens
+
+      [] ->
+        tokens = tokenize_uncached(line, language)
+        cache_put(key, tokens)
+        tokens
+    end
+  end
+
+  defp tokenize_uncached(line, language) do
     prefix = Map.get(@comment_prefixes, language, "#")
     split_on_comment(line, prefix, language)
+  end
+
+  defp ensure_cache do
+    case :ets.whereis(@cache) do
+      :undefined ->
+        try do
+          :ets.new(@cache, [:named_table, :public, :set])
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _tid ->
+        :ok
+    end
+  end
+
+  defp cache_put(key, tokens) do
+    if :ets.info(@cache, :size) > @cache_limit, do: :ets.delete_all_objects(@cache)
+    :ets.insert(@cache, {key, tokens})
   end
 
   defp split_on_comment(line, prefix, language) do

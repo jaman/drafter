@@ -27,12 +27,14 @@ defmodule Drafter.Widget.TextArea.Editing do
         new_line_content = String.slice(before, 0..-2//1) <> after_text
         new_lines = List.replace_at(state.lines, state.cursor_line, new_line_content)
 
-        new_state = %{
-          state
-          | lines: new_lines,
-            cursor_col: state.cursor_col - 1,
-            text: Enum.join(new_lines, "\n")
-        }
+        new_state =
+          %{
+            state
+            | lines: new_lines,
+              cursor_col: state.cursor_col - 1,
+              text: Enum.join(new_lines, "\n")
+          }
+          |> Cursor.adjust_scroll()
 
         {:ok, new_state}
 
@@ -153,12 +155,14 @@ defmodule Drafter.Widget.TextArea.Editing do
       new_line_content = before <> spaces <> after_text
       new_lines = List.replace_at(state.lines, state.cursor_line, new_line_content)
 
-      new_state = %{
-        state
-        | lines: new_lines,
-          cursor_col: state.cursor_col + state.tab_size,
-          text: Enum.join(new_lines, "\n")
-      }
+      new_state =
+        %{
+          state
+          | lines: new_lines,
+            cursor_col: state.cursor_col + state.tab_size,
+            text: Enum.join(new_lines, "\n")
+        }
+        |> Cursor.adjust_scroll()
 
       {:ok, new_state}
     end
@@ -183,12 +187,14 @@ defmodule Drafter.Widget.TextArea.Editing do
 
     new_lines = List.replace_at(state.lines, state.cursor_line, new_line_content)
 
-    new_state = %{
-      state
-      | lines: new_lines,
-        cursor_col: state.cursor_col + 1,
-        text: Enum.join(new_lines, "\n")
-    }
+    new_state =
+      %{
+        state
+        | lines: new_lines,
+          cursor_col: state.cursor_col + 1,
+          text: Enum.join(new_lines, "\n")
+      }
+      |> Cursor.adjust_scroll()
 
     {:ok, new_state}
   end

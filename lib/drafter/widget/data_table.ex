@@ -223,6 +223,12 @@ defmodule Drafter.Widget.DataTable do
   def get_data_height(%{viewport_height: vh}) when is_integer(vh) and vh > 0, do: vh
   def get_data_height(%{height: height}), do: height
 
+  defp resolve_viewport_height(vh, _rect_height) when is_integer(vh) and vh > 0, do: vh
+  defp resolve_viewport_height(_vh, rect_height), do: rect_height
+
+  defp normalize_height(height) when is_integer(height) and height > 0, do: height
+  defp normalize_height(_height), do: 20
+
   @impl Drafter.Widget
   def mount(props) do
     columns = Map.get(props, :columns, [])
@@ -242,7 +248,6 @@ defmodule Drafter.Widget.DataTable do
           {data, nil, :asc}
       end
 
-    _data_height = if Map.get(props, :show_header, true), do: height - 1, else: height
 
     highlighted_index = if sorted_data != [], do: 0, else: nil
     selected_indices = MapSet.new()
@@ -291,7 +296,7 @@ defmodule Drafter.Widget.DataTable do
       show_scrollbars: Map.get(props, :show_scrollbars, true),
       column_fit_mode: Map.get(props, :column_fit_mode, :fit),
       width: Map.get(props, :width, 80),
-      height: height,
+      height: normalize_height(height),
       viewport_height: height,
       fixed_columns: min(fixed_columns, length(columns)),
       fixed_col_widths: [],
@@ -313,9 +318,10 @@ defmodule Drafter.Widget.DataTable do
   @impl Drafter.Widget
   def render(state, rect) do
     st = state |> Rendering.normalize_state() |> Rendering.apply_theme_styles(ThemeManager.get_current_theme())
+    st = %{st | viewport_height: resolve_viewport_height(st.viewport_height, rect.height)}
 
     content_width = min(st.width, rect.width)
-    content_height = st.viewport_height || rect.height
+    content_height = st.viewport_height
     data_height = get_data_height(st)
     tbl_width = Rendering.table_width(st, content_width, data_height)
     column_widths = Columns.get_column_widths(st, tbl_width)
@@ -530,7 +536,7 @@ defmodule Drafter.Widget.DataTable do
         show_scrollbars: Map.get(props, :show_scrollbars, state.show_scrollbars),
         column_fit_mode: Map.get(props, :column_fit_mode, state.column_fit_mode),
         width: Map.get(props, :width, state.width),
-        height: Map.get(props, :height, state.height),
+        height: normalize_height(Map.get(props, :height, state.height)),
         sortable: Map.get(props, :sortable, state.sortable),
         resizable: Map.get(props, :resizable, state.resizable),
         locked: Map.get(props, :locked, state.locked),

@@ -89,6 +89,10 @@ defmodule Drafter.Widget.TextArea.Cursor do
 
   @spec adjust_scroll(map()) :: map()
   def adjust_scroll(state) do
+    state |> adjust_v_scroll() |> adjust_h_scroll()
+  end
+
+  defp adjust_v_scroll(state) do
     content_height = state.height - 2
 
     cond do
@@ -100,6 +104,22 @@ defmodule Drafter.Widget.TextArea.Cursor do
 
       true ->
         state
+    end
+  end
+
+  defp adjust_h_scroll(state) do
+    content_width = max(1, state.width - 2 - state.gutter_width)
+    h = state.h_scroll || 0
+
+    cond do
+      state.cursor_col < h ->
+        %{state | h_scroll: state.cursor_col}
+
+      state.cursor_col >= h + content_width ->
+        %{state | h_scroll: state.cursor_col - content_width + 1}
+
+      true ->
+        %{state | h_scroll: h}
     end
   end
 

@@ -60,6 +60,7 @@ defmodule Drafter.Widget.TextArea do
     :cursor_line,
     :cursor_col,
     :scroll_offset,
+    :h_scroll,
     :focused,
     :style,
     :placeholder_style,
@@ -93,6 +94,7 @@ defmodule Drafter.Widget.TextArea do
           cursor_line: non_neg_integer(),
           cursor_col: non_neg_integer(),
           scroll_offset: non_neg_integer(),
+          h_scroll: non_neg_integer(),
           focused: boolean(),
           style: Segment.style(),
           placeholder_style: Segment.style(),
@@ -139,6 +141,7 @@ defmodule Drafter.Widget.TextArea do
       cursor_line: 0,
       cursor_col: 0,
       scroll_offset: 0,
+      h_scroll: 0,
       focused: Map.get(props, :focused, false),
       style: Map.get(props, :style, %{fg: {200, 200, 200}, bg: {40, 40, 40}}),
       placeholder_style:
@@ -231,7 +234,7 @@ defmodule Drafter.Widget.TextArea do
               end
 
             seg_width =
-              Enum.reduce(content_segments, 0, fn seg, acc -> acc + String.length(seg.text) end)
+              Enum.reduce(content_segments, 0, fn seg, acc -> acc + Segment.width(seg) end)
 
             padding_width = max(0, rect.width - gutter_width - seg_width - 2)
 
