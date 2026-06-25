@@ -91,6 +91,11 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
+  defp dispatch_loop_msg(:coalesced_render, {app_module, app_state, rect, timers, wh, ss}) do
+    {_, new_wh} = do_render(app_module, app_state, rect, wh)
+    app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
+  end
+
   defp dispatch_loop_msg({:app_event, name, data}, {app_module, app_state, rect, timers, wh, ss}) do
     result = Runtime.for_app(app_module).handle_message(app_module, name, data, app_state)
 
@@ -816,9 +821,33 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp immediate_render(app_module, app_state, screen_rect, hierarchy) do
+    if pending_messages?() do
+      schedule_coalesced_render()
+      {nil, hierarchy}
+    else
+      do_render(app_module, app_state, screen_rect, hierarchy)
+    end
+  end
+
+  defp do_render(app_module, app_state, screen_rect, hierarchy) do
+    Process.delete(:coalesced_render_scheduled)
     Process.put(:last_render_ms, System.monotonic_time(:millisecond))
     Process.delete(:render_deferred)
     Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
+  end
+
+  defp schedule_coalesced_render do
+    unless Process.get(:coalesced_render_scheduled) do
+      Process.put(:coalesced_render_scheduled, true)
+      send(self(), :coalesced_render)
+    end
+  end
+
+  defp pending_messages? do
+    case Process.info(self(), :message_queue_len) do
+      {:message_queue_len, len} -> len > 0
+      _ -> false
+    end
   end
 
   defp throttled_render(app_module, app_state, screen_rect, hierarchy) do
