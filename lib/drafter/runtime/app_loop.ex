@@ -51,7 +51,8 @@ defmodule Drafter.Runtime.AppLoop do
     initial_props = %{}
     app_state = Runtime.for_app(app_module).mount(app_module, initial_props)
 
-    {width, height} = Compositor.get_screen_size()
+    {width, height} = Terminal.Driver.refresh_size()
+    Compositor.resize(width, height)
     screen_rect = make_screen_rect(width, height)
 
     {_, hierarchy} = Renderer.render_app(app_module, app_state, screen_rect)

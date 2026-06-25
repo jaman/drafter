@@ -99,6 +99,12 @@ defmodule Drafter.Compositor do
     GenServer.call(resolve(), :get_screen_size)
   end
 
+  @spec resize(pos_integer(), pos_integer()) :: :ok
+  def resize(width, height) do
+    send(resolve(), {:tui_event, {:resize, {width, height}}})
+    :ok
+  end
+
   @doc "Returns the current composited screen buffer (one `Strip` per row) for the given compositor."
   @spec get_buffer(pid()) :: [Drafter.Draw.Strip.t()]
   def get_buffer(pid) do

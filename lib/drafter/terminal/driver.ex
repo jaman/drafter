@@ -60,6 +60,11 @@ defmodule Drafter.Terminal.Driver do
     GenServer.call(__MODULE__, :get_size)
   end
 
+  @spec refresh_size() :: {pos_integer(), pos_integer()}
+  def refresh_size do
+    GenServer.call(__MODULE__, :refresh_size)
+  end
+
   @doc "Discard any pending stdin input not yet processed"
   @spec drain_pending_input() :: :ok
   def drain_pending_input do
@@ -121,6 +126,11 @@ defmodule Drafter.Terminal.Driver do
 
   def handle_call(:get_size, _from, state) do
     {:reply, state.size, state}
+  end
+
+  def handle_call(:refresh_size, _from, state) do
+    size = detect_terminal_size()
+    {:reply, size, %{state | size: size}}
   end
 
   def handle_call(:drain_pending_input, _from, state) do
@@ -515,6 +525,24 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp detect_terminal_size_unix do
+    case {io_size(:columns), io_size(:rows)} do
+      {cols, rows} when is_integer(cols) and is_integer(rows) -> {cols, rows}
+      _ -> tput_terminal_size()
+    end
+  end
+
+  defp io_size(dimension) do
+    case apply(:io, dimension, [:standard_io]) do
+      {:ok, n} when is_integer(n) and n > 0 -> n
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
+  end
+
+  defp tput_terminal_size do
     case System.cmd("tput", ["cols"]) do
       {cols_str, 0} ->
         case System.cmd("tput", ["lines"]) do
