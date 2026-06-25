@@ -525,9 +525,13 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp detect_terminal_size_unix do
-    case {io_size(:columns), io_size(:rows)} do
-      {cols, rows} when is_integer(cols) and is_integer(rows) -> {cols, rows}
-      _ -> tput_terminal_size()
+    if System.get_env("DRAFTER_TPUT_SIZE") in [nil, ""] do
+      case {io_size(:columns), io_size(:rows)} do
+        {cols, rows} when is_integer(cols) and is_integer(rows) -> {cols, rows}
+        _ -> tput_terminal_size()
+      end
+    else
+      tput_terminal_size()
     end
   end
 
