@@ -90,6 +90,42 @@ defmodule Drafter.TextAreaRenderTest do
     end
   end
 
+  describe "update/2 reclamps the cursor when text is swapped" do
+    test "clamps cursor_col to the new shorter line length" do
+      state = TextArea.mount(%{text: "select from some_long_table_name", width: 40, height: 6})
+      state = %{state | cursor_col: 30}
+
+      updated = TextArea.update(%{text: "select from bbo"}, state)
+
+      assert updated.cursor_line == 0
+      assert updated.cursor_col == String.length("select from bbo")
+    end
+
+    test "clamps cursor_line when the new text has fewer lines" do
+      state = TextArea.mount(%{text: "a\nb\nc\nd\ne", width: 40, height: 6})
+      state = %{state | cursor_line: 4, cursor_col: 1}
+
+      updated = TextArea.update(%{text: "x\ny"}, state)
+
+      assert updated.cursor_line == 1
+      assert updated.cursor_col <= 1
+    end
+
+    test "clears a stale selection on text swap" do
+      state = TextArea.mount(%{text: "hello world", width: 40, height: 6})
+      state = %{state | selection: {0, 0, 0, 5}}
+
+      assert TextArea.update(%{text: "hi"}, state).selection == nil
+    end
+
+    test "leaves the cursor untouched when text is unchanged" do
+      state = TextArea.mount(%{text: "abc", width: 40, height: 6})
+      state = %{state | cursor_col: 2}
+
+      assert TextArea.update(%{focused: true}, state).cursor_col == 2
+    end
+  end
+
   describe "editing follows the horizontal scroll" do
     test "typing past the visible width advances h_scroll" do
       state = TextArea.mount(%{text: "", language: nil, focused: true, width: 12, height: 4})

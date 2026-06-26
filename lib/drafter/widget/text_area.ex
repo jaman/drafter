@@ -428,7 +428,8 @@ defmodule Drafter.Widget.TextArea do
   @impl Drafter.Widget
   def update(props, state) do
     text = Map.get(props, :text, state.text)
-    lines = if text != state.text, do: String.split(text, "\n"), else: state.lines
+    text_changed? = text != state.text
+    lines = if text_changed?, do: String.split(text, "\n"), else: state.lines
     show_line_numbers = Map.get(props, :show_line_numbers, state.show_line_numbers)
 
     gutter_width =
@@ -440,31 +441,42 @@ defmodule Drafter.Widget.TextArea do
         0
       end
 
-    %{
-      state
-      | text: text,
-        lines: lines,
-        placeholder: Map.get(props, :placeholder, state.placeholder),
-        focused: Map.get(props, :focused, state.focused),
-        style: Map.get(props, :style, state.style),
-        placeholder_style: Map.get(props, :placeholder_style, state.placeholder_style),
-        focused_style: Map.get(props, :focused_style, state.focused_style),
-        on_change: Map.get(props, :on_change, state.on_change),
-        max_lines: Map.get(props, :max_lines, state.max_lines),
-        width: Map.get(props, :width, state.width),
-        height: Map.get(props, :height, state.height),
-        show_line_numbers: show_line_numbers,
-        line_number_style: Map.get(props, :line_number_style, state.line_number_style),
-        gutter_width: gutter_width,
-        language: Map.get(props, :language, state.language),
-        read_only: Map.get(props, :read_only, state.read_only),
-        trap_focus: Map.get(props, :trap_focus, state.trap_focus),
-        tab_behavior: Map.get(props, :tab_behavior, state.tab_behavior),
-        tab_size: Map.get(props, :tab_size, state.tab_size),
-        max_checkpoints: Map.get(props, :max_checkpoints, state.max_checkpoints),
-        highlight_cursor_line:
-          Map.get(props, :highlight_cursor_line, state.highlight_cursor_line)
-    }
+    new_state =
+      %{
+        state
+        | text: text,
+          lines: lines,
+          placeholder: Map.get(props, :placeholder, state.placeholder),
+          focused: Map.get(props, :focused, state.focused),
+          style: Map.get(props, :style, state.style),
+          placeholder_style: Map.get(props, :placeholder_style, state.placeholder_style),
+          focused_style: Map.get(props, :focused_style, state.focused_style),
+          on_change: Map.get(props, :on_change, state.on_change),
+          max_lines: Map.get(props, :max_lines, state.max_lines),
+          width: Map.get(props, :width, state.width),
+          height: Map.get(props, :height, state.height),
+          show_line_numbers: show_line_numbers,
+          line_number_style: Map.get(props, :line_number_style, state.line_number_style),
+          gutter_width: gutter_width,
+          language: Map.get(props, :language, state.language),
+          read_only: Map.get(props, :read_only, state.read_only),
+          trap_focus: Map.get(props, :trap_focus, state.trap_focus),
+          tab_behavior: Map.get(props, :tab_behavior, state.tab_behavior),
+          tab_size: Map.get(props, :tab_size, state.tab_size),
+          max_checkpoints: Map.get(props, :max_checkpoints, state.max_checkpoints),
+          highlight_cursor_line:
+            Map.get(props, :highlight_cursor_line, state.highlight_cursor_line)
+      }
+
+    if text_changed?, do: reclamp_cursor(new_state), else: new_state
+  end
+
+  defp reclamp_cursor(state) do
+    cursor_line = min(state.cursor_line, max(0, length(state.lines) - 1))
+    line_len = String.length(Enum.at(state.lines, cursor_line, ""))
+
+    %{state | cursor_line: cursor_line, cursor_col: min(state.cursor_col, line_len), selection: nil}
+    |> Cursor.adjust_scroll()
   end
 
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 6)
