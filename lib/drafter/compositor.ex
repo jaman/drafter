@@ -384,10 +384,33 @@ defmodule Drafter.Compositor do
 
     if output != [] do
       trace_frame(text_rows, image_rows)
-      write_output(state, output)
+      traced_write(state, output, changed_lines)
     end
 
     {state.screen_buffer, new_painted}
+  end
+
+  defp traced_write(state, output, changed_lines) do
+    if Drafter.Trace.enabled?() do
+      bytes = IO.iodata_length(output)
+      t0 = System.monotonic_time(:microsecond)
+      write_output(state, output)
+      t1 = System.monotonic_time(:microsecond)
+
+      Drafter.Trace.log([
+        "W ",
+        Drafter.Trace.ts(),
+        " lines=",
+        Integer.to_string(length(changed_lines)),
+        " bytes=",
+        Integer.to_string(bytes),
+        " write_us=",
+        Integer.to_string(t1 - t0),
+        "\n"
+      ])
+    else
+      write_output(state, output)
+    end
   end
 
   defp write_output(%__MODULE__{paced_tty: tty}, output) when tty != nil do
@@ -504,7 +527,11 @@ defmodule Drafter.Compositor do
   defp synced_text([]), do: []
 
   defp synced_text(text_rows) do
-    [Terminal.ANSI.sync_start()] ++ text_rows ++ [Terminal.ANSI.sync_end()]
+    if System.get_env("DRAFTER_NO_SYNC") in [nil, ""] do
+      [Terminal.ANSI.sync_start()] ++ text_rows ++ [Terminal.ANSI.sync_end()]
+    else
+      text_rows
+    end
   end
 
   defp images_pending?(state) do
