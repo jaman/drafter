@@ -428,8 +428,8 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp handle_widget_consumed(app_module, app_state, screen_rect, timers, new_hierarchy, session_stack, actions, {event, raw_mouse_event?}) do
-    Process.put(:render_cache_layout_dirty, true)
     {needs_layout, layout_direction} = RenderCache.extract_layout_impact(actions)
+    Process.put(:render_cache_layout_dirty, needs_layout)
 
     new_app_state =
       Enum.reduce(actions, app_state, fn

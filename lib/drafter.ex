@@ -273,6 +273,13 @@ defmodule Drafter do
   """
   @spec get_widget_value(atom()) :: term() | nil
   def get_widget_value(widget_id) do
+    case Drafter.WidgetPidRegistry.lookup(widget_id) do
+      nil -> get_widget_value_via_loop(widget_id)
+      pid -> extract_widget_value(Drafter.WidgetServer.get_state(pid))
+    end
+  end
+
+  defp get_widget_value_via_loop(widget_id) do
     Drafter.AppRegistry.send_to_loop({:get_widget_value, widget_id, self()})
 
     receive do
@@ -281,6 +288,71 @@ defmodule Drafter do
       100 -> nil
     end
   end
+
+  defp extract_widget_value(%{text: text}), do: text
+  defp extract_widget_value(%{checked: checked}), do: checked
+  defp extract_widget_value(%{state: s}) when s in [:on, :off], do: s == :on
+
+  defp extract_widget_value(%{selected_index: idx, options: options}),
+    do: option_id_at(options, idx)
+
+  defp extract_widget_value(%{selected_indices: indices, options: options}) do
+    indices
+    |> MapSet.to_list()
+    |> Enum.map(&option_id_at(options, &1))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp extract_widget_value(%{expanded: expanded}), do: expanded
+  defp extract_widget_value(%{active_tab: tab}), do: tab
+  defp extract_widget_value(%{selected_rows: rows}), do: MapSet.to_list(rows)
+  defp extract_widget_value(%{selected_nodes: nodes}), do: MapSet.to_list(nodes)
+  defp extract_widget_value(_state), do: nil
+
+  defp option_id_at(options, idx) do
+    case Enum.at(options, idx) do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Imperatively set a widget's value by its ID.
+
+  This is the discrete, on-demand counterpart to `get_widget_value/1`: the
+  client sets a widget's value at a specific moment (a click, a menu choice)
+  rather than mirroring state on every keystroke. The widget remains the owner
+  of its own state between these calls.
+
+  Supported widgets:
+
+  - Text widgets (`text_area`, `text_input`): pass a string to replace the text;
+    the widget reclamps its cursor and selection.
+  - `checkbox`: pass a boolean.
+
+  Returns `:ok`.
+
+      Drafter.set_widget_value(:query_editor, "select * from quotes")
+  """
+  @spec set_widget_value(atom(), term()) :: :ok
+  def set_widget_value(widget_id, value) do
+    case Drafter.WidgetPidRegistry.lookup(widget_id) do
+      nil ->
+        :ok
+
+      pid ->
+        case value_to_update_props(Drafter.WidgetServer.get_state(pid), value) do
+          nil -> :ok
+          props -> Drafter.WidgetServer.update_props(pid, props)
+        end
+    end
+
+    :ok
+  end
+
+  defp value_to_update_props(%{text: _}, value) when is_binary(value), do: %{text: value}
+  defp value_to_update_props(%{checked: _}, value) when is_boolean(value), do: %{checked: value}
+  defp value_to_update_props(_state, _value), do: nil
 
   @doc """
   Get the full state of a widget by its ID.
@@ -292,6 +364,13 @@ defmodule Drafter do
   """
   @spec get_widget_state(atom()) :: struct() | nil
   def get_widget_state(widget_id) do
+    case Drafter.WidgetPidRegistry.lookup(widget_id) do
+      nil -> get_widget_state_via_loop(widget_id)
+      pid -> Drafter.WidgetServer.get_state(pid)
+    end
+  end
+
+  defp get_widget_state_via_loop(widget_id) do
     Drafter.AppRegistry.send_to_loop({:get_widget_state, widget_id, self()})
 
     receive do
