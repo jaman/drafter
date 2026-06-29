@@ -833,7 +833,23 @@ defmodule Drafter.Runtime.AppLoop do
     Process.delete(:coalesced_render_scheduled)
     Process.put(:last_render_ms, System.monotonic_time(:millisecond))
     Process.delete(:render_deferred)
-    Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
+
+    if Drafter.Trace.enabled?() do
+      t0 = System.monotonic_time(:microsecond)
+      result = Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
+
+      Drafter.Trace.log([
+        "R ",
+        Drafter.Trace.ts(),
+        " render_app_us=",
+        Integer.to_string(System.monotonic_time(:microsecond) - t0),
+        "\n"
+      ])
+
+      result
+    else
+      Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
+    end
   end
 
   defp schedule_coalesced_render do
