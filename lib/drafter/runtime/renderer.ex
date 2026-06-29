@@ -413,6 +413,7 @@ defmodule Drafter.Runtime.Renderer do
 
     cond do
       has_cache and dirty_ids == [] and stale_bounds == [] ->
+        ctrace(["C skip\n"])
         previous
 
       has_cache ->
@@ -422,14 +423,21 @@ defmodule Drafter.Runtime.Renderer do
           |> add_bounds_rows(stale_bounds)
 
         if MapSet.size(dirty_rows) >= viewport.height do
+          ctrace(["C full dirty=", Integer.to_string(MapSet.size(dirty_rows)), ">=h=", Integer.to_string(viewport.height), " lc=", Integer.to_string(length(all_layers)), " stale=", Integer.to_string(length(stale_bounds)), " ids=", inspect(dirty_ids), "\n"])
           LayerCompositor.composite(all_layers, viewport)
         else
+          ctrace(["C incr dirty=", Integer.to_string(MapSet.size(dirty_rows)), " ids=", inspect(dirty_ids), "\n"])
           LayerCompositor.composite_incremental(all_layers, viewport, previous, dirty_rows)
         end
 
       true ->
+        ctrace(["C full nocache prevnil=", to_string(previous == nil), " plc=", inspect(prev_layer_count), " lc=", Integer.to_string(length(all_layers)), " ph=", inspect(previous && length(previous)), " h=", Integer.to_string(viewport.height), "\n"])
         LayerCompositor.composite(all_layers, viewport)
     end
+  end
+
+  defp ctrace(iodata) do
+    if Drafter.Trace.enabled?(), do: Drafter.Trace.log(iodata)
   end
 
   defp add_bounds_rows(dirty_rows, bounds_list) do
