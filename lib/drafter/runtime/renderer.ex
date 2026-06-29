@@ -76,13 +76,30 @@ defmodule Drafter.Runtime.Renderer do
       Process.delete(:render_cache_layout_rect)
       current_theme = ThemeManager.get_current_theme()
 
+      t0 = System.monotonic_time(:microsecond)
+
       render_result =
         case app_module.render(app_state) do
           [] -> app_module.render(app_state, screen_rect)
           result -> result
         end
 
-      apply_render_result(render_result, app_module, app_state, screen_rect, current_theme, existing_hierarchy)
+      t1 = System.monotonic_time(:microsecond)
+      out = apply_render_result(render_result, app_module, app_state, screen_rect, current_theme, existing_hierarchy)
+
+      if Drafter.Trace.enabled?() do
+        t2 = System.monotonic_time(:microsecond)
+
+        Drafter.Trace.log([
+          "RR render1_us=",
+          Integer.to_string(t1 - t0),
+          " apply_us=",
+          Integer.to_string(t2 - t1),
+          "\n"
+        ])
+      end
+
+      out
     end
   end
 
