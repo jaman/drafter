@@ -83,8 +83,6 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg({:tui_event, event}, {app_module, app_state, rect, timers, wh, ss}) do
-    Drafter.Trace.log_sync(["I ", Drafter.Trace.ts(), " ", inspect(event), "\n"])
-
     case check_global_quit(event) do
       :quit -> handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
       :continue -> handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
@@ -534,11 +532,8 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp handle_stop(reason, _app_module, _app_state, _screen_rect, timers, widget_hierarchy, []) do
-    Drafter.Trace.log_sync(["Q stop_start ", Drafter.Trace.ts(), "\n"])
     cleanup_timers(timers)
-    Drafter.Trace.log_sync(["Q timers_done ", Drafter.Trace.ts(), "\n"])
     Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
-    Drafter.Trace.log_sync(["Q servers_stopped ", Drafter.Trace.ts(), "\n"])
     if reason == :normal, do: :ok, else: {:error, reason}
   end
 
@@ -833,23 +828,7 @@ defmodule Drafter.Runtime.AppLoop do
     Process.delete(:coalesced_render_scheduled)
     Process.put(:last_render_ms, System.monotonic_time(:millisecond))
     Process.delete(:render_deferred)
-
-    if Drafter.Trace.enabled?() do
-      t0 = System.monotonic_time(:microsecond)
-      result = Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
-
-      Drafter.Trace.log([
-        "R ",
-        Drafter.Trace.ts(),
-        " render_app_us=",
-        Integer.to_string(System.monotonic_time(:microsecond) - t0),
-        "\n"
-      ])
-
-      result
-    else
-      Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
-    end
+    Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
   end
 
   defp schedule_coalesced_render do

@@ -64,7 +64,6 @@ defmodule Drafter.Runtime.Renderer do
     app_hash = :erlang.phash2(app_state)
     prev_hash = RenderCache.get_app_state_hash()
     layout_dirty = Process.get(:render_cache_layout_dirty, true)
-    ctrace(["FP eq=", to_string(prev_hash == app_hash), " ld=", to_string(layout_dirty), " h=", to_string(existing_hierarchy != nil), "\n"])
 
     if prev_hash == app_hash and existing_hierarchy != nil and not layout_dirty do
       RenderCache.put_app_state_hash(app_hash)
@@ -77,46 +76,24 @@ defmodule Drafter.Runtime.Renderer do
       Process.delete(:render_cache_layout_rect)
       current_theme = ThemeManager.get_current_theme()
 
-      t0 = System.monotonic_time(:microsecond)
-
       render_result =
         case app_module.render(app_state) do
           [] -> app_module.render(app_state, screen_rect)
           result -> result
         end
 
-      t1 = System.monotonic_time(:microsecond)
-      out = apply_render_result(render_result, app_module, app_state, screen_rect, current_theme, existing_hierarchy)
-
-      if Drafter.Trace.enabled?() do
-        t2 = System.monotonic_time(:microsecond)
-
-        Drafter.Trace.log([
-          "RR render1_us=",
-          Integer.to_string(t1 - t0),
-          " apply_us=",
-          Integer.to_string(t2 - t1),
-          "\n"
-        ])
-      end
-
-      out
+      apply_render_result(render_result, app_module, app_state, screen_rect, current_theme, existing_hierarchy)
     end
   end
 
   defp apply_render_result(component_tree, app_module, app_state, screen_rect, theme, existing_hierarchy)
        when is_tuple(component_tree) do
-    ta = System.monotonic_time(:microsecond)
-
     hierarchy =
       ComponentRenderer.render_tree(
         component_tree, screen_rect, theme, app_state, existing_hierarchy, app_module: app_module
       )
 
-    tb = System.monotonic_time(:microsecond)
     render_hierarchy_layers(hierarchy, screen_rect, theme)
-    tc = System.monotonic_time(:microsecond)
-    ctrace(["A tree_us=", Integer.to_string(tb - ta), " layers_us=", Integer.to_string(tc - tb), "\n"])
     {:ok, hierarchy}
   end
 
@@ -130,9 +107,7 @@ defmodule Drafter.Runtime.Renderer do
 
   defp render_hierarchy_layers(hierarchy, screen_rect, theme) do
     background_strips = create_app_background(screen_rect, theme)
-    t0 = System.monotonic_time(:microsecond)
-    {widget_layers, dirty_ids, stale_bounds} = create_widget_layers_tracking_dirty(hierarchy, screen_rect)
-    t1 = System.monotonic_time(:microsecond)
+    {widget_layers, dirty_rows, stale_bounds} = create_widget_layers_tracking_dirty(hierarchy, screen_rect)
 
     if widget_layers == [] do
       RenderCache.put_composited(background_strips)
@@ -144,13 +119,11 @@ defmodule Drafter.Runtime.Renderer do
       all_layers = [background_layer | widget_layers]
 
       final_strips =
-        incremental_composite_or_full(all_layers, viewport, dirty_ids, stale_bounds)
+        incremental_composite_or_full(all_layers, viewport, dirty_rows, stale_bounds)
 
-      t2 = System.monotonic_time(:microsecond)
       RenderCache.put_composited(final_strips)
       RenderCache.put_layer_count(length(all_layers))
       Compositor.render_strips(final_strips, 0, 0)
-      ctrace(["A build_us=", Integer.to_string(t1 - t0), " comp_us=", Integer.to_string(t2 - t1), "\n"])
     end
   end
 
@@ -429,21 +402,14 @@ defmodule Drafter.Runtime.Renderer do
         dirty_rows = add_bounds_rows(widget_dirty_rows, stale_bounds)
 
         if MapSet.size(dirty_rows) >= viewport.height do
-          ctrace(["C full dirty=", Integer.to_string(MapSet.size(dirty_rows)), ">=h=", Integer.to_string(viewport.height), " lc=", Integer.to_string(length(all_layers)), " stale=", Integer.to_string(length(stale_bounds)), "\n"])
           LayerCompositor.composite(all_layers, viewport)
         else
-          ctrace(["C incr dirty=", Integer.to_string(MapSet.size(dirty_rows)), "\n"])
           LayerCompositor.composite_incremental(all_layers, viewport, previous, dirty_rows)
         end
 
       true ->
-        ctrace(["C full nocache prevnil=", to_string(previous == nil), " plc=", inspect(prev_layer_count), " lc=", Integer.to_string(length(all_layers)), " ph=", inspect(previous && length(previous)), " h=", Integer.to_string(viewport.height), "\n"])
         LayerCompositor.composite(all_layers, viewport)
     end
-  end
-
-  defp ctrace(iodata) do
-    if Drafter.Trace.enabled?(), do: Drafter.Trace.log(iodata)
   end
 
   defp add_bounds_rows(dirty_rows, bounds_list) do

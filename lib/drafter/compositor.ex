@@ -113,7 +113,6 @@ defmodule Drafter.Compositor do
 
   @impl GenServer
   def init(opts) do
-    Drafter.Trace.ensure_started()
     terminal_driver = Keyword.get(opts, :terminal_driver, Terminal.Driver)
     event_manager = Keyword.get(opts, :event_manager, Event.Manager)
 
@@ -383,34 +382,10 @@ defmodule Drafter.Compositor do
     output = compose_output(text_rows, image_block)
 
     if output != [] do
-      trace_frame(text_rows, image_rows)
-      traced_write(state, output, changed_lines)
+      write_output(state, output)
     end
 
     {state.screen_buffer, new_painted}
-  end
-
-  defp traced_write(state, output, changed_lines) do
-    if Drafter.Trace.enabled?() do
-      bytes = IO.iodata_length(output)
-      t0 = System.monotonic_time(:microsecond)
-      write_output(state, output)
-      t1 = System.monotonic_time(:microsecond)
-
-      Drafter.Trace.log([
-        "W ",
-        Drafter.Trace.ts(),
-        " lines=",
-        Integer.to_string(length(changed_lines)),
-        " bytes=",
-        Integer.to_string(bytes),
-        " write_us=",
-        Integer.to_string(t1 - t0),
-        "\n"
-      ])
-    else
-      write_output(state, output)
-    end
   end
 
   defp write_output(%__MODULE__{paced_tty: tty}, output) when tty != nil do
@@ -433,22 +408,6 @@ defmodule Drafter.Compositor do
   defp open_paced_tty(_driver), do: nil
 
   defp paced_write?, do: System.get_env("DRAFTER_NO_PACED_WRITE") in [nil, ""]
-
-  defp trace_frame(text_rows, image_rows) do
-    Drafter.Trace.log([
-      "F ",
-      Drafter.Trace.ts(),
-      " t",
-      Integer.to_string(length(text_rows)),
-      " i",
-      Integer.to_string(length(image_rows)),
-      "\n"
-    ])
-  end
-
-  defp trace_paint(id, reason) do
-    Drafter.Trace.log(["P ", Drafter.Trace.ts(), " ", inspect(id), " ", reason, "\n"])
-  end
 
   defp build_terminal_output(screen_buffer, rendered_buffer) do
     prev_tuple = List.to_tuple(rendered_buffer)
@@ -489,8 +448,6 @@ defmodule Drafter.Compositor do
   end
 
   defp paint_region(id, region, rows, painted_acc) do
-    reason = if needs_paint?(region, Map.get(painted_acc, id)), do: "v", else: "o"
-    trace_paint(id, reason)
     cmd = [Terminal.ANSI.cursor_to(region.x + region.dx + 1, region.y + region.dy + 1), region.bytes]
     {[cmd | rows], Map.put(painted_acc, id, {region.version, {region.x, region.y}})}
   end

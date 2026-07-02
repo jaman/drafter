@@ -3,6 +3,17 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.2.11] - 2026-06-29
+
+### Added
+
+- **`Drafter.set_widget_value/2`** — imperatively set a widget's value on demand (text widgets take a string, `checkbox` a boolean). The discrete counterpart to `get_widget_value/1`; routes through the widget's own `update/2` so text widgets reclamp the cursor. Lets a client own a self-managed input widget and write into it at specific moments rather than mirroring state on every keystroke.
+
+### Changed
+
+- **Per-keystroke render cost greatly reduced for editor-heavy UIs.** Incremental compositing now tracks dirty regions **per row** (a cache-key per strip) instead of per widget, so editing one line recomposites a single row instead of the whole widget; and a keystroke that changes neither app state nor layout now skips the component-tree reconcile via the render fast path.
+- **`get_widget_value/1` and `get_widget_state/1` read the widget's `WidgetServer` directly** through the widget registry instead of round-tripping a message through the app loop. They are now deadlock-free and safe to call from inside app event handlers.
+
 ## [0.2.10] - 2026-03-27
 
 ### Added

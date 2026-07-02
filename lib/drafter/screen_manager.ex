@@ -348,24 +348,32 @@ defmodule Drafter.ScreenManager do
         :handled
 
       screen.widget_hierarchy != nil and should_forward_to_widget_hierarchy?(screen, screen_rect, event) ->
-        handle_widget_hierarchy_result(
-          handle_widget_hierarchy_event_direct(screen, screen_rect, event),
-          screen,
-          sm,
-          manager_state
-        )
-
-      should_capture_event?(screen, event) ->
-        handle_screen_event_result(
-          Screen.handle_screen_event(screen, event),
-          screen,
-          sm,
-          manager_state,
-          :handled_on_noreply
-        )
+        case handle_widget_hierarchy_result(
+               handle_widget_hierarchy_event_direct(screen, screen_rect, event),
+               screen,
+               sm,
+               manager_state
+             ) do
+          :passthrough -> capture_or_passthrough(screen, event, sm, manager_state)
+          result -> result
+        end
 
       true ->
-        :passthrough
+        capture_or_passthrough(screen, event, sm, manager_state)
+    end
+  end
+
+  defp capture_or_passthrough(screen, event, sm, manager_state) do
+    if should_capture_event?(screen, event) do
+      handle_screen_event_result(
+        Screen.handle_screen_event(screen, event),
+        screen,
+        sm,
+        manager_state,
+        :handled_on_noreply
+      )
+    else
+      :passthrough
     end
   end
 
@@ -508,6 +516,19 @@ defmodule Drafter.ScreenManager do
       |> process_hierarchy_result(screen, :passthrough)
     else
       :passthrough
+    end
+  rescue
+    _ -> :passthrough
+  end
+
+  defp handle_widget_hierarchy_event_direct(screen, _screen_rect, {:key, :escape} = event) do
+    if screen.widget_hierarchy == nil do
+      :passthrough
+    else
+      case Drafter.WidgetHierarchy.handle_event(screen.widget_hierarchy, event) do
+        {_updated_hierarchy, []} -> :passthrough
+        result -> process_hierarchy_result(result, screen, :ok)
+      end
     end
   rescue
     _ -> :passthrough
