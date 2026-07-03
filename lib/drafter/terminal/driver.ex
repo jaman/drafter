@@ -423,8 +423,27 @@ defmodule Drafter.Terminal.Driver do
         cancel_escape_timer(timer_ref)
         read_csi_sequence(buffer <> "[")
 
+      "O" ->
+        cancel_escape_timer(timer_ref)
+        read_ss3_sequence(buffer <> "O")
+
       char when is_binary(char) ->
         cancel_escape_timer(timer_ref)
+        send(__MODULE__, {:stdin, buffer <> char})
+        stdin_reader()
+    end
+  end
+
+  defp read_ss3_sequence(buffer) do
+    case IO.read(:stdio, 1) do
+      :eof ->
+        send(__MODULE__, {:stdin, buffer})
+
+      {:error, _} ->
+        send(__MODULE__, {:stdin, buffer})
+        stdin_reader()
+
+      char when is_binary(char) ->
         send(__MODULE__, {:stdin, buffer <> char})
         stdin_reader()
     end
