@@ -50,13 +50,17 @@ defmodule Drafter.RenderCache do
   def changed_rows(prev_keys, curr_keys, bounds_y) do
     prev = List.to_tuple(prev_keys)
     prev_count = tuple_size(prev)
+    curr_count = length(curr_keys)
 
-    curr_keys
-    |> Enum.with_index()
-    |> Enum.reduce(MapSet.new(), fn {key, index}, acc ->
-      same? = index < prev_count and elem(prev, index) == key
-      if same?, do: acc, else: MapSet.put(acc, index + bounds_y)
-    end)
+    changed =
+      curr_keys
+      |> Enum.with_index()
+      |> Enum.reduce(MapSet.new(), fn {key, index}, acc ->
+        same? = index < prev_count and elem(prev, index) == key
+        if same?, do: acc, else: MapSet.put(acc, index + bounds_y)
+      end)
+
+    Enum.into(curr_count..(prev_count - 1)//1, changed, &(&1 + bounds_y))
   end
 
   @spec get_widget_bounds(term()) :: map() | nil

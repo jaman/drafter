@@ -308,6 +308,7 @@ defmodule Drafter.Widget.DataTable do
     }
   end
 
+  @impl Drafter.Widget
   def on_rect_change(rect, state) do
     %{state | viewport_height: rect.height, width: rect.width}
   end

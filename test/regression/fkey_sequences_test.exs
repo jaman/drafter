@@ -31,4 +31,13 @@ defmodule Drafter.Regression.FkeySequencesTest do
     assert {[{:key, :f5}], ""} = ANSI.parse_sequence("\e[15~")
     assert {[{:key, :f12}], ""} = ANSI.parse_sequence("\e[24~")
   end
+
+  test "multi-byte UTF-8 split across reads reassembles via the remaining buffer" do
+    <<first, second, third>> = "好"
+
+    assert {[], remaining} = ANSI.parse_sequence(<<first>>)
+    assert {[], remaining} = ANSI.parse_sequence(remaining <> <<second>>)
+    assert {[{:char, codepoint}], ""} = ANSI.parse_sequence(remaining <> <<third>>)
+    assert <<codepoint::utf8>> == "好"
+  end
 end

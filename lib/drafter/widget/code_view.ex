@@ -47,7 +47,8 @@ defmodule Drafter.Widget.CodeView do
     :h_scroll_offset,
     :focused,
     :show_line_numbers,
-    :hex_view
+    :hex_view,
+    :viewport_height
   ]
 
   @impl Drafter.Widget
@@ -68,8 +69,15 @@ defmodule Drafter.Widget.CodeView do
       h_scroll_offset: 0,
       focused: false,
       show_line_numbers: show_line_numbers,
-      hex_view: hex_view
+      hex_view: hex_view,
+      viewport_height: nil
     }
+  end
+
+  @impl Drafter.Widget
+  def on_rect_change(rect, state) do
+    clamped = %{state | viewport_height: rect.height}
+    %{clamped | scroll_offset: min(clamped.scroll_offset, max_scroll_offset(clamped))}
   end
 
   @impl Drafter.Widget
@@ -97,8 +105,7 @@ defmodule Drafter.Widget.CodeView do
   end
 
   def handle_scroll(:down, state) do
-    max_offset = max(0, length(state.lines) - 1)
-    {:ok, %{state | scroll_offset: min(max_offset, state.scroll_offset + 3)}}
+    {:ok, %{state | scroll_offset: min(max_scroll_offset(state), state.scroll_offset + 3)}}
   end
 
   @impl Drafter.Widget
@@ -107,8 +114,7 @@ defmodule Drafter.Widget.CodeView do
   end
 
   def handle_key(:down, state) do
-    max_offset = max(0, length(state.lines) - 1)
-    {:ok, %{state | scroll_offset: min(max_offset, state.scroll_offset + 1)}}
+    {:ok, %{state | scroll_offset: min(max_scroll_offset(state), state.scroll_offset + 1)}}
   end
 
   def handle_key(:page_up, state) do
@@ -116,8 +122,7 @@ defmodule Drafter.Widget.CodeView do
   end
 
   def handle_key(:page_down, state) do
-    max_offset = max(0, length(state.lines) - 1)
-    {:ok, %{state | scroll_offset: min(max_offset, state.scroll_offset + @page_size)}}
+    {:ok, %{state | scroll_offset: min(max_scroll_offset(state), state.scroll_offset + @page_size)}}
   end
 
   def handle_key(:left, state) do
@@ -267,6 +272,11 @@ defmodule Drafter.Widget.CodeView do
       end
 
     if captures == [], do: nil, else: TSFeatures.build(captures)
+  end
+
+  defp max_scroll_offset(state) do
+    viewport = state.viewport_height || 1
+    max(0, length(state.lines) - viewport)
   end
 
   defp line_number_width(total_lines) do
