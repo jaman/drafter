@@ -4,7 +4,7 @@ defmodule Drafter.MixProject do
   def project do
     [
       app: :drafter,
-      version: "0.2.14",
+      version: "0.2.15",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:elixir_make | Mix.compilers()],

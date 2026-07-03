@@ -2,13 +2,7 @@ defmodule Drafter.Binding do
   @moduledoc false
 
   defp send_app_callback(session_pid, callback_name, data) do
-    case Drafter.ScreenManager.get_active_screen() do
-      nil ->
-        send(session_pid, {:app_event, callback_name, data})
-
-      _screen ->
-        send(session_pid, {:tui_event, {:app_callback, callback_name, data}})
-    end
+    send(session_pid, {:widget_callback, callback_name, data})
   end
 
   def get_bound_value(opts, app_state, default \\ nil) do

@@ -94,6 +94,14 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
 
+  defp dispatch_loop_msg({:widget_callback, name, data}, loop_ctx) do
+    if screens_open?() do
+      dispatch_loop_msg({:tui_event, {:app_callback, name, data}}, loop_ctx)
+    else
+      dispatch_loop_msg({:app_event, name, data}, loop_ctx)
+    end
+  end
+
   defp dispatch_loop_msg({:app_event, name, data}, {app_module, app_state, rect, timers, wh, ss}) do
     result = Runtime.for_app(app_module).handle_message(app_module, name, data, app_state)
 
@@ -338,7 +346,7 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg(:screen_render_needed, {app_module, app_state, rect, timers, wh, ss}) do
-    Renderer.render_screens_from_manager(rect, app_module, app_state, wh)
+    schedule_coalesced_render()
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
@@ -387,6 +395,12 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
+  defp screens_open? do
+    Drafter.ScreenManager.get_all_screens() != []
+  catch
+    _, _ -> false
+  end
+
   defp handle_continue_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event) do
     if Drafter.ScreenManager.get_all_screens() != [] do
       Drafter.EventHandler.dispatch_event_sync(event)
@@ -401,7 +415,8 @@ defmodule Drafter.Runtime.AppLoop do
       {_, fresh_hierarchy} = immediate_render(app_module, app_state, screen_rect, widget_hierarchy)
       app_event_loop(app_module, app_state, screen_rect, timers, fresh_hierarchy, session_stack)
     else
-      render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
+      schedule_coalesced_render()
+      app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
     end
   end
 

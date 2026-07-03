@@ -163,13 +163,25 @@ defmodule Drafter.Runtime.Renderer do
       all_layers =
         [background_layer] ++ base_layers ++ screen_layers ++ overlay_layers ++ toast_layers
 
+      overlay_rows = layer_rows(screen_layers ++ overlay_layers ++ toast_layers, viewport)
+
       final_strips =
-        incremental_composite_or_full(all_layers, viewport, dirty_ids, stale_bounds)
+        incremental_composite_or_full(all_layers, viewport, MapSet.union(dirty_ids, overlay_rows), stale_bounds)
 
       RenderCache.put_composited(final_strips)
       RenderCache.put_layer_count(length(all_layers))
       Compositor.render_strips(final_strips, 0, 0)
     end
+  end
+
+  defp layer_rows(layers, viewport) do
+    layers
+    |> List.flatten()
+    |> Enum.reduce(MapSet.new(), fn %{bounds: bounds}, acc ->
+      first = max(bounds.y, 0)
+      last = min(bounds.y + bounds.height - 1, viewport.height - 1)
+      Enum.into(first..last//1, acc)
+    end)
   end
 
   @spec render_screens_from_manager(map(), module(), term(), map() | nil) :: :ok
