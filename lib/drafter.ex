@@ -350,12 +350,15 @@ defmodule Drafter do
     :ok
   end
 
+  defp safe_widget_state(nil), do: nil
+
   defp safe_widget_state(pid) do
-    Drafter.WidgetServer.get_state(pid)
+    if Process.alive?(pid), do: Drafter.WidgetServer.get_state(pid)
   catch
     :exit, _ -> nil
   end
 
+  defp value_to_update_props(nil, _value), do: nil
   defp value_to_update_props(%{text: _}, value) when is_binary(value), do: %{text: value}
   defp value_to_update_props(%{checked: _}, value) when is_boolean(value), do: %{checked: value}
   defp value_to_update_props(_state, _value), do: nil
@@ -372,7 +375,7 @@ defmodule Drafter do
   def get_widget_state(widget_id) do
     case Drafter.WidgetPidRegistry.lookup(widget_id) do
       nil -> get_widget_state_via_loop(widget_id)
-      pid -> safe_widget_state(pid)
+      pid -> safe_widget_state(pid) || get_widget_state_via_loop(widget_id)
     end
   end
 
@@ -1165,9 +1168,12 @@ defmodule Drafter do
 
     receive do
       {:DOWN, ^ref, :process, ^app_pid, reason} ->
+        Drafter.Trace.log_sync(["Q down ", Drafter.Trace.ts(), "\n"])
         Event.Manager.drain_queue()
         Terminal.Driver.cleanup()
+        Drafter.Trace.log_sync(["Q cleanup_done ", Drafter.Trace.ts(), "\n"])
         Event.Manager.drain_queue()
+        Drafter.Trace.log_sync(["Q run_returns ", Drafter.Trace.ts(), "\n"])
         if reason == :normal, do: :ok, else: {:error, reason}
     end
   end
@@ -1195,6 +1201,7 @@ defmodule Drafter do
 
   defp maybe_halt(result, opts) do
     if Keyword.get(opts, :halt_on_exit, true) do
+      Drafter.Trace.log_sync(["Q before_halt ", Drafter.Trace.ts(), "\n"])
       System.halt(exit_code(result))
     end
 

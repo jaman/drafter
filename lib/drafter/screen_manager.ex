@@ -534,8 +534,7 @@ defmodule Drafter.ScreenManager do
     _ -> :passthrough
   end
 
-  defp handle_widget_hierarchy_event_direct(screen, _screen_rect, event)
-       when elem(event, 0) in [:key, :char] do
+  defp handle_widget_hierarchy_event_direct(screen, _screen_rect, {:key, _} = event) do
     if screen.widget_hierarchy == nil do
       :passthrough
     else
@@ -621,8 +620,7 @@ defmodule Drafter.ScreenManager do
   defp should_forward_to_widget_hierarchy?(screen, screen_rect, event) do
     screen.widget_hierarchy != nil and
       screen_rect != nil and
-      (match?({:mouse, _}, event) or match?({:key, _}, event) or match?({:key, _, _}, event) or
-         match?({:char, _}, event)) and
+      (match?({:mouse, _}, event) or match?({:key, _}, event)) and
       not match?({:app_callback, _, _}, event)
   end
 

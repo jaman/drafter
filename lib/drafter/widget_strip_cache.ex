@@ -22,11 +22,9 @@ defmodule Drafter.WidgetStripCache do
     ArgumentError -> :ok
   end
 
-  @spec put(term(), map(), list()) :: boolean()
+  @spec put(term(), map(), list()) :: true
   def put(widget_id, rect, strips) do
     :ets.insert(@table, {session_key(widget_id), rect, strips})
-  rescue
-    ArgumentError -> false
   end
 
   @spec get(term()) :: {map(), list()} | nil
@@ -37,15 +35,11 @@ defmodule Drafter.WidgetStripCache do
       [{^key, rect, strips}] -> {rect, strips}
       [] -> nil
     end
-  rescue
-    ArgumentError -> nil
   end
 
   @spec delete(term()) :: true
   def delete(widget_id) do
     :ets.delete(@table, session_key(widget_id))
-  rescue
-    ArgumentError -> true
   end
 
   @spec mark_visible(term(), boolean()) :: true

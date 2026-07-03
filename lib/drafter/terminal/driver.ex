@@ -177,6 +177,7 @@ defmodule Drafter.Terminal.Driver do
 
   @impl GenServer
   def handle_info({:stdin, data}, state) do
+    Drafter.Trace.log(["S ", Drafter.Trace.ts(), " ", Base.encode16(data), "\n"])
     new_buffer = state.buffer <> data
     {events, remaining_buffer} = ANSI.parse_sequence(new_buffer)
 
@@ -353,8 +354,8 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp setup_stdin do
-    :io.setopts(:stdio, [:binary, {:encoding, :latin1}])
-    Drafter.Terminal.InputAssembler.start(self())
+    :io.setopts(:stdio, [:binary, {:encoding, :unicode}])
+    spawn_link(fn -> stdin_reader() end)
   end
 
   defp maybe_stop_stdin_reader(nil), do: :ok
@@ -384,6 +385,108 @@ defmodule Drafter.Terminal.Driver do
 
       _ ->
         :ok
+    end
+  end
+
+  defp stdin_reader do
+    case IO.read(:stdio, 1) do
+      :eof ->
+        :ok
+
+      {:error, _reason} ->
+        :ok
+
+      "\e" ->
+        read_escape_sequence("\e")
+
+      data when is_binary(data) ->
+        send(__MODULE__, {:stdin, data})
+        stdin_reader()
+    end
+  end
+
+  defp read_escape_sequence(buffer) do
+    drain_stale_escape_timeouts()
+    timer_ref = Process.send_after(self(), :escape_timeout, 100)
+
+    case IO.read(:stdio, 1) do
+      :eof ->
+        cancel_escape_timer(timer_ref)
+        send(__MODULE__, {:stdin, buffer})
+
+      {:error, _} ->
+        cancel_escape_timer(timer_ref)
+        send(__MODULE__, {:stdin, buffer})
+        stdin_reader()
+
+      "[" ->
+        cancel_escape_timer(timer_ref)
+        read_csi_sequence(buffer <> "[")
+
+      char when is_binary(char) ->
+        cancel_escape_timer(timer_ref)
+        send(__MODULE__, {:stdin, buffer <> char})
+        stdin_reader()
+    end
+  end
+
+  defp drain_stale_escape_timeouts do
+    receive do
+      :escape_timeout -> drain_stale_escape_timeouts()
+    after
+      0 -> :ok
+    end
+  end
+
+  defp cancel_escape_timer(timer_ref) do
+    Process.cancel_timer(timer_ref)
+
+    receive do
+      :escape_timeout -> :ok
+    after
+      0 -> :ok
+    end
+  end
+
+  defp read_csi_sequence(buffer) do
+    case IO.read(:stdio, 1) do
+      :eof ->
+        send(__MODULE__, {:stdin, buffer})
+
+      {:error, _} ->
+        send(__MODULE__, {:stdin, buffer})
+        stdin_reader()
+
+      "<" ->
+        read_sgr_mouse_sequence(buffer <> "<")
+
+      char when is_binary(char) ->
+        dispatch_csi_char(buffer <> char, char)
+    end
+  end
+
+  defp dispatch_csi_char(buffer, <<byte>> ) when byte in ?a..?z or byte in ?A..?Z or byte == ?~ do
+    send(__MODULE__, {:stdin, buffer})
+    stdin_reader()
+  end
+
+  defp dispatch_csi_char(buffer, _char), do: read_csi_sequence(buffer)
+
+  defp read_sgr_mouse_sequence(buffer) do
+    case IO.read(:stdio, 1) do
+      :eof ->
+        send(__MODULE__, {:stdin, buffer})
+
+      {:error, _} ->
+        send(__MODULE__, {:stdin, buffer})
+        stdin_reader()
+
+      char when char == "M" or char == "m" ->
+        send(__MODULE__, {:stdin, buffer <> char})
+        stdin_reader()
+
+      char when is_binary(char) ->
+        read_sgr_mouse_sequence(buffer <> char)
     end
   end
 

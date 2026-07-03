@@ -47,8 +47,6 @@ defmodule Drafter.Widget do
 
   @callback apply_data_buffer(state(), Drafter.RingBuffer.t(), rect()) :: state()
 
-  @callback on_rect_change(rect(), state()) :: state()
-
   @optional_callbacks [
     update: 2,
     unmount: 1,
@@ -60,8 +58,7 @@ defmodule Drafter.Widget do
     handle_hover: 3,
     handle_custom_event: 2,
     handle_event_capture: 2,
-    apply_data_buffer: 3,
-    on_rect_change: 2
+    apply_data_buffer: 3
   ]
 
   def mount(_props), do: %{}

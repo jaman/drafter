@@ -111,7 +111,6 @@ defmodule Drafter.Widget.DirectoryTree do
     }
   end
 
-  @impl Drafter.Widget
   def on_rect_change(rect, state) do
     %{state | viewport_height: rect.height}
   end

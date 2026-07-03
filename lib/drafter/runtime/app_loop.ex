@@ -83,6 +83,8 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg({:tui_event, event}, {app_module, app_state, rect, timers, wh, ss}) do
+    Drafter.Trace.log_sync(["I ", Drafter.Trace.ts(), " ", inspect(event), "\n"])
+
     case check_global_quit(event) do
       :quit -> handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
       :continue -> handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
@@ -92,14 +94,6 @@ defmodule Drafter.Runtime.AppLoop do
   defp dispatch_loop_msg(:coalesced_render, {app_module, app_state, rect, timers, wh, ss}) do
     {_, new_wh} = do_render(app_module, app_state, rect, wh)
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
-  end
-
-  defp dispatch_loop_msg({:widget_callback, name, data}, loop_ctx) do
-    if screens_open?() do
-      dispatch_loop_msg({:tui_event, {:app_callback, name, data}}, loop_ctx)
-    else
-      dispatch_loop_msg({:app_event, name, data}, loop_ctx)
-    end
   end
 
   defp dispatch_loop_msg({:app_event, name, data}, {app_module, app_state, rect, timers, wh, ss}) do
@@ -346,7 +340,7 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg(:screen_render_needed, {app_module, app_state, rect, timers, wh, ss}) do
-    schedule_coalesced_render()
+    Renderer.render_screens_from_manager(rect, app_module, app_state, wh)
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
@@ -395,12 +389,6 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp screens_open? do
-    Drafter.ScreenManager.get_all_screens() != []
-  catch
-    _, _ -> false
-  end
-
   defp handle_continue_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event) do
     if Drafter.ScreenManager.get_all_screens() != [] do
       Drafter.EventHandler.dispatch_event_sync(event)
@@ -415,8 +403,7 @@ defmodule Drafter.Runtime.AppLoop do
       {_, fresh_hierarchy} = immediate_render(app_module, app_state, screen_rect, widget_hierarchy)
       app_event_loop(app_module, app_state, screen_rect, timers, fresh_hierarchy, session_stack)
     else
-      schedule_coalesced_render()
-      app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
+      render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
     end
   end
 
@@ -547,8 +534,11 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp handle_stop(reason, _app_module, _app_state, _screen_rect, timers, widget_hierarchy, []) do
+    Drafter.Trace.log_sync(["Q stop_start ", Drafter.Trace.ts(), "\n"])
     cleanup_timers(timers)
+    Drafter.Trace.log_sync(["Q timers_done ", Drafter.Trace.ts(), "\n"])
     Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
+    Drafter.Trace.log_sync(["Q servers_stopped ", Drafter.Trace.ts(), "\n"])
     if reason == :normal, do: :ok, else: {:error, reason}
   end
 
@@ -843,7 +833,23 @@ defmodule Drafter.Runtime.AppLoop do
     Process.delete(:coalesced_render_scheduled)
     Process.put(:last_render_ms, System.monotonic_time(:millisecond))
     Process.delete(:render_deferred)
-    Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
+
+    if Drafter.Trace.enabled?() do
+      t0 = System.monotonic_time(:microsecond)
+      result = Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
+
+      Drafter.Trace.log([
+        "R ",
+        Drafter.Trace.ts(),
+        " render_app_us=",
+        Integer.to_string(System.monotonic_time(:microsecond) - t0),
+        "\n"
+      ])
+
+      result
+    else
+      Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
+    end
   end
 
   defp schedule_coalesced_render do

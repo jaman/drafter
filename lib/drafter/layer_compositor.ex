@@ -84,38 +84,21 @@ defmodule Drafter.LayerCompositor do
 
   defp prepare_layer(layer) do
     strips = layer.strips || []
-
-    %{
-      tuple: List.to_tuple(strips),
-      count: length(strips),
-      bounds: layer.bounds,
-      blank: bounds_blank(layer.bounds)
-    }
+    %{tuple: List.to_tuple(strips), count: length(strips), bounds: layer.bounds}
   end
 
   defp compose_row(prepared, viewport, row, blank) do
-    Enum.reduce(prepared, blank, fn %{tuple: tuple, count: count, bounds: bounds, blank: layer_blank}, acc ->
+    Enum.reduce(prepared, blank, fn %{tuple: tuple, count: count, bounds: bounds}, acc ->
       layer_row = row - bounds.y
 
-      in_bounds =
-        row >= bounds.y and row < bounds.y + bounds.height and bounds.x < viewport.width
-
-      cond do
-        in_bounds and layer_row < count ->
-          composite_strips_at_position(acc, elem(tuple, layer_row), bounds.x, viewport.width)
-
-        in_bounds ->
-          composite_strips_at_position(acc, layer_blank, bounds.x, viewport.width)
-
-        true ->
-          acc
+      if layer_row >= 0 and layer_row < count and
+           row >= bounds.y and row < bounds.y + bounds.height and
+           bounds.x < viewport.width do
+        composite_strips_at_position(acc, elem(tuple, layer_row), bounds.x, viewport.width)
+      else
+        acc
       end
     end)
-  end
-
-  defp bounds_blank(bounds) do
-    width = max(Map.get(bounds, :width, 0), 0)
-    Strip.new([Segment.new(String.duplicate(" ", width), %{})])
   end
 
   defp blank_strip(viewport) do
@@ -179,26 +162,19 @@ defmodule Drafter.LayerCompositor do
     layer_strips = layer.strips || []
     layer_count = length(layer_strips)
     layer_tuple = List.to_tuple(layer_strips)
-    layer_blank = bounds_blank(bounds)
 
     canvas
     |> Enum.with_index()
     |> Enum.map(fn {canvas_strip, row_index} ->
       layer_row = row_index - bounds.y
 
-      in_bounds =
-        row_index >= bounds.y and row_index < bounds.y + bounds.height and
-          bounds.x < viewport.width
-
-      cond do
-        in_bounds and layer_row < layer_count ->
-          composite_strips_at_position(canvas_strip, elem(layer_tuple, layer_row), bounds.x, viewport.width)
-
-        in_bounds ->
-          composite_strips_at_position(canvas_strip, layer_blank, bounds.x, viewport.width)
-
-        true ->
-          canvas_strip
+      if layer_row >= 0 and layer_row < layer_count and
+           row_index >= bounds.y and row_index < bounds.y + bounds.height and
+           bounds.x < viewport.width do
+        layer_strip = elem(layer_tuple, layer_row)
+        composite_strips_at_position(canvas_strip, layer_strip, bounds.x, viewport.width)
+      else
+        canvas_strip
       end
     end)
   end

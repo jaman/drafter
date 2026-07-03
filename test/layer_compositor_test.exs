@@ -70,58 +70,6 @@ defmodule Drafter.LayerCompositorTest do
     end
   end
 
-  describe "layers with fewer strips than their bounds" do
-    defp text_of(strip), do: Enum.map_join(strip.segments, "", & &1.text)
-
-    defp short_layer do
-      strips = [
-        Strip.new([Segment.new("last line", %{})])
-      ]
-
-      LayerCompositor.widget_layer(:short, strips, %{x: 0, y: 0, width: 9, height: 4})
-    end
-
-    test "composite/2 blanks bounds rows the strips no longer cover" do
-      viewport = %{width: 9, height: 4}
-
-      stale_strips = List.duplicate(Strip.new([Segment.new("stalestal", %{})]), 4)
-      stale = LayerCompositor.background_layer(stale_strips, %{x: 0, y: 0, width: 9, height: 4})
-
-      result = LayerCompositor.composite([stale, short_layer()], viewport)
-
-      assert text_of(Enum.at(result, 0)) == "last line"
-      assert String.trim(text_of(Enum.at(result, 1))) == ""
-      assert String.trim(text_of(Enum.at(result, 2))) == ""
-      assert String.trim(text_of(Enum.at(result, 3))) == ""
-    end
-
-    test "composite_incremental/4 blanks uncovered bounds rows on dirty rows" do
-      viewport = %{width: 9, height: 4}
-      previous = List.duplicate(Strip.new([Segment.new("stalestal", %{})]), 4)
-      dirty = MapSet.new([0, 1, 2, 3])
-
-      result = LayerCompositor.composite_incremental([short_layer()], viewport, previous, dirty)
-
-      assert text_of(Enum.at(result, 0)) == "last line"
-      assert String.trim(text_of(Enum.at(result, 1))) == ""
-      assert String.trim(text_of(Enum.at(result, 3))) == ""
-    end
-
-    test "blanking stays inside the layer's horizontal bounds" do
-      viewport = %{width: 12, height: 2}
-
-      neighbor_strips = List.duplicate(Strip.new([Segment.new("NN", %{})]), 2)
-      neighbor = LayerCompositor.widget_layer(:neighbor, neighbor_strips, %{x: 10, y: 0, width: 2, height: 2})
-
-      strips = [Strip.new([Segment.new("short", %{})])]
-      short = LayerCompositor.widget_layer(:short2, strips, %{x: 0, y: 0, width: 5, height: 2})
-
-      result = LayerCompositor.composite([neighbor, short], viewport)
-
-      assert text_of(Enum.at(result, 1)) |> String.slice(10, 2) == "NN"
-    end
-  end
-
   describe "LayerCompositor helper functions" do
     test "background_layer creates layer with correct z-index" do
       strips = [Strip.new([Segment.new("test", %{})])]
