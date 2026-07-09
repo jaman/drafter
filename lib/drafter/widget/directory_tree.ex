@@ -472,13 +472,25 @@ defmodule Drafter.Widget.DirectoryTree do
 
   @spec handle_item_selection(t(), tree_item()) :: {:ok, t()}
   defp handle_item_selection(state, %{type: :dir, path: path}) do
-    toggle_directory(state, path)
+    {:ok, new_state} = toggle_directory(state, path)
+    {:ok, new_state, select_actions(state, path)}
   end
 
   defp handle_item_selection(state, %{type: :file, path: path}) do
     new_state = %{state | selected_file: path}
-    actions = file_select_actions(state, path)
+    actions = file_select_actions(state, path) ++ select_actions(state, path)
     {:ok, new_state, actions}
+  end
+
+  defp select_actions(state, path) do
+    if state.on_select do
+      case state.on_select.(path) do
+        nil -> []
+        action -> [action]
+      end
+    else
+      []
+    end
   end
 
   defp toggle_directory(state, dir_path) do

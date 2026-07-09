@@ -52,6 +52,7 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
   def dispatch_to_focused_or_ignore(hierarchy, {:key, _} = event), do: dispatch_to_focused(hierarchy, event)
   def dispatch_to_focused_or_ignore(hierarchy, {:key, _, _} = event), do: dispatch_to_focused(hierarchy, event)
   def dispatch_to_focused_or_ignore(hierarchy, {:char, _} = event), do: dispatch_to_focused(hierarchy, event)
+  def dispatch_to_focused_or_ignore(hierarchy, {:bracketed_paste, _} = event), do: dispatch_to_focused(hierarchy, event)
   def dispatch_to_focused_or_ignore(hierarchy, _), do: {hierarchy, []}
 
   def handle_event_consumed(hierarchy, event) do

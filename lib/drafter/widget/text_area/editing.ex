@@ -179,6 +179,60 @@ defmodule Drafter.Widget.TextArea.Editing do
     end
   end
 
+  @doc "Insert a (possibly multi-line) string at the cursor — used for paste."
+  @spec insert_text(map(), String.t()) :: {:ok, map()} | {:noreply, map()}
+  def insert_text(state, text) do
+    if state.read_only do
+      {:noreply, state}
+    else
+      state = History.push_undo(state)
+      state = if state.selection != nil, do: Selection.delete_selection(state), else: state
+      do_insert_text(state, String.split(text, ["\r\n", "\r", "\n"]))
+    end
+  end
+
+  defp do_insert_text(state, [single]) do
+    current = Enum.at(state.lines, state.cursor_line, "")
+    {before, after_text} = String.split_at(current, state.cursor_col)
+    new_line = before <> single <> after_text
+    new_lines = List.replace_at(state.lines, state.cursor_line, new_line)
+
+    new_state =
+      %{
+        state
+        | lines: new_lines,
+          cursor_col: state.cursor_col + String.length(single),
+          text: Enum.join(new_lines, "\n")
+      }
+      |> Cursor.adjust_scroll()
+
+    {:ok, new_state}
+  end
+
+  defp do_insert_text(state, lines) do
+    current = Enum.at(state.lines, state.cursor_line, "")
+    {before, after_text} = String.split_at(current, state.cursor_col)
+    {[first | middle], [last]} = Enum.split(lines, -1)
+
+    inserted = [before <> first] ++ middle ++ [last <> after_text]
+
+    new_lines =
+      Enum.take(state.lines, state.cursor_line) ++
+        inserted ++ Enum.drop(state.lines, state.cursor_line + 1)
+
+    new_state =
+      %{
+        state
+        | lines: new_lines,
+          cursor_line: state.cursor_line + length(inserted) - 1,
+          cursor_col: String.length(last),
+          text: Enum.join(new_lines, "\n")
+      }
+      |> Cursor.adjust_scroll()
+
+    {:ok, new_state}
+  end
+
   @spec insert_char(map(), String.t()) :: {:ok, map()}
   def insert_char(state, char) do
     current_line = Enum.at(state.lines, state.cursor_line, "")

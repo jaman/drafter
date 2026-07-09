@@ -309,6 +309,10 @@ defmodule Drafter.Widget.TextInput do
     try_insert_char(state, " ")
   end
 
+  defp handle_focused_event({:bracketed_paste, content}, state) do
+    insert_string(state, String.replace(content, ~r/[\r\n]+/, " "))
+  end
+
   defp handle_focused_event({:char, char}, state) when is_integer(char) do
     try_insert_char(state, <<char::utf8>>)
   end
@@ -617,6 +621,22 @@ defmodule Drafter.Widget.TextInput do
 
     new_state =
       %{state | text: new_text, cursor_position: state.cursor_position + 1}
+      |> Rendering.adjust_scroll_offset()
+
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp insert_string(state, "") do
+    {:ok, state}
+  end
+
+  defp insert_string(state, str) do
+    {before, after_text} = String.split_at(state.text, state.cursor_position)
+    new_text = before <> str <> after_text
+
+    new_state =
+      %{state | text: new_text, cursor_position: state.cursor_position + String.length(str), selection_start: nil, selection_end: nil}
       |> Rendering.adjust_scroll_offset()
 
     trigger_change(new_state)

@@ -410,6 +410,12 @@ defmodule Drafter.Widget.TextArea do
     {tag, new_state}
   end
 
+  def handle_event({:bracketed_paste, content}, %{focused: true} = state) do
+    {tag, new_state} = Editing.insert_text(state, content)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
+
   def handle_event({:char, char}, %{focused: true} = state) when is_integer(char) do
     char_str = <<char::utf8>>
     handle_printable_char(state, char_str)
