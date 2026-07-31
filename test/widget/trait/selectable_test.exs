@@ -59,19 +59,19 @@ defmodule Drafter.Widget.Trait.SelectableTest do
   describe "single selection" do
     test "space selects current item" do
       state = %{Selectable.default_state() | _cursor_index: 3, _item_count: 10}
-      {:ok, new_state} = Selectable.handle_event({:key, :space}, state, %{})
+      {:ok, new_state} = Selectable.handle_event({:key, :" "}, state, %{})
       assert MapSet.member?(new_state._selected_indices, 3)
     end
 
     test "space deselects already selected item" do
       state = %{Selectable.default_state() | _cursor_index: 3, _selected_indices: MapSet.new([3])}
-      {:ok, new_state} = Selectable.handle_event({:key, :space}, state, %{})
+      {:ok, new_state} = Selectable.handle_event({:key, :" "}, state, %{})
       assert MapSet.equal?(new_state._selected_indices, MapSet.new())
     end
 
     test "selecting new item clears previous selection in single mode" do
       state = %{Selectable.default_state() | _cursor_index: 5, _selected_indices: MapSet.new([3])}
-      {:ok, new_state} = Selectable.handle_event({:key, :space}, state, %{})
+      {:ok, new_state} = Selectable.handle_event({:key, :" "}, state, %{})
       assert MapSet.equal?(new_state._selected_indices, MapSet.new([5]))
     end
   end
@@ -85,7 +85,7 @@ defmodule Drafter.Widget.Trait.SelectableTest do
           _selected_indices: MapSet.new([3])
       }
 
-      {:ok, new_state} = Selectable.handle_event({:key, :space}, state, %{})
+      {:ok, new_state} = Selectable.handle_event({:key, :" "}, state, %{})
       assert MapSet.equal?(new_state._selected_indices, MapSet.new([3, 5]))
     end
 
@@ -97,7 +97,7 @@ defmodule Drafter.Widget.Trait.SelectableTest do
           _selected_indices: MapSet.new([3, 5])
       }
 
-      {:ok, new_state} = Selectable.handle_event({:key, :space}, state, %{})
+      {:ok, new_state} = Selectable.handle_event({:key, :" "}, state, %{})
       assert MapSet.equal?(new_state._selected_indices, MapSet.new([5]))
     end
   end
@@ -105,7 +105,7 @@ defmodule Drafter.Widget.Trait.SelectableTest do
   describe "none selection mode" do
     test "space does nothing in none mode" do
       state = %{Selectable.default_state() | _selection_mode: :none, _cursor_index: 3}
-      {:ok, new_state} = Selectable.handle_event({:key, :space}, state, %{})
+      {:ok, new_state} = Selectable.handle_event({:key, :" "}, state, %{})
       assert MapSet.equal?(new_state._selected_indices, MapSet.new())
     end
   end

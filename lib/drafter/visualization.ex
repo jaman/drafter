@@ -13,8 +13,9 @@ defmodule Drafter.Visualization do
   """
   @spec normalize(number(), number(), number()) :: float()
   def normalize(_value, min, max) when min == max, do: 0.0
+
   def normalize(value, min, max) do
-    (value - min) / (max - min)
+    ((value - min) / (max - min))
     |> clamp(0.0, 1.0)
   end
 
@@ -23,7 +24,9 @@ defmodule Drafter.Visualization do
   Returns `dst_min` when the source range is empty.
   """
   @spec scale(number(), number(), number(), number(), number()) :: float()
-  def scale(_value, src_min, src_max, dst_min, _dst_max) when src_min == src_max, do: dst_min * 1.0
+  def scale(_value, src_min, src_max, dst_min, _dst_max) when src_min == src_max,
+    do: dst_min * 1.0
+
   def scale(value, src_min, src_max, dst_min, dst_max) do
     t = normalize(value, src_min, src_max)
     dst_min + t * (dst_max - dst_min)
@@ -44,18 +47,23 @@ defmodule Drafter.Visualization do
   """
   @spec format_number(number(), non_neg_integer()) :: String.t()
   def format_number(value, precision \\ 1)
+
   def format_number(value, _precision) when abs(value) >= 1_000_000 do
     :erlang.float_to_binary(value / 1_000_000, decimals: 1) <> "M"
   end
+
   def format_number(value, _precision) when abs(value) >= 1_000 do
     :erlang.float_to_binary(value / 1_000, decimals: 1) <> "K"
   end
+
   def format_number(value, precision) when is_integer(value) and precision == 0 do
     Integer.to_string(value)
   end
+
   def format_number(value, precision) when is_integer(value) do
     Float.to_string(value * 1.0) |> trim_decimals(precision)
   end
+
   def format_number(value, precision) do
     :erlang.float_to_binary(value * 1.0, decimals: precision) |> trim_decimals(precision)
   end
@@ -68,9 +76,11 @@ defmodule Drafter.Visualization do
   @spec calculate_range([number()], keyword()) :: {number(), number()}
   def calculate_range(values, opts \\ [])
   def calculate_range([], _opts), do: {0, 1}
+
   def calculate_range(values, opts) do
     raw_min = Enum.min(values)
     raw_max = Enum.max(values)
+
     if Keyword.get(opts, :include_zero, false) do
       {min(0, raw_min), max(0, raw_max)}
     else
@@ -85,6 +95,7 @@ defmodule Drafter.Visualization do
   @spec level_index(float(), [term()]) :: non_neg_integer()
   def level_index(normalized, levels) do
     count = length(levels)
+
     round(normalized * (count - 1))
     |> clamp(0, count - 1)
   end
@@ -132,5 +143,7 @@ defmodule Drafter.Visualization do
   end
 
   defp trim_decimals(str, 0), do: String.replace(str, ~r/\..*$/, "")
-  defp trim_decimals(str, _precision), do: String.replace(str, ~r/(\.\d*?)0+$/, "\\1") |> String.trim_trailing(".")
+
+  defp trim_decimals(str, _precision),
+    do: String.replace(str, ~r/(\.\d*?)0+$/, "\\1") |> String.trim_trailing(".")
 end

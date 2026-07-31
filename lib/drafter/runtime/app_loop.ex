@@ -1,18 +1,30 @@
 defmodule Drafter.Runtime.AppLoop do
   @moduledoc """
-  Application event loop for Drafter.
+  The Drafter application event loop.
 
-  Owns the receive loop and all message dispatch logic.
-  Calls Drafter.Runtime.Renderer for all rendering.
+  Owns the receive loop and all message dispatch. Rendering is delegated to
+  `Drafter.Runtime.Renderer`.
   """
 
   alias Drafter.{Compositor, Event, RenderCache, SkinManager, Terminal, ThemeManager}
   alias Drafter.Runtime
+  alias Drafter.Runtime.FrameClock
   alias Drafter.Runtime.Renderer
+  alias Drafter.Session.SharedState
   alias Drafter.Widget.SplitPaneDivider
 
   @scroll_debounce_ms 150
 
+  @doc """
+  Turns the calling process into the application loop, returning when the app stops.
+
+  Registers the caller with `Drafter.AppRegistry` and applies `:refresh_rate`
+  from `opts`, then receives and dispatches events until the application returns
+  `{:stop, reason}` or the session shuts down.
+
+  Remote sessions call this directly. A local terminal goes through `run/2`,
+  which sets the terminal up first.
+  """
   @spec enter_loop(module(), term(), map(), map(), map() | nil, keyword()) :: :ok
   def enter_loop(
         app_module,
@@ -22,6 +34,7 @@ defmodule Drafter.Runtime.AppLoop do
         widget_hierarchy \\ nil,
         opts \\ []
       ) do
+    Drafter.AppRegistry.register()
     setup_frame_rate(app_module, opts)
     app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, [])
   end
@@ -42,23 +55,36 @@ defmodule Drafter.Runtime.AppLoop do
     Drafter.Event.Manager.drain_queue()
     drain_stale_events()
     Terminal.Driver.start_input()
-    Process.sleep(50)
     Terminal.Driver.drain_pending_input()
     Drafter.Event.Manager.drain_queue()
     drain_stale_events()
     Compositor.clear_screen()
 
-    initial_props = %{}
-    app_state = Runtime.for_app(app_module).mount(app_module, initial_props)
-
     {width, height} = Terminal.Driver.refresh_size()
     Compositor.resize(width, height)
-    screen_rect = make_screen_rect(width, height)
+
+    start(app_module, make_screen_rect(width, height), opts)
+  end
+
+  @doc """
+  Mount an app, run its ready hook, and enter the event loop for `screen_rect`.
+
+  Everything `run/2` does after the terminal is set up. A headless run shares this
+  function rather than repeating the sequence, so how an app receives its props and
+  its startup timers cannot differ between a test and a real terminal.
+  """
+  @spec start(module(), map(), keyword()) :: :ok
+  def start(app_module, screen_rect, opts \\ []) do
+    Drafter.AppRegistry.register()
+    setup_frame_rate(app_module, opts)
+
+    runtime = Runtime.for_app(app_module)
+    app_state = runtime.mount(app_module, Runtime.mount_props(opts))
 
     {_, hierarchy} = Renderer.render_app(app_module, app_state, screen_rect)
 
     Process.put(:pending_intervals, [])
-    ready_app_state = Runtime.for_app(app_module).ready(app_module, app_state)
+    ready_app_state = runtime.ready(app_module, app_state)
     initial_timers = collect_pending_intervals()
     {_, hierarchy} = Renderer.render_app(app_module, ready_app_state, screen_rect, hierarchy)
 
@@ -66,6 +92,8 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack) do
+    Process.put(:drafter_current_hierarchy, widget_hierarchy)
+    publish_shared_state(app_state)
     ctx = {app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack}
 
     receive do
@@ -73,7 +101,10 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp dispatch_loop_msg({:tui_event, {:resize, {w, h}}}, {app_module, app_state, _rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:tui_event, {:resize, {w, h}}},
+         {app_module, app_state, _rect, timers, wh, ss}
+       ) do
     {fw, fh} = drain_pending_resizes(w, h)
     Process.put(:last_resize_ms, System.monotonic_time(:millisecond))
     rect = make_screen_rect(fw, fh)
@@ -83,7 +114,8 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg({:tui_event, event}, {app_module, app_state, rect, timers, wh, ss}) do
-    Drafter.Trace.log_sync(["I ", Drafter.Trace.ts(), " ", inspect(event), "\n"])
+    if Drafter.Trace.enabled?(),
+      do: Drafter.Trace.log_sync(["I ", Drafter.Trace.ts(), " ", inspect(event), "\n"])
 
     case check_global_quit(event) do
       :quit -> handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
@@ -100,7 +132,9 @@ defmodule Drafter.Runtime.AppLoop do
     result = Runtime.for_app(app_module).handle_message(app_module, name, data, app_state)
 
     case result do
-      {:stop, reason} -> handle_stop(reason, app_module, app_state, rect, timers, wh, ss)
+      {:stop, reason} ->
+        handle_stop(reason, app_module, app_state, rect, timers, wh, ss)
+
       _ ->
         new_state = dispatch_app_callback_result(result, app_state)
         {_, new_wh} = immediate_render(app_module, new_state, rect, wh)
@@ -108,7 +142,10 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp dispatch_loop_msg({:bound_state_update, key, value}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:bound_state_update, key, value},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     new_state = Map.put(app_state, key, value)
     {_, new_wh} = immediate_render(app_module, new_state, rect, wh)
     app_event_loop(app_module, new_state, rect, timers, new_wh, ss)
@@ -121,7 +158,11 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg({:theme_updated, theme}, {app_module, app_state, rect, timers, wh, ss}) do
     new_state =
-      case Runtime.for_app(app_module).handle_input(app_module, {:theme_updated, theme}, app_state) do
+      case Runtime.for_app(app_module).handle_input(
+             app_module,
+             {:theme_updated, theme},
+             app_state
+           ) do
         {:ok, s} -> s
         {:noreply, s} -> s
         s when is_map(s) -> s
@@ -147,7 +188,9 @@ defmodule Drafter.Runtime.AppLoop do
   defp dispatch_loop_msg({:timer, timer_id}, {app_module, app_state, rect, timers, wh, ss}) do
     is_parent =
       not Map.has_key?(timers, timer_id) and
-        Enum.any?(ss, fn {_, _, _, parent_timers, _, _} -> Map.has_key?(parent_timers, timer_id) end)
+        Enum.any?(ss, fn {_, _, _, parent_timers, _, _} ->
+          Map.has_key?(parent_timers, timer_id)
+        end)
 
     if is_parent do
       app_event_loop(app_module, app_state, rect, timers, wh, ss)
@@ -163,24 +206,34 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp dispatch_loop_msg({:set_interval, ms, timer_id}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:set_interval, ms, timer_id},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     {:ok, timer_ref} = :timer.send_interval(ms, {:timer, timer_id})
     app_event_loop(app_module, app_state, rect, Map.put(timers, timer_id, timer_ref), wh, ss)
   end
 
-  defp dispatch_loop_msg({:set_timeout, ms, timer_id}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:set_timeout, ms, timer_id},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     Process.send_after(self(), {:timer, timer_id}, ms)
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:focus_widget, widget_id}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:focus_widget, widget_id},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     new_wh = if wh, do: Drafter.WidgetHierarchy.focus_widget(wh, widget_id), else: wh
     Process.put(:render_cache_layout_dirty, true)
     {_, updated_wh} = immediate_render(app_module, app_state, rect, new_wh)
     app_event_loop(app_module, app_state, rect, timers, updated_wh, ss)
   end
 
-  defp dispatch_loop_msg({:widget_event, event}, {app_module, app_state, rect, timers, wh, ss}) when wh != nil do
+  defp dispatch_loop_msg({:widget_event, event}, {app_module, app_state, rect, timers, wh, ss})
+       when wh != nil do
     {new_wh, _} = Drafter.WidgetHierarchy.broadcast_event(wh, event)
     Process.put(:render_cache_layout_dirty, true)
     {_, updated_wh} = immediate_render(app_module, app_state, rect, new_wh)
@@ -191,18 +244,28 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:widget_event, widget_id, event}, {app_module, app_state, rect, timers, wh, ss}) when wh != nil do
+  defp dispatch_loop_msg(
+         {:widget_event, widget_id, event},
+         {app_module, app_state, rect, timers, wh, ss}
+       )
+       when wh != nil do
     {new_wh, _} = Drafter.WidgetHierarchy.send_event_to_widget(wh, widget_id, event)
     Process.put(:render_cache_layout_dirty, true)
     {_, updated_wh} = immediate_render(app_module, app_state, rect, new_wh)
     app_event_loop(app_module, app_state, rect, timers, updated_wh, ss)
   end
 
-  defp dispatch_loop_msg({:widget_event, _widget_id, _event}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:widget_event, _widget_id, _event},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:widget_render_needed, _id}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:widget_render_needed, _id},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     drain_widget_render_notifications()
     Process.put(:render_cache_layout_dirty, true)
     if wh, do: Renderer.render_hierarchy(wh, rect)
@@ -222,32 +285,52 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp dispatch_loop_msg({:widget_action, _, {:theme_change, name}}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:widget_action, _, {:theme_change, name}},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     ThemeManager.set_theme(name)
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:widget_action, _, {:skin_change, name}}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:widget_action, _, {:skin_change, name}},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     SkinManager.set_skin(name)
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:widget_action, _, {:app_callback, cb, data}}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:widget_action, _, {:app_callback, cb, data}},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     new_state = dispatch_app_callback(app_module, cb, data, app_state)
     {_, updated_wh} = immediate_render(app_module, new_state, rect, wh)
     app_event_loop(app_module, new_state, rect, timers, updated_wh, ss)
   end
 
-  defp dispatch_loop_msg({:widget_action, _, _action}, {app_module, app_state, rect, timers, wh, ss}) when wh != nil do
+  defp dispatch_loop_msg(
+         {:widget_action, _, _action},
+         {app_module, app_state, rect, timers, wh, ss}
+       )
+       when wh != nil do
     {_, updated_wh} = immediate_render(app_module, app_state, rect, wh)
     app_event_loop(app_module, app_state, rect, timers, updated_wh, ss)
   end
 
-  defp dispatch_loop_msg({:widget_action, _, _action}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:widget_action, _, _action},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:activate_widget, widget_id}, {app_module, app_state, rect, timers, wh, ss}) when wh != nil do
+  defp dispatch_loop_msg(
+         {:activate_widget, widget_id},
+         {app_module, app_state, rect, timers, wh, ss}
+       )
+       when wh != nil do
     {new_wh, actions} = Drafter.WidgetHierarchy.send_event_to_widget(wh, widget_id, :activate)
 
     new_state =
@@ -264,7 +347,10 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:get_widget_value, widget_id, caller}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:get_widget_value, widget_id, caller},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     value =
       if wh do
         case Drafter.WidgetHierarchy.get_widget_state(wh, widget_id) do
@@ -279,31 +365,46 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:get_widget_state, widget_id, caller}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:get_widget_state, widget_id, caller},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     state = if wh, do: Drafter.WidgetHierarchy.get_widget_state(wh, widget_id), else: nil
     send(caller, {:widget_state, widget_id, state})
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:query_one, selector, caller}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:query_one, selector, caller},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     result = if wh, do: Drafter.WidgetHierarchy.query_one(wh, selector), else: nil
     send(caller, {:query_result, :one, result})
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:query_all, selector, caller}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:query_all, selector, caller},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     result = if wh, do: Drafter.WidgetHierarchy.query_all(wh, selector), else: []
     send(caller, {:query_result, :all, result})
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:validate_widget, widget_id, caller}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:validate_widget, widget_id, caller},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     result = validate_widget_in_hierarchy(wh, widget_id)
     send(caller, {:validation_result, widget_id, result})
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:get_animated_property, widget_id, prop, caller}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:get_animated_property, widget_id, prop, caller},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     value =
       if wh do
         case Drafter.WidgetHierarchy.get_widget_state(wh, widget_id) do
@@ -318,19 +419,32 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:apply_animation, widget_id, prop, value}, {app_module, app_state, rect, timers, wh, ss}) when wh != nil do
+  defp dispatch_loop_msg(
+         {:apply_animation, widget_id, prop, value},
+         {app_module, app_state, rect, timers, wh, ss}
+       )
+       when wh != nil do
     case Drafter.WidgetHierarchy.get_widget_info(wh, widget_id) do
       nil ->
         app_event_loop(app_module, app_state, rect, timers, wh, ss)
 
       widget_info ->
-        new_wh = Drafter.WidgetHierarchy.update_widget_state(wh, widget_id, apply_animated_property(widget_info.state, prop, value))
+        new_wh =
+          Drafter.WidgetHierarchy.update_widget_state(
+            wh,
+            widget_id,
+            apply_animated_property(widget_info.state, prop, value)
+          )
+
         {_, final_wh} = throttled_render(app_module, app_state, rect, new_wh)
         app_event_loop(app_module, app_state, rect, timers, final_wh, ss)
     end
   end
 
-  defp dispatch_loop_msg({:apply_animation, _, _, _}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:apply_animation, _, _, _},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
@@ -344,13 +458,19 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:__drafter_stop__, reason}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:__drafter_stop__, reason},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     handle_stop(reason, app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg({:push_session, new_module, opts, action_handlers, from_pid, ref}, {app_module, app_state, rect, timers, wh, ss}) do
+  defp dispatch_loop_msg(
+         {:push_session, new_module, opts, action_handlers, from_pid, ref},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
     RenderCache.invalidate()
-    mount_props = opts |> Keyword.drop([:scroll_optimization, :syntax_highlighting, :refresh_rate]) |> Map.new()
+    mount_props = Runtime.mount_props(opts)
     setup_frame_rate(new_module, opts)
     prev_handlers = Drafter.ActionRegistry.collect()
     Drafter.ActionRegistry.init(action_handlers)
@@ -372,6 +492,40 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
 
+  defp dispatch_loop_msg({:get_state, caller}, {app_module, app_state, rect, timers, wh, ss}) do
+    send(caller, {:state, app_state})
+    app_event_loop(app_module, app_state, rect, timers, wh, ss)
+  end
+
+  defp dispatch_loop_msg({:get_hierarchy, caller}, {app_module, app_state, rect, timers, wh, ss}) do
+    send(caller, {:hierarchy, wh})
+    app_event_loop(app_module, app_state, rect, timers, wh, ss)
+  end
+
+  defp dispatch_loop_msg(
+         {:widget_click, widget_id},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
+    case widget_center(wh, widget_id) do
+      nil ->
+        app_event_loop(app_module, app_state, rect, timers, wh, ss)
+
+      {x, y} ->
+        event = {:mouse, %{type: :mouse_up, x: x, y: y, button: :left, mods: []}}
+        handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
+    end
+  end
+
+  defp dispatch_loop_msg(
+         {:shared_state_updated, incoming},
+         {app_module, _app_state, rect, timers, wh, ss}
+       ) do
+    merged = Map.merge(incoming, Process.get(:drafter_mount_props, %{}))
+    Process.put(:drafter_shared_last, merged)
+    {_, new_wh} = immediate_render(app_module, merged, rect, wh)
+    app_event_loop(app_module, merged, rect, timers, new_wh, ss)
+  end
+
   defp dispatch_loop_msg({:EXIT, _pid, _reason}, {app_module, app_state, rect, timers, wh, ss}) do
     handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
   end
@@ -389,27 +543,72 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp handle_continue_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event) do
+  defp handle_continue_event(
+         app_module,
+         app_state,
+         screen_rect,
+         timers,
+         widget_hierarchy,
+         session_stack,
+         event
+       ) do
     if Drafter.ScreenManager.get_all_screens() != [] do
       Drafter.EventHandler.dispatch_event_sync(event)
-      handle_post_screen_dispatch(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
+
+      handle_post_screen_dispatch(
+        app_module,
+        app_state,
+        screen_rect,
+        timers,
+        widget_hierarchy,
+        session_stack
+      )
     else
-      handle_no_screens_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event)
+      handle_no_screens_event(
+        app_module,
+        app_state,
+        screen_rect,
+        timers,
+        widget_hierarchy,
+        session_stack,
+        event
+      )
     end
   end
 
-  defp handle_post_screen_dispatch(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack) do
+  defp handle_post_screen_dispatch(
+         app_module,
+         app_state,
+         screen_rect,
+         timers,
+         widget_hierarchy,
+         session_stack
+       ) do
     if Drafter.ScreenManager.get_all_screens() == [] do
-      {_, fresh_hierarchy} = immediate_render(app_module, app_state, screen_rect, widget_hierarchy)
+      {_, fresh_hierarchy} =
+        immediate_render(app_module, app_state, screen_rect, widget_hierarchy)
+
       app_event_loop(app_module, app_state, screen_rect, timers, fresh_hierarchy, session_stack)
     else
-      render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
+      render_screens_and_loop(
+        {app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack}
+      )
     end
   end
 
-  defp handle_no_screens_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event) do
+  defp handle_no_screens_event(
+         app_module,
+         app_state,
+         screen_rect,
+         timers,
+         widget_hierarchy,
+         session_stack,
+         event
+       ) do
+    already_routed? = widget_hierarchy != nil and widget_hierarchy.focused_widget != nil
+
     {new_hierarchy, actions, widget_consumed} =
-      if widget_hierarchy && widget_hierarchy.focused_widget do
+      if already_routed? do
         Drafter.WidgetHierarchy.handle_event_consumed(widget_hierarchy, event)
       else
         {widget_hierarchy, [], false}
@@ -419,15 +618,39 @@ defmodule Drafter.Runtime.AppLoop do
 
     if widget_consumed do
       handle_widget_consumed(
-        app_module, app_state, screen_rect, timers, new_hierarchy,
-        session_stack, actions, {event, raw_mouse_event?}
+        app_module,
+        app_state,
+        screen_rect,
+        timers,
+        new_hierarchy,
+        session_stack,
+        actions,
+        {event, raw_mouse_event?}
       )
     else
-      dispatch_app_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event)
+      dispatch_app_event(
+        app_module,
+        app_state,
+        screen_rect,
+        timers,
+        new_hierarchy,
+        session_stack,
+        event,
+        already_routed?
+      )
     end
   end
 
-  defp handle_widget_consumed(app_module, app_state, screen_rect, timers, new_hierarchy, session_stack, actions, {event, raw_mouse_event?}) do
+  defp handle_widget_consumed(
+         app_module,
+         app_state,
+         screen_rect,
+         timers,
+         new_hierarchy,
+         session_stack,
+         actions,
+         {event, raw_mouse_event?}
+       ) do
     {needs_layout, layout_direction} = RenderCache.extract_layout_impact(actions)
     Process.put(:render_cache_layout_dirty, needs_layout)
 
@@ -435,12 +658,21 @@ defmodule Drafter.Runtime.AppLoop do
       Enum.reduce(actions, app_state, fn
         {:app_callback, callback, data}, acc_state ->
           dispatch_app_callback(app_module, callback, data, acc_state)
+
         _, acc_state ->
           acc_state
       end)
 
     has_app_callback = Enum.any?(actions, &match?({:app_callback, _, _}, &1))
-    post_widget_state = maybe_passthrough_mouse(app_module, event, new_app_state, raw_mouse_event?, has_app_callback)
+
+    post_widget_state =
+      maybe_passthrough_mouse(
+        app_module,
+        event,
+        new_app_state,
+        raw_mouse_event?,
+        has_app_callback
+      )
 
     divider_mode = find_divider_mode(actions)
 
@@ -448,7 +680,15 @@ defmodule Drafter.Runtime.AppLoop do
       divider_mode == :quick ->
         moved_hierarchy = move_divider_rect(new_hierarchy)
         Renderer.render_hierarchy(moved_hierarchy, screen_rect)
-        app_event_loop(app_module, post_widget_state, screen_rect, timers, moved_hierarchy, session_stack)
+
+        app_event_loop(
+          app_module,
+          post_widget_state,
+          screen_rect,
+          timers,
+          moved_hierarchy,
+          session_stack
+        )
 
       needs_layout ->
         clear_divider_origins()
@@ -461,15 +701,38 @@ defmodule Drafter.Runtime.AppLoop do
         scrolled_app_state = maybe_scroll_active(app_module, post_widget_state)
         Renderer.render_hierarchy(new_hierarchy, screen_rect)
         reschedule_scroll_debounce()
-        app_event_loop(app_module, scrolled_app_state, screen_rect, timers, new_hierarchy, session_stack)
+
+        app_event_loop(
+          app_module,
+          scrolled_app_state,
+          screen_rect,
+          timers,
+          new_hierarchy,
+          session_stack
+        )
 
       true ->
-        {_, final_hierarchy} = immediate_render(app_module, post_widget_state, screen_rect, new_hierarchy)
-        app_event_loop(app_module, post_widget_state, screen_rect, timers, final_hierarchy, session_stack)
+        {_, final_hierarchy} =
+          immediate_render(app_module, post_widget_state, screen_rect, new_hierarchy)
+
+        app_event_loop(
+          app_module,
+          post_widget_state,
+          screen_rect,
+          timers,
+          final_hierarchy,
+          session_stack
+        )
     end
   end
 
-  defp maybe_passthrough_mouse(app_module, event, app_state, true = _raw_mouse, false = _has_callback) do
+  defp maybe_passthrough_mouse(
+         app_module,
+         event,
+         app_state,
+         true = _raw_mouse,
+         false = _has_callback
+       ) do
     case Runtime.for_app(app_module).handle_input(app_module, event, app_state) do
       {:ok, s} -> s
       {:noreply, s} -> s
@@ -477,58 +740,113 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp maybe_passthrough_mouse(_app_module, _event, app_state, _raw_mouse, _has_callback), do: app_state
+  defp maybe_passthrough_mouse(_app_module, _event, app_state, _raw_mouse, _has_callback),
+    do: app_state
 
-  defp dispatch_app_event(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event) do
+  defp dispatch_app_event(
+         app_module,
+         app_state,
+         screen_rect,
+         timers,
+         widget_hierarchy,
+         session_stack,
+         event,
+         already_routed?
+       ) do
     result = Runtime.for_app(app_module).handle_input(app_module, event, app_state)
-    apply_app_event_result(result, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, event)
+
+    ctx = {app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack}
+    apply_app_event_result(result, ctx, event, already_routed?)
   end
 
-  defp apply_app_event_result({:ok, new_app_state}, app_module, _app_state, screen_rect, timers, widget_hierarchy, session_stack, _event) do
-    {_, updated_hierarchy} = immediate_render(app_module, new_app_state, screen_rect, widget_hierarchy)
-    app_event_loop(app_module, new_app_state, screen_rect, timers, updated_hierarchy, session_stack)
-  end
+  defp apply_app_event_result({:ok, new_app_state}, ctx, _event, _already_routed?) do
+    {app_module, _app_state, screen_rect, timers, widget_hierarchy, session_stack} = ctx
 
-  defp apply_app_event_result({:stop, reason}, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, _event) do
-    handle_stop(reason, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
-  end
+    {_, updated_hierarchy} =
+      immediate_render(app_module, new_app_state, screen_rect, widget_hierarchy)
 
-  defp apply_app_event_result({:error, _reason}, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, _event) do
-    app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
-  end
-
-  defp apply_app_event_result({:show_modal, screen_module, props, opts}, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, _event) do
-    Drafter.ScreenManager.show_modal(screen_module, props, opts)
-    render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
-  end
-
-  defp apply_app_event_result({:show_toast, message, opts}, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, _event) do
-    Drafter.ScreenManager.show_toast(message, opts)
-    render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
-  end
-
-  defp apply_app_event_result({:push, screen_module, props, opts}, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, _event) do
-    Drafter.ScreenManager.push(screen_module, props, opts)
-    render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
-  end
-
-  defp apply_app_event_result({:replace, screen_module, props, opts}, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, _event) do
-    Drafter.ScreenManager.replace(screen_module, props, opts)
-    render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
-  end
-
-  defp apply_app_event_result({:pop, result}, app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack, _event) do
-    Drafter.ScreenManager.pop(result)
-    render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
-  end
-
-  defp apply_app_event_result({:noreply, new_app_state}, app_module, _app_state, screen_rect, timers, widget_hierarchy, session_stack, event) do
-    handle_noreply_with_hierarchy(
-      app_module, new_app_state, screen_rect, timers, widget_hierarchy, session_stack, event
+    app_event_loop(
+      app_module,
+      new_app_state,
+      screen_rect,
+      timers,
+      updated_hierarchy,
+      session_stack
     )
   end
 
-  defp render_screens_and_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack) do
+  defp apply_app_event_result({:stop, reason}, ctx, _event, _already_routed?) do
+    {app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack} = ctx
+
+    handle_stop(
+      reason,
+      app_module,
+      app_state,
+      screen_rect,
+      timers,
+      widget_hierarchy,
+      session_stack
+    )
+  end
+
+  defp apply_app_event_result({:error, _reason}, ctx, _event, _already_routed?) do
+    {app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack} = ctx
+    app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
+  end
+
+  defp apply_app_event_result(
+         {:show_modal, screen_module, props, opts},
+         ctx,
+         _event,
+         _already_routed?
+       ) do
+    Drafter.ScreenManager.show_modal(screen_module, props, opts)
+    render_screens_and_loop(ctx)
+  end
+
+  defp apply_app_event_result({:show_toast, message, opts}, ctx, _event, _already_routed?) do
+    Drafter.ScreenManager.show_toast(message, opts)
+    render_screens_and_loop(ctx)
+  end
+
+  defp apply_app_event_result({:push, screen_module, props, opts}, ctx, _event, _already_routed?) do
+    Drafter.ScreenManager.push(screen_module, props, opts)
+    render_screens_and_loop(ctx)
+  end
+
+  defp apply_app_event_result(
+         {:replace, screen_module, props, opts},
+         ctx,
+         _event,
+         _already_routed?
+       ) do
+    Drafter.ScreenManager.replace(screen_module, props, opts)
+    render_screens_and_loop(ctx)
+  end
+
+  defp apply_app_event_result({:pop, result}, ctx, _event, _already_routed?) do
+    Drafter.ScreenManager.pop(result)
+    render_screens_and_loop(ctx)
+  end
+
+  defp apply_app_event_result({:noreply, new_app_state}, ctx, event, already_routed?) do
+    {app_module, _app_state, screen_rect, timers, widget_hierarchy, session_stack} = ctx
+
+    handle_noreply_with_hierarchy(
+      app_module,
+      new_app_state,
+      screen_rect,
+      timers,
+      widget_hierarchy,
+      session_stack,
+      event,
+      already_routed?
+    )
+  end
+
+  defp render_screens_and_loop(
+         {app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack}
+       ) do
     Renderer.render_screens_from_manager(screen_rect, app_module, app_state, widget_hierarchy)
     app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
   end
@@ -542,15 +860,39 @@ defmodule Drafter.Runtime.AppLoop do
     if reason == :normal, do: :ok, else: {:error, reason}
   end
 
-  defp handle_stop(_reason, _app_module, _app_state, screen_rect, timers, widget_hierarchy, session_stack) do
-    {prev_module, prev_state, prev_hierarchy, prev_timers, prev_from, prev_ref, prev_handlers} = hd(session_stack)
+  defp handle_stop(
+         _reason,
+         _app_module,
+         _app_state,
+         screen_rect,
+         timers,
+         widget_hierarchy,
+         session_stack
+       ) do
+    {prev_module, prev_state, prev_hierarchy, prev_timers, prev_from, prev_ref, prev_handlers} =
+      hd(session_stack)
+
+    Drafter.Trace.log_sync(["Q pop_start ", Drafter.Trace.ts(), "\n"])
     cleanup_timers(timers)
     Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
+    Drafter.Trace.log_sync(["Q pop_servers_stopped ", Drafter.Trace.ts(), "\n"])
     Drafter.ScreenManager.reset()
     if prev_from, do: send(prev_from, {:session_result, prev_ref, :ok})
     Drafter.ActionRegistry.init(prev_handlers)
-    {_, restored_hierarchy} = Renderer.render_app(prev_module, prev_state, screen_rect, prev_hierarchy)
-    app_event_loop(prev_module, prev_state, screen_rect, prev_timers, restored_hierarchy, tl(session_stack))
+
+    {_, restored_hierarchy} =
+      Renderer.render_app(prev_module, prev_state, screen_rect, prev_hierarchy)
+
+    Drafter.Trace.log_sync(["Q pop_rendered ", Drafter.Trace.ts(), "\n"])
+
+    app_event_loop(
+      prev_module,
+      prev_state,
+      screen_rect,
+      prev_timers,
+      restored_hierarchy,
+      tl(session_stack)
+    )
   end
 
   defp handle_noreply_with_hierarchy(
@@ -560,10 +902,11 @@ defmodule Drafter.Runtime.AppLoop do
          timers,
          widget_hierarchy,
          session_stack,
-         event
+         event,
+         already_routed?
        ) do
     {new_hierarchy, widget_handled, needs_rerender, actions} =
-      resolve_hierarchy_event(widget_hierarchy, event)
+      resolve_hierarchy_event(widget_hierarchy, event, already_routed?)
 
     {needs_layout, layout_direction} = RenderCache.extract_layout_impact(actions)
 
@@ -582,25 +925,46 @@ defmodule Drafter.Runtime.AppLoop do
       Enum.reduce(actions, app_state, fn
         {:app_callback, callback, data}, acc_state ->
           dispatch_app_callback(app_module, callback, data, acc_state)
+
         _, acc_state ->
           acc_state
       end)
 
     if needs_rerender or widget_handled do
-      {_, final_hierarchy} = immediate_render(app_module, new_app_state, screen_rect, updated_hierarchy)
-      app_event_loop(app_module, new_app_state, screen_rect, timers, final_hierarchy, session_stack)
+      {_, final_hierarchy} =
+        immediate_render(app_module, new_app_state, screen_rect, updated_hierarchy)
+
+      app_event_loop(
+        app_module,
+        new_app_state,
+        screen_rect,
+        timers,
+        final_hierarchy,
+        session_stack
+      )
     else
-      app_event_loop(app_module, new_app_state, screen_rect, timers, updated_hierarchy, session_stack)
+      app_event_loop(
+        app_module,
+        new_app_state,
+        screen_rect,
+        timers,
+        updated_hierarchy,
+        session_stack
+      )
     end
   end
 
-  defp resolve_hierarchy_event(nil, _event), do: {nil, false, false, []}
+  defp resolve_hierarchy_event(widget_hierarchy, _event, true),
+    do: {widget_hierarchy, false, false, []}
 
-  defp resolve_hierarchy_event(widget_hierarchy, event) do
+  defp resolve_hierarchy_event(nil, _event, _already_routed?), do: {nil, false, false, []}
+
+  defp resolve_hierarchy_event(widget_hierarchy, event, _already_routed?) do
     case Drafter.WidgetHierarchy.handle_event(widget_hierarchy, event) do
       {hierarchy, []} ->
         changed = hierarchy.focused_widget != widget_hierarchy.focused_widget
         {hierarchy, changed, changed, []}
+
       {hierarchy, actions} ->
         {hierarchy, true, true, actions}
     end
@@ -625,14 +989,17 @@ defmodule Drafter.Runtime.AppLoop do
   defp extract_widget_value(%{text: text}), do: text
   defp extract_widget_value(%{checked: checked}), do: checked
   defp extract_widget_value(%{state: s}) when s in [:on, :off], do: s == :on
+
   defp extract_widget_value(%{selected_index: idx, options: options}),
     do: option_id_at(options, idx)
+
   defp extract_widget_value(%{selected_indices: indices, options: options}) do
     indices
     |> MapSet.to_list()
     |> Enum.map(&option_id_at(options, &1))
     |> Enum.reject(&is_nil/1)
   end
+
   defp extract_widget_value(%{expanded: expanded}), do: expanded
   defp extract_widget_value(%{active_tab: tab}), do: tab
   defp extract_widget_value(%{selected_rows: rows}), do: MapSet.to_list(rows)
@@ -771,8 +1138,40 @@ defmodule Drafter.Runtime.AppLoop do
     Runtime.for_app(app_module).scroll_idle(app_module, app_state)
   end
 
+  @doc false
+  @spec share_state_with(pid(), map()) :: :ok
+  def share_state_with(shared_state_pid, mount_props) do
+    Process.put(:drafter_shared_state, shared_state_pid)
+    Process.put(:drafter_mount_props, mount_props)
+    :ok
+  end
+
+  defp publish_shared_state(app_state) do
+    case Process.get(:drafter_shared_state) do
+      nil ->
+        :ok
+
+      pid ->
+        if Process.get(:drafter_shared_last) != app_state do
+          Process.put(:drafter_shared_last, app_state)
+          SharedState.update_state(pid, app_state)
+        end
+
+        :ok
+    end
+  end
+
   defp make_screen_rect(width, height) do
     %{x: 0, y: 0, width: width, height: height}
+  end
+
+  defp widget_center(nil, _widget_id), do: nil
+
+  defp widget_center(hierarchy, widget_id) do
+    case Map.get(hierarchy.widget_rects, widget_id) do
+      nil -> nil
+      rect -> {rect.x + div(rect.width, 2), rect.y + div(rect.height, 2)}
+    end
   end
 
   defp setup_frame_rate(app_module, opts) do
@@ -788,28 +1187,7 @@ defmodule Drafter.Runtime.AppLoop do
     Process.delete(:render_deferred)
   end
 
-  defp parse_refresh_rate(:unlimited), do: nil
-  defp parse_refresh_rate(n) when is_integer(n) and n > 0, do: n
-
-  defp parse_refresh_rate(s) when is_binary(s) do
-    cond do
-      s == "unlimited" ->
-        nil
-
-      Regex.match?(~r/^\d+(\.\d+)?\s*fps$/i, s) ->
-        [fps_str] = Regex.run(~r/[\d.]+/, s)
-
-        fps =
-          if String.contains?(fps_str, "."),
-            do: String.to_float(fps_str),
-            else: String.to_integer(fps_str)
-
-        round(1000 / fps)
-
-      true ->
-        raise ArgumentError, "invalid refresh_rate: #{inspect(s)}"
-    end
-  end
+  defp parse_refresh_rate(rate), do: FrameClock.interval_for(rate)
 
   defp collect_pending_intervals do
     pending = Process.delete(:pending_intervals) || []
@@ -826,6 +1204,13 @@ defmodule Drafter.Runtime.AppLoop do
       {nil, hierarchy}
     else
       do_render(app_module, app_state, screen_rect, hierarchy)
+    end
+  end
+
+  defp schedule_coalesced_render do
+    unless Process.get(:coalesced_render_scheduled) do
+      Process.put(:coalesced_render_scheduled, true)
+      send(self(), :coalesced_render)
     end
   end
 
@@ -852,13 +1237,6 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp schedule_coalesced_render do
-    unless Process.get(:coalesced_render_scheduled) do
-      Process.put(:coalesced_render_scheduled, true)
-      send(self(), :coalesced_render)
-    end
-  end
-
   defp pending_messages? do
     case Process.info(self(), :message_queue_len) do
       {:message_queue_len, len} -> len > 0
@@ -873,7 +1251,7 @@ defmodule Drafter.Runtime.AppLoop do
 
       interval ->
         now = System.monotonic_time(:millisecond)
-        last = Process.get(:last_render_ms, 0)
+        last = Process.get(:last_render_ms) || now - interval
 
         if now - last >= interval do
           Process.put(:last_render_ms, now)
@@ -893,9 +1271,11 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
+  @divider_fields [:dragging, :drag_start_pos, :orientation, :fixed_pos, :ratio, :total_size]
+
   defp move_divider_rect(hierarchy) do
     Enum.reduce(hierarchy.widgets, hierarchy, fn {widget_id, widget_info}, acc ->
-      state = widget_info.state
+      state = divider_state(widget_info)
 
       if widget_info.module == SplitPaneDivider and
            Map.get(state, :dragging, false) do
@@ -905,6 +1285,12 @@ defmodule Drafter.Runtime.AppLoop do
       end
     end)
   end
+
+  defp divider_state(%{module: SplitPaneDivider, pid: pid}) when is_pid(pid) do
+    Drafter.WidgetServer.get_state_fields(pid, @divider_fields)
+  end
+
+  defp divider_state(widget_info), do: widget_info.state
 
   defp apply_divider_delta(hierarchy, widget_id, state) do
     current_rect = Map.get(hierarchy.widget_rects, widget_id)
@@ -962,7 +1348,8 @@ defmodule Drafter.Runtime.AppLoop do
     Process.put(:render_cache_layout_dirty, true)
   end
 
-  defp scoped_invalidate_for_layout(direction, screen_rect) when direction in [:self, :below, :above, :left, :right, :parent] do
+  defp scoped_invalidate_for_layout(direction, screen_rect)
+       when direction in [:self, :below, :above, :left, :right, :parent] do
     Process.put(:render_cache_layout_dirty, true)
     Process.put(:render_cache_layout_direction, direction)
     Process.put(:render_cache_layout_rect, screen_rect)

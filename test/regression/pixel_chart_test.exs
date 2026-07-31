@@ -55,6 +55,7 @@ defmodule Drafter.Regression.PixelChartTest do
       pixel = Chart.mount(%{data: data, chart_type: type, renderer: :iterm2})
 
       assert {paint, "", %{cols: _, rows: _}} = Chart.image(pixel, rect, type)
+
       assert (is_binary(paint) or is_list(paint)) and IO.iodata_length(paint) > 0,
              "no image bytes for #{type}"
 
@@ -126,7 +127,9 @@ defmodule Drafter.Regression.PixelChartTest do
     state = PieChart.mount(%{data: [{"A", 30}, {"B", 50}, {"C", 20}], renderer: :iterm2})
     rect = %{x: 0, y: 0, width: 40, height: 12}
 
-    assert {paint, "", %{dx: 0, dy: 0, cols: cols, rows: 12}} = PieChart.image(state, rect, :pie_a)
+    assert {paint, "", %{dx: 0, dy: 0, cols: cols, rows: 12}} =
+             PieChart.image(state, rect, :pie_a)
+
     assert (is_binary(paint) or is_list(paint)) and IO.iodata_length(paint) > 0
     assert cols <= 40
 

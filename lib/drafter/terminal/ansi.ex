@@ -5,6 +5,11 @@ defmodule Drafter.Terminal.ANSI do
   @type modifiers :: [atom()]
   @type event :: {:key, key()} | {:key, key(), modifiers()} | {:mouse, map()} | :unknown
 
+  # A reply the terminal sends back — a kitty graphics acknowledgement, an answer to an OSC
+  # query — opens one of these and runs to a string terminator. Undecoded it reaches the
+  # application as whatever it happens to spell: `\e_Gi=1;OK\e\\` arrives as ten keystrokes.
+  @string_openers ~c"_P]X^"
+
   @key_sequences %{
     "\e[A" => {:key, :up},
     "\e[B" => {:key, :down},
@@ -50,7 +55,6 @@ defmodule Drafter.Terminal.ANSI do
     "\x06" => {:key, :f, [:ctrl]},
     "\x07" => {:key, :g, [:ctrl]},
     "\x08" => {:key, :h, [:ctrl]},
-    #    "\x08" => {:key, :backspace},
     "\x09" => {:key, :tab},
     "\x0a" => {:key, :enter},
     "\x0b" => {:key, :k, [:ctrl]},
@@ -72,82 +76,159 @@ defmodule Drafter.Terminal.ANSI do
     "\x7f" => {:key, :backspace}
   }
 
-  @doc "Parse input buffer into events and remaining buffer."
+  @doc """
+  Parse an input buffer into events plus the bytes that could not yet be decided.
+
+  A trailing sequence that is only partially received — an unterminated
+  bracketed paste, a CSI awaiting its final byte, a split UTF-8 codepoint — is
+  returned in the remaining buffer. Callers must carry that remainder into the
+  next call.
+  """
   @spec parse_sequence(binary()) :: {[event()], binary()}
-  def parse_sequence(buffer) do
-    parse_sequence(buffer, [])
-  end
+  def parse_sequence(buffer), do: do_parse(buffer, [], :partial)
 
-  defp parse_sequence("", events), do: {Enum.reverse(events), ""}
+  @doc """
+  Parse an input buffer, resolving any trailing ambiguity instead of retaining it.
 
-  defp parse_sequence(buffer, events) do
+  Call this when no further bytes are expected — after an escape timeout, or when
+  the input stream closes. A lone `ESC` becomes the escape key, and an
+  unterminated bracketed paste is delivered with the content received so far.
+  """
+  @spec flush_sequence(binary()) :: {[event()], binary()}
+  def flush_sequence(buffer), do: do_parse(buffer, [], :flush)
+
+  defp do_parse("", events, _mode), do: {Enum.reverse(events), ""}
+
+  defp do_parse(buffer, events, mode) do
     case parse_bracketed_paste(buffer) do
-      {:bracketed_paste, content, rest} -> parse_sequence(rest, [{:bracketed_paste, content} | events])
-      :no_match -> parse_sequence_match(buffer, events)
+      {:bracketed_paste, content, rest} ->
+        do_parse(rest, [{:bracketed_paste, content} | events], mode)
+
+      {:incomplete, partial} ->
+        resolve_incomplete_paste(buffer, partial, events, mode)
+
+      :no_match ->
+        parse_sequence_match(buffer, events, mode)
     end
   end
 
-  defp parse_sequence_match(buffer, events) do
-    case find_longest_match(buffer) do
-      {:ignore, rest} -> parse_sequence(rest, events)
-      {event, rest} -> parse_sequence(rest, [event | events])
-      :no_match -> parse_sequence_char(buffer, events)
+  defp resolve_incomplete_paste(buffer, _partial, events, :partial) do
+    {Enum.reverse(events), buffer}
+  end
+
+  defp resolve_incomplete_paste(_buffer, partial, events, :flush) do
+    {Enum.reverse([{:bracketed_paste, partial} | events]), ""}
+  end
+
+  defp parse_sequence_match(buffer, events, mode) do
+    if mode == :partial and incomplete_sequence?(buffer) do
+      {Enum.reverse(events), buffer}
+    else
+      case find_longest_match(buffer) do
+        {:ignore, rest} -> do_parse(rest, events, mode)
+        {event, rest} -> do_parse(rest, [event | events], mode)
+        :no_match -> parse_sequence_char(buffer, events, mode)
+      end
     end
   end
 
-  defp parse_sequence_char(<<char::utf8, rest::binary>>, events) when char >= 32 and char <= 126 do
-    parse_sequence(rest, [{:key, String.to_atom(<<char::utf8>>)} | events])
+  @doc """
+  Whether the buffer ends in a control sequence that has not fully arrived.
+
+  A lone `ESC` counts as incomplete: it is indistinguishable from the start of a
+  sequence still in flight, so the caller must resolve it on a timeout via
+  `flush_sequence/1`.
+  """
+  @spec incomplete_sequence?(binary()) :: boolean()
+  def incomplete_sequence?("\e"), do: true
+  def incomplete_sequence?(<<"\e[", rest::binary>>), do: csi_unterminated?(rest)
+  def incomplete_sequence?("\eO"), do: true
+
+  def incomplete_sequence?(<<"\e", opener, rest::binary>>) when opener in @string_openers,
+    do: string_terminator(rest) == :none
+
+  def incomplete_sequence?(_buffer), do: false
+
+  defp csi_unterminated?(<<>>), do: true
+
+  defp csi_unterminated?(<<byte, rest::binary>>) when byte >= 0x20 and byte <= 0x3F do
+    csi_unterminated?(rest)
   end
 
-  defp parse_sequence_char(<<char::utf8, rest::binary>>, events) do
-    parse_sequence(rest, [{:char, char} | events])
+  defp csi_unterminated?(_rest), do: false
+
+  defp parse_sequence_char(<<char::utf8, rest::binary>>, events, mode)
+       when char >= 32 and char <= 126 do
+    do_parse(rest, [{:key, printable_key(char)} | events], mode)
   end
 
-  defp parse_sequence_char(incomplete, events) do
+  defp parse_sequence_char(<<char::utf8, rest::binary>>, events, mode) do
+    do_parse(rest, [{:char, char} | events], mode)
+  end
+
+  defp parse_sequence_char(incomplete, events, _mode) do
     {Enum.reverse(events), incomplete}
   end
 
-  defp parse_bracketed_paste(buffer) do
-    start_seq = "\e[200~"
-    end_seq = "\e[201~"
+  for char <- 32..126 do
+    key = String.to_atom(<<char::utf8>>)
+    defp printable_key(unquote(char)), do: unquote(key)
+  end
 
-    if String.starts_with?(buffer, start_seq) do
-      <<_::binary-size(byte_size(start_seq)), after_start::binary>> = buffer
+  @paste_start "\e[200~"
+  @paste_end "\e[201~"
 
-      case :binary.match(after_start, end_seq) do
-        {pos, _len} ->
-          content = binary_part(after_start, 0, pos)
-          rest = binary_part(after_start, pos + byte_size(end_seq), byte_size(after_start) - pos - byte_size(end_seq))
-          {:bracketed_paste, content, rest}
+  defp parse_bracketed_paste(<<@paste_start, after_start::binary>>) do
+    case :binary.match(after_start, @paste_end) do
+      {pos, _len} ->
+        content = binary_part(after_start, 0, pos)
+        tail_start = pos + byte_size(@paste_end)
+        rest = binary_part(after_start, tail_start, byte_size(after_start) - tail_start)
+        {:bracketed_paste, content, rest}
 
-        :nomatch ->
-          :no_match
-      end
-    else
-      :no_match
+      :nomatch ->
+        {:incomplete, after_start}
     end
   end
+
+  defp parse_bracketed_paste(_buffer), do: :no_match
 
   defp find_longest_match(buffer) do
     case parse_mouse_event(buffer) do
-      {mouse_event, rest} ->
-        {mouse_event, rest}
-
-      :no_match ->
-        @key_sequences
-        |> Enum.filter(fn {seq, _event} -> String.starts_with?(buffer, seq) end)
-        |> Enum.max_by(fn {seq, _event} -> byte_size(seq) end, fn -> nil end)
-        |> case do
-          {seq, event} ->
-            seq_len = byte_size(seq)
-            <<_::binary-size(seq_len), rest::binary>> = buffer
-            {event, rest}
-
-          nil ->
-            :no_match
-        end
+      {mouse_event, rest} -> {mouse_event, rest}
+      :no_match -> parse_string_sequence(buffer) || match_key_sequence(buffer)
     end
   end
+
+  defp parse_string_sequence(<<"\e", opener, rest::binary>>) when opener in @string_openers do
+    case string_terminator(rest) do
+      {:ok, remainder} -> {:ignore, remainder}
+      :none -> nil
+    end
+  end
+
+  defp parse_string_sequence(_buffer), do: nil
+
+  # ST ends any of them; OSC is also allowed to end at BEL.
+  defp string_terminator(binary) do
+    case :binary.match(binary, ["\e\\", "\a"]) do
+      {index, length} ->
+        start = index + length
+        {:ok, binary_part(binary, start, byte_size(binary) - start)}
+
+      :nomatch ->
+        :none
+    end
+  end
+
+  for {sequence, event} <-
+        Enum.sort_by(@key_sequences, fn {seq, _} -> byte_size(seq) end, :desc) do
+    defp match_key_sequence(unquote(sequence) <> rest) do
+      {unquote(Macro.escape(event)), rest}
+    end
+  end
+
+  defp match_key_sequence(_buffer), do: :no_match
 
   defp parse_mouse_event(buffer) do
     parse_mouse_sgr(buffer) ||
@@ -168,7 +249,9 @@ defmodule Drafter.Terminal.ANSI do
     case Regex.run(~r/^\e\[<(\d+);(\d+);(\d+)([Mm])/, buffer) do
       [full_match, button_str, x_str, y_str, action_char] ->
         parse_sgr_mouse_event(buffer, full_match, button_str, x_str, y_str, action_char)
-      nil -> nil
+
+      nil ->
+        nil
     end
   end
 
@@ -176,7 +259,9 @@ defmodule Drafter.Terminal.ANSI do
     case Regex.run(~r/^\e\[<(\d+);(\d+);(\d+)H/, buffer) do
       [full_match, button_str, x_str, y_str] ->
         parse_sgr_mouse_event(buffer, full_match, button_str, x_str, y_str, "M")
-      nil -> nil
+
+      nil ->
+        nil
     end
   end
 
@@ -184,7 +269,9 @@ defmodule Drafter.Terminal.ANSI do
     case Regex.run(~r/^\e\[(\d+);(\d+);(\d+)([Mm])/, buffer) do
       [full_match, button_str, x_str, y_str, action_char] ->
         parse_legacy_mouse_event(buffer, full_match, button_str, x_str, y_str, action_char)
-      nil -> nil
+
+      nil ->
+        nil
     end
   end
 
@@ -218,6 +305,9 @@ defmodule Drafter.Terminal.ANSI do
     build_mouse_result(buffer, full_match, button, x, y, type, extra)
   end
 
+  defp classify_mouse_action(button, "m", _format) when button >= 64 and button <= 67,
+    do: {:ignore, nil}
+
   defp classify_mouse_action(button, _action_char, _format) when button >= 64 and button <= 67,
     do: {:scroll, scroll_direction(button)}
 
@@ -243,6 +333,10 @@ defmodule Drafter.Terminal.ANSI do
   defp scroll_direction(66), do: :right
   defp scroll_direction(67), do: :left
 
+  defp build_mouse_result(buffer, full_match, _button, _x, _y, :ignore, _extra) do
+    {:ignore, String.slice(buffer, String.length(full_match)..-1//1)}
+  end
+
   defp build_mouse_result(buffer, full_match, button, x, y, type, extra) do
     payload = build_mouse_payload(button, x, y, type, extra)
     rest = String.slice(buffer, String.length(full_match)..-1//1)
@@ -258,7 +352,13 @@ defmodule Drafter.Terminal.ANSI do
   end
 
   defp build_mouse_payload(button, x, y, type, _extra) do
-    %{type: type, button: parse_mouse_button(button), x: x, y: y, modifiers: parse_mouse_modifiers(button)}
+    %{
+      type: type,
+      button: parse_mouse_button(button),
+      x: x,
+      y: y,
+      modifiers: parse_mouse_modifiers(button)
+    }
   end
 
   defp parse_mouse_button(button) when button >= 64 and button <= 67, do: :scroll

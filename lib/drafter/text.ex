@@ -1,11 +1,28 @@
 defmodule Drafter.Text do
   @moduledoc """
-  Unicode-aware text layout utilities for terminal rendering.
+  Unicode-aware text layout for terminal rendering.
 
-  Provides wrapping, truncation, ellipsis, display-width measurement, and
-  padding operations that correctly handle multi-byte graphemes and
-  double-width CJK characters. All width calculations operate in terminal
-  display columns, not byte or codepoint counts.
+  Wrapping, truncation, ellipsis, display-width measurement, and padding, all
+  handling multi-byte graphemes and double-width CJK characters. Widths are in
+  terminal display columns, not bytes or codepoints.
+
+  ## Examples
+
+      iex> Drafter.Text.display_width("漢字")
+      4
+
+      iex> Drafter.Text.wrap("the quick brown fox", 9, :word)
+      ["the quick", "brown fox"]
+
+      iex> Drafter.Text.truncate("abcdef", 3)
+      "abc"
+
+      iex> Drafter.Text.ellipsize("abcdef", 4)
+      "abc…"
+
+      iex> Drafter.Text.pad_center("hi", 6, ".")
+      "..hi.."
+
   """
 
   @type wrap_mode :: :none | :char | :word
@@ -112,17 +129,28 @@ defmodule Drafter.Text do
   defp wrap_line_char("", _width), do: [""]
 
   defp wrap_line_char(line, width) do
-    line
-    |> String.graphemes()
-    |> chunk_by_width(width)
+    if fits?(line, width) do
+      [line]
+    else
+      line
+      |> String.graphemes()
+      |> chunk_by_width(width)
+    end
   end
 
   defp wrap_line_word("", _width), do: [""]
 
   defp wrap_line_word(line, width) do
-    words = split_into_words(line)
-    wrap_words(words, width, [], "")
+    if fits?(line, width) do
+      [line]
+    else
+      line
+      |> split_into_words()
+      |> wrap_words(width, [], "")
+    end
   end
+
+  defp fits?(line, width), do: display_width(line) <= width
 
   defp split_into_words(line) do
     ~r/(\s+|\S+)/

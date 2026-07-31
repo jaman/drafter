@@ -66,7 +66,9 @@ defmodule Drafter.Widget.Trait.PipelineTest do
 
     test "consume stops pipeline and sets consumed flag" do
       state = %{_consumed: false, _counter: 0}
-      {new_state, consumed?} = Pipeline.run_traits([ConsumerTrait, CounterTrait], {:key, :up}, state)
+
+      {new_state, consumed?} =
+        Pipeline.run_traits([ConsumerTrait, CounterTrait], {:key, :up}, state)
 
       assert new_state._consumed == true
       assert new_state._counter == 0
@@ -75,7 +77,9 @@ defmodule Drafter.Widget.Trait.PipelineTest do
 
     test "traits process in declaration order" do
       state = %{_counter: 0, _consumed: false}
-      {new_state, consumed?} = Pipeline.run_traits([CounterTrait, ConsumerTrait], {:key, :up}, state)
+
+      {new_state, consumed?} =
+        Pipeline.run_traits([CounterTrait, ConsumerTrait], {:key, :up}, state)
 
       assert new_state._counter == 1
       assert new_state._consumed == true

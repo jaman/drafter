@@ -59,34 +59,35 @@ defmodule Drafter.Style.Selector do
   end
 
   defp extract_widget_type(str) do
-    case Regex.run(~r/^([a-z][a-z0-9_]*)/, str) do
-      [match, type] -> {safe_to_atom(type), String.replace_prefix(str, match, "")}
-      _ -> {nil, str}
+    case Regex.run(~r/^([A-Za-z][A-Za-z0-9_]*)/, str) do
+      [match, type] ->
+        {name_or_atom(Macro.underscore(type)), String.replace_prefix(str, match, "")}
+
+      _ ->
+        {nil, str}
     end
   end
 
   defp extract_id(str) do
-    case Regex.run(~r/^#([a-z][a-z0-9_]*)/, str) do
-      [match, id] -> {safe_to_atom(id), String.replace_prefix(str, match, "")}
+    case Regex.run(~r/^#([A-Za-z_][A-Za-z0-9_]*)/, str) do
+      [match, id] -> {name_or_atom(id), String.replace_prefix(str, match, "")}
       _ -> {nil, str}
     end
   end
 
   defp extract_classes(str) do
-    case Regex.scan(~r/\.([a-z][a-z0-9_-]*)/, str) do
+    case Regex.scan(~r/\.([A-Za-z][A-Za-z0-9_-]*)/, str) do
       [] ->
         {[], str}
 
       matches ->
-        classes =
-          matches
-          |> Enum.map(fn [_, class] -> safe_to_atom(class) end)
-          |> Enum.reject(&is_nil/1)
-
-        cleaned = Regex.replace(~r/\.[a-z][a-z0-9_-]*/, str, "")
+        classes = Enum.map(matches, fn [_, class] -> name_or_atom(class) end)
+        cleaned = Regex.replace(~r/\.[A-Za-z][A-Za-z0-9_-]*/, str, "")
         {classes, cleaned}
     end
   end
+
+  defp name_or_atom(name), do: safe_to_atom(name) || name
 
   defp extract_pseudo_classes(str) do
     case Regex.scan(~r/(?<!:):([a-z]+)/, str) do
@@ -126,20 +127,39 @@ defmodule Drafter.Style.Selector do
   end
 
   defp matches_widget_type?(%{widget_type: nil}, _context), do: true
-  defp matches_widget_type?(%{widget_type: type}, %{widget_type: type}), do: true
-  defp matches_widget_type?(_, _), do: false
+
+  defp matches_widget_type?(%{widget_type: type}, context),
+    do: same_name?(type, Map.get(context, :widget_type))
 
   defp matches_id?(%{id: nil}, _context), do: true
-  defp matches_id?(%{id: id}, %{id: id}), do: true
-  defp matches_id?(_, _), do: false
+  defp matches_id?(%{id: id}, context), do: same_name?(id, Map.get(context, :id))
 
   defp matches_classes?(%{classes: []}, _context), do: true
 
   defp matches_classes?(%{classes: selector_classes}, %{classes: context_classes}) do
-    Enum.all?(selector_classes, &(&1 in context_classes))
+    Enum.all?(selector_classes, fn class ->
+      Enum.any?(context_classes, &same_name?(class, &1))
+    end)
   end
 
   defp matches_classes?(_, _), do: false
+
+  @doc """
+  Whether two selector tokens name the same thing, comparing atoms and strings alike.
+
+  A token stays a string when its atom does not exist yet — a widget type whose module
+  has not been loaded, or an id belonging to a widget that has not rendered. Comparing
+  by name means such a selector matches what it names and nothing else, rather than
+  collapsing to `nil` and matching everything.
+  """
+  @spec same_name?(term(), term()) :: boolean()
+  def same_name?(nil, _other), do: false
+  def same_name?(_token, nil), do: false
+  def same_name?(token, other), do: to_name(token) == to_name(other)
+
+  defp to_name(value) when is_atom(value), do: Atom.to_string(value)
+  defp to_name(value) when is_binary(value), do: value
+  defp to_name(value), do: inspect(value)
 
   defp matches_pseudo_classes?(%{pseudo_classes: []}, _context), do: true
 

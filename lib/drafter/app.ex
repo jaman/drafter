@@ -91,9 +91,7 @@ defmodule Drafter.App do
 
       def mount(_props), do: %{}
       def render(_state), do: []
-      def handle_event(_event, state), do: {:noreply, state}
       def on_ready(state), do: state
-      def on_timer(_timer_id, state), do: state
       def unmount(_state), do: :ok
       def keybindings, do: []
       defoverridable keybindings: 0
@@ -106,25 +104,36 @@ defmodule Drafter.App do
 
       defoverridable mount: 1,
                      render: 1,
-                     handle_event: 2,
                      on_ready: 1,
-                     on_timer: 2,
                      unmount: 1
     end
   end
 
+  @doc """
+  Appends the catch-all `handle_event/2` and `on_timer/2` clauses after every clause the app defined.
+  """
   defmacro __before_compile__(env) do
     hints = Module.get_attribute(env.module, :keybinding_hints)
-    if hints != [] do
-      quote do
-        def keybindings, do: Enum.reverse(@keybinding_hints)
+
+    keybindings =
+      if hints != [] do
+        quote do
+          def keybindings, do: Enum.reverse(@keybinding_hints)
+        end
       end
+
+    quote do
+      unquote(keybindings)
+
+      def handle_event(_event, state), do: {:noreply, state}
+      def on_timer(_timer_id, state), do: state
     end
   end
 
   defmacro keybinding(key_spec, hint, do: body) do
     pattern = build_key_pattern(key_spec)
     display = build_key_hint(key_spec)
+
     quote do
       @keybinding_hints [{unquote(display), unquote(hint)} | @keybinding_hints]
       def handle_event(unquote(pattern), var!(state)) do
@@ -157,7 +166,7 @@ defmodule Drafter.App do
   defp key_label(:escape), do: "Esc"
   defp key_label(:enter), do: "Enter"
   defp key_label(:tab), do: "Tab"
-  defp key_label(:space), do: "Space"
+  defp key_label(:" "), do: "Space"
   defp key_label(:backspace), do: "Backspace"
   defp key_label(:delete), do: "Delete"
   defp key_label(:up), do: "↑"

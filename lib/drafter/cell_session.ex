@@ -46,7 +46,10 @@ defmodule Drafter.CellSession do
 
     {:ok, driver} = Driver.start_link({width, height})
     {:ok, em} = Event.Manager.start_link(name: nil)
-    {:ok, comp} = Compositor.start_link(name: nil, terminal_driver: {Driver, driver}, event_manager: em)
+
+    {:ok, comp} =
+      Compositor.start_link(name: nil, terminal_driver: {Driver, driver}, event_manager: em)
+
     {:ok, tm} = ThemeManager.start_link(name: nil)
     {:ok, eh} = EventHandler.start_link(name: nil)
     {:ok, sm} = ScreenManager.start_link(name: nil, event_handler: eh)

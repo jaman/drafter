@@ -35,22 +35,24 @@ defmodule Drafter.WidgetHierarchy.Query do
 
   def matches_type?(_module, nil), do: true
 
-  def matches_type?(module, type) when is_atom(type) do
-    type_name = module_to_type_name(module)
-    type_name == type
+  def matches_type?(module, type) do
+    Style.Selector.same_name?(module_to_type_name(module), type)
   end
 
   def matches_id?(_widget_id, nil), do: true
 
-  def matches_id?(widget_id, id) when is_atom(id) do
-    widget_id == id
+  def matches_id?(widget_id, id) do
+    Style.Selector.same_name?(widget_id, id)
   end
 
   def matches_classes?(_state, []), do: true
 
   def matches_classes?(state, classes) do
     widget_classes = Map.get(state, :classes, [])
-    Enum.all?(classes, &(&1 in widget_classes))
+
+    Enum.all?(classes, fn class ->
+      Enum.any?(widget_classes, &Style.Selector.same_name?(class, &1))
+    end)
   end
 
   def module_to_type_name(module) do

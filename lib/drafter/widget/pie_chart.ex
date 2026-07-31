@@ -144,15 +144,16 @@ defmodule Drafter.Widget.PieChart do
 
   @impl Drafter.Widget
   def update(props, state) do
-    %{state |
-      data: Map.get(props, :data, state.data),
-      show_legend: Map.get(props, :show_legend, state.show_legend),
-      show_percentages: Map.get(props, :show_percentages, state.show_percentages),
-      colors: Map.get(props, :colors, state.colors),
-      style: Map.get(props, :style, state.style),
-      classes: Map.get(props, :classes, state.classes),
-      app_module: Map.get(props, :app_module, state.app_module),
-      renderer: Map.get(props, :renderer, state.renderer)
+    %{
+      state
+      | data: Map.get(props, :data, state.data),
+        show_legend: Map.get(props, :show_legend, state.show_legend),
+        show_percentages: Map.get(props, :show_percentages, state.show_percentages),
+        colors: Map.get(props, :colors, state.colors),
+        style: Map.get(props, :style, state.style),
+        classes: Map.get(props, :classes, state.classes),
+        app_module: Map.get(props, :app_module, state.app_module),
+        renderer: Map.get(props, :renderer, state.renderer)
     }
   end
 
@@ -222,7 +223,12 @@ defmodule Drafter.Widget.PieChart do
       slices
       |> Enum.map(fn slice ->
         base = String.length("  #{slice.label}")
-        pct = if state.show_percentages, do: String.length(" (#{format_pct(slice.percentage)})"), else: 0
+
+        pct =
+          if state.show_percentages,
+            do: String.length(" (#{format_pct(slice.percentage)})"),
+            else: 0
+
         base + pct
       end)
       |> Enum.max(fn -> 0 end)
@@ -241,9 +247,9 @@ defmodule Drafter.Widget.PieChart do
     angles = build_angles(slices)
     braille_map = build_braille_map(cx, cy, radius, dots_w, dots_h, angles)
 
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       segments =
-        Enum.map(0..(width - 1), fn col ->
+        Enum.map(0..(width - 1)//1, fn col ->
           render_braille_cell(braille_map, col, row, bg)
         end)
 
@@ -331,7 +337,7 @@ defmodule Drafter.Widget.PieChart do
   defp render_legend(slices, state, legend_width, chart_height, bg) do
     legend_start_row = max(0, div(chart_height - length(slices), 2))
 
-    for row <- 0..(chart_height - 1) do
+    for row <- 0..(chart_height - 1)//1 do
       slice_idx = row - legend_start_row
 
       if slice_idx >= 0 and slice_idx < length(slices) do
@@ -396,7 +402,9 @@ defmodule Drafter.Widget.PieChart do
     current = length(strips)
 
     if current < target_height do
-      padding = for _ <- 1..(target_height - current), do: Strip.new([Segment.new(" ", %{bg: bg})])
+      padding =
+        for _ <- 1..(target_height - current), do: Strip.new([Segment.new(" ", %{bg: bg})])
+
       strips ++ padding
     else
       Enum.take(strips, target_height)

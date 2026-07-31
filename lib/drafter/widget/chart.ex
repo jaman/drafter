@@ -124,7 +124,18 @@ defmodule Drafter.Widget.Chart do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
-  alias Drafter.Widget.Chart.{Area, Bar, BrailleArea, Bubble, Candlestick, Heatmap, Histogram, Pixel}
+
+  alias Drafter.Widget.Chart.{
+    Area,
+    Bar,
+    BrailleArea,
+    Bubble,
+    Candlestick,
+    Heatmap,
+    Histogram,
+    Pixel
+  }
+
   alias Drafter.Widget.Chart.{Line, MultiSeries, Scatter, Step}
 
   @type chart_type ::
@@ -251,10 +262,19 @@ defmodule Drafter.Widget.Chart do
   def handle_key(:ArrowLeft, state), do: scroll_left(state)
   def handle_key(:right, state), do: scroll_right(state)
   def handle_key(:ArrowRight, state), do: scroll_right(state)
-  def handle_key(:up, state), do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) + 1)}
-  def handle_key(:ArrowUp, state), do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) + 1)}
-  def handle_key(:down, state), do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) - 1)}
-  def handle_key(:ArrowDown, state), do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) - 1)}
+
+  def handle_key(:up, state),
+    do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) + 1)}
+
+  def handle_key(:ArrowUp, state),
+    do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) + 1)}
+
+  def handle_key(:down, state),
+    do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) - 1)}
+
+  def handle_key(:ArrowDown, state),
+    do: {:ok, update_internal(state, y_offset: (state._internal.y_offset || 0) - 1)}
+
   def handle_key(?c, state), do: {:ok, update_internal(state, y_offset: 0)}
   def handle_key(_key, state), do: {:bubble, state}
 
@@ -350,6 +370,8 @@ defmodule Drafter.Widget.Chart do
   end
 
   @impl Drafter.Widget
+  def render(_state, %{width: width}) when width <= 0, do: []
+
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
@@ -396,7 +418,9 @@ defmodule Drafter.Widget.Chart do
 
     axis_label_width = if state.show_axes, do: compute_y_axis_width(state), else: 0
     chart_height = if state.show_axes, do: max(1, rect.height - 2), else: rect.height
-    chart_width = if state.show_axes, do: max(1, rect.width - axis_label_width - 1), else: rect.width
+
+    chart_width =
+      if state.show_axes, do: max(1, rect.width - axis_label_width - 1), else: rect.width
 
     animation_offset =
       if state.animated do
@@ -505,18 +529,30 @@ defmodule Drafter.Widget.Chart do
         orientation: Map.get(props, :orientation, state.orientation),
         bar_labels: Map.get(props, :bar_labels, state.bar_labels),
         show_values: Map.get(props, :show_values, state.show_values),
+        fill_opacity: Map.get(props, :fill_opacity, state.fill_opacity),
+        show_baseline: Map.get(props, :show_baseline, state.show_baseline),
+        zero_center: Map.get(props, :zero_center, state.zero_center),
         _internal:
           Map.merge(state._internal, %{
             precision: Map.get(props, :precision, state._internal[:precision] || 3),
-            render_timestamp: Map.get(props, :_render_timestamp, state._internal.render_timestamp),
+            render_timestamp:
+              Map.get(props, :_render_timestamp, state._internal.render_timestamp),
             live_candle: live_candle,
             data_tuple: new_tuple,
-            data_hash: new_hash
+            data_hash: new_hash,
+            renderer: Map.get(props, :renderer, state._internal[:renderer]),
+            smooth: Map.get(props, :smooth, state._internal[:smooth]),
+            line_thickness: Map.get(props, :line_thickness, state._internal[:line_thickness]),
+            connect_lines: Map.get(props, :connect_lines, state._internal[:connect_lines]),
+            raw_data: Map.get(props, :raw_data, state._internal[:raw_data]),
+            image_scale: Map.get(props, :image_scale, state._internal[:image_scale])
           })
     }
   end
 
-  defp apply_axes(strips, %{show_axes: true} = state, rect, bg, fg), do: add_axes(strips, state, rect, bg, fg)
+  defp apply_axes(strips, %{show_axes: true} = state, rect, bg, fg),
+    do: add_axes(strips, state, rect, bg, fg)
+
   defp apply_axes(strips, _state, _rect, _bg, _fg), do: strips
 
   defp apply_title(strips, %{title: title}, rect, bg, fg) when is_binary(title) and title != "",
@@ -541,25 +577,46 @@ defmodule Drafter.Widget.Chart do
     dispatch_chart_v(state.chart_type, state, w, h, bg, fg, anim)
   end
 
-  defp dispatch_chart_v(:braille_area, state, w, h, bg, _fg, _anim), do: BrailleArea.render(state, w, h, bg)
-  defp dispatch_chart_v(:bar, s, w, h, bg, fg, _a), do: {Bar.render_bar_chart_v(s, w, h, bg, fg), s}
-  defp dispatch_chart_v(:clustered_bar, s, w, h, bg, _fg, _a), do: {Bar.render_clustered_bar(s, w, h, bg), s}
-  defp dispatch_chart_v(:stacked_bar, s, w, h, bg, _fg, _a), do: {Bar.render_stacked_bar(s, w, h, bg), s}
-  defp dispatch_chart_v(:range_bar, s, w, h, bg, fg, _a), do: {Bar.render_range_bar(s, w, h, bg, fg), s}
-  defp dispatch_chart_v(:candlestick, s, w, h, bg, fg, _a), do: {Candlestick.render(s, w, h, bg, fg), s}
+  defp dispatch_chart_v(:braille_area, state, w, h, bg, _fg, _anim),
+    do: BrailleArea.render(state, w, h, bg)
+
+  defp dispatch_chart_v(:bar, s, w, h, bg, fg, _a),
+    do: {Bar.render_bar_chart_v(s, w, h, bg, fg), s}
+
+  defp dispatch_chart_v(:clustered_bar, s, w, h, bg, _fg, _a),
+    do: {Bar.render_clustered_bar(s, w, h, bg), s}
+
+  defp dispatch_chart_v(:stacked_bar, s, w, h, bg, _fg, _a),
+    do: {Bar.render_stacked_bar(s, w, h, bg), s}
+
+  defp dispatch_chart_v(:range_bar, s, w, h, bg, fg, _a),
+    do: {Bar.render_range_bar(s, w, h, bg, fg), s}
+
+  defp dispatch_chart_v(:candlestick, s, w, h, bg, fg, _a),
+    do: {Candlestick.render(s, w, h, bg, fg), s}
+
   defp dispatch_chart_v(:area, s, w, h, bg, fg, a), do: {Area.render(s, w, h, bg, fg, a), s}
   defp dispatch_chart_v(:scatter, s, w, h, bg, fg, _a), do: {Scatter.render(s, w, h, bg, fg), s}
   defp dispatch_chart_v(:step, s, w, h, bg, fg, a), do: {Step.render(s, w, h, bg, fg, a), s}
-  defp dispatch_chart_v(:histogram, s, w, h, bg, fg, _a), do: {Histogram.render(s, w, h, bg, fg), s}
+
+  defp dispatch_chart_v(:histogram, s, w, h, bg, fg, _a),
+    do: {Histogram.render(s, w, h, bg, fg), s}
+
   defp dispatch_chart_v(:heatmap, s, w, h, bg, fg, _a), do: {Heatmap.render(s, w, h, bg, fg), s}
   defp dispatch_chart_v(:bubble, s, w, h, bg, fg, _a), do: {Bubble.render(s, w, h, bg, fg), s}
-  defp dispatch_chart_v(:braille, s, w, h, bg, fg, a), do: {Line.render_braille(s, w, h, bg, fg, a), s}
+
+  defp dispatch_chart_v(:braille, s, w, h, bg, fg, a),
+    do: {Line.render_braille(s, w, h, bg, fg, a), s}
+
   defp dispatch_chart_v(_type, s, w, h, bg, fg, a), do: {Line.render(s, w, h, bg, fg, a), s}
 
   defp scroll_left(state),
-    do: {:ok, update_internal(state, scroll_offset: max(0, (state._internal.scroll_offset || 0) - 5))}
+    do:
+      {:ok,
+       update_internal(state, scroll_offset: max(0, (state._internal.scroll_offset || 0) - 5))}
 
-  defp scroll_right(state), do: {:ok, update_internal(state, scroll_offset: (state._internal.scroll_offset || 0) + 5)}
+  defp scroll_right(state),
+    do: {:ok, update_internal(state, scroll_offset: (state._internal.scroll_offset || 0) + 5)}
 
   defp init_live_candle(data) when is_list(data) and data != [] do
     last_candle = List.last(data)
@@ -660,11 +717,25 @@ defmodule Drafter.Widget.Chart do
     label_width = compute_y_axis_width(state)
     axis_col_width = label_width + 1
 
+    if rect.width <= axis_col_width do
+      strips
+    else
+      axed_strips(strips, state, rect, bg, fg, label_width, axis_col_width)
+    end
+  end
+
+  defp axed_strips(strips, state, rect, bg, fg, label_width, axis_col_width) do
+    tick_span = max(rect.height - 3, 1)
+
     y_axis_segments =
-      for i <- 0..(rect.height - 3) do
-        y_val = state.max_value - (state.max_value - state.min_value) * i / (rect.height - 3)
+      for i <- 0..tick_span do
+        y_val = state.max_value - (state.max_value - state.min_value) * i / tick_span
         label = format_axis_value(y_val, state._internal[:precision] || 3)
-        Segment.new(IO.iodata_to_binary([String.pad_leading(label, label_width), "│"]), %{fg: fg, bg: bg})
+
+        Segment.new(IO.iodata_to_binary([String.pad_leading(label, label_width), "│"]), %{
+          fg: fg,
+          bg: bg
+        })
       end
 
     strips_with_y =
@@ -683,7 +754,13 @@ defmodule Drafter.Widget.Chart do
       end)
 
     x_axis_content_width = max(1, rect.width - axis_col_width - 1)
-    x_axis = IO.iodata_to_binary([String.duplicate(" ", label_width), "└", String.duplicate("─", x_axis_content_width)])
+
+    x_axis =
+      IO.iodata_to_binary([
+        String.duplicate(" ", label_width),
+        "└",
+        String.duplicate("─", x_axis_content_width)
+      ])
 
     x_axis_strip =
       Strip.new([Segment.new(String.pad_trailing(x_axis, rect.width), %{fg: fg, bg: bg})])

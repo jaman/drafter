@@ -3,6 +3,8 @@ defmodule Drafter.RingBufferTest do
 
   alias Drafter.RingBuffer
 
+  doctest Drafter.RingBuffer
+
   describe "new/1" do
     test "creates empty buffer with given max size" do
       buf = RingBuffer.new(5)

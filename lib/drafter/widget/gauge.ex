@@ -96,7 +96,9 @@ defmodule Drafter.Widget.Gauge do
   end
 
   defp render_pixel_base(state, rect) do
-    label_strips = if state.label, do: [center_strip(state.label, rect.width, {160, 160, 160})], else: []
+    label_strips =
+      if state.label, do: [center_strip(state.label, rect.width, {160, 160, 160})], else: []
+
     arc_rows = max(0, rect.height - length(label_strips) - 1)
     blank = Strip.new([Segment.new(String.duplicate(" ", rect.width))])
     value_strip = center_strip(format_value(state.value), rect.width, fill_rgb(state))
@@ -109,7 +111,12 @@ defmodule Drafter.Widget.Gauge do
   end
 
   defp gauge_image(state, cols, rows, label_rows, id) do
-    spec = %{type: :gauge, value: state.value, fill: gauge_fill(state), track: to_rgba(state.track_color)}
+    spec = %{
+      type: :gauge,
+      value: state.value,
+      fill: gauge_fill(state),
+      track: to_rgba(state.track_color)
+    }
 
     case Pixel.image(spec, Pixel.protocol(state.renderer), {cols, rows}, id) do
       nil -> nil
@@ -154,7 +161,7 @@ defmodule Drafter.Widget.Gauge do
       end
 
     arc_strips =
-      for row <- 0..(arc_char_rows - 1) do
+      for row <- 0..(arc_char_rows - 1)//1 do
         if row == value_row do
           value_overlay_strip(braille_map, row, w, state)
         else
@@ -170,10 +177,11 @@ defmodule Drafter.Widget.Gauge do
 
   @impl Drafter.Widget
   def update(props, state) do
-    %{state |
-      value: Map.get(props, :value, state.value),
-      label: Map.get(props, :label, state.label),
-      renderer: Map.get(props, :renderer, state.renderer)
+    %{
+      state
+      | value: Map.get(props, :value, state.value),
+        label: Map.get(props, :label, state.label),
+        renderer: Map.get(props, :renderer, state.renderer)
     }
   end
 
@@ -252,7 +260,7 @@ defmodule Drafter.Widget.Gauge do
   end
 
   defp row_strip(braille_map, row, width) do
-    segments = Enum.map(0..(width - 1), &render_braille_cell(braille_map, &1, row))
+    segments = Enum.map(0..(width - 1)//1, &render_braille_cell(braille_map, &1, row))
     Strip.new(segments)
   end
 
@@ -282,7 +290,7 @@ defmodule Drafter.Widget.Gauge do
     text_chars = String.graphemes(text)
 
     segments =
-      Enum.map(0..(width - 1), fn col ->
+      Enum.map(0..(width - 1)//1, fn col ->
         text_offset = col - text_start
         render_overlay_cell(text_offset, text_len, text_chars, color, braille_map, col, row)
       end)

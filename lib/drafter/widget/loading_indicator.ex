@@ -77,7 +77,12 @@ defmodule Drafter.Widget.LoadingIndicator do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
     computed_opts = [classes: state.classes, style: state.style]
-    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
+
+    computed_opts =
+      if state.app_module,
+        do: Keyword.put(computed_opts, :app_module, state.app_module),
+        else: computed_opts
+
     computed = Computed.for_widget(:loading_indicator, state, computed_opts)
 
     spinner_char = current_spinner_char(state)
@@ -95,14 +100,21 @@ defmodule Drafter.Widget.LoadingIndicator do
         :error -> CharacterSet.spinner(spinner_type_to_skin_key(state.spinner_type))
       end
 
-    frame = if state.running, do: System.monotonic_time(:millisecond) |> div(@spinner_speed), else: 0
+    frame =
+      if state.running, do: System.monotonic_time(:millisecond) |> div(@spinner_speed), else: 0
+
     Enum.at(spinner_chars, rem(frame, length(spinner_chars)))
   end
 
-  defp resolve_fg_color(%{gradient_colors: nil}, computed), do: computed[:color] || {200, 200, 200}
+  defp resolve_fg_color(%{gradient_colors: nil}, computed),
+    do: computed[:color] || {200, 200, 200}
 
   defp resolve_fg_color(state, _computed) do
-    gradient_frame = if state.running, do: System.monotonic_time(:millisecond) |> div(state.gradient_speed), else: 0
+    gradient_frame =
+      if state.running,
+        do: System.monotonic_time(:millisecond) |> div(state.gradient_speed),
+        else: 0
+
     interpolate_gradient(state.gradient_colors, gradient_frame)
   end
 
@@ -150,6 +162,7 @@ defmodule Drafter.Widget.LoadingIndicator do
 
   def from_component_opts(_args, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+
     %{
       text: Keyword.get(opts, :text, "Loading..."),
       spinner_type: Keyword.get(opts, :spinner_type, :default),

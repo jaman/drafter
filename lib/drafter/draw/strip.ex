@@ -60,6 +60,30 @@ defmodule Drafter.Draw.Strip do
     end
   end
 
+  @doc """
+  Narrow a strip to `width`.
+
+  `:clip` cuts at the boundary. `:ellipsis` cuts at `width - 1` and appends `…`
+  in the trailing segment's style. A strip already within `width` is returned
+  unchanged.
+  """
+  @spec overflow(t(), non_neg_integer(), :clip | :ellipsis) :: t()
+  def overflow(strip, width, mode \\ :clip)
+
+  def overflow(%__MODULE__{} = strip, width, :ellipsis) when width > 0 do
+    if strip.width <= width do
+      strip
+    else
+      ellipsis = Segment.new("…", trailing_style(strip))
+      strip |> crop(max(0, width - 1)) |> append(ellipsis)
+    end
+  end
+
+  def overflow(%__MODULE__{} = strip, width, _mode), do: crop(strip, width)
+
+  defp trailing_style(%__MODULE__{segments: []}), do: %{}
+  defp trailing_style(%__MODULE__{segments: segments}), do: List.last(segments).style
+
   @doc "Fit strip to exact width by cropping or padding"
   @spec fit_to_width(t(), non_neg_integer()) :: t()
   def fit_to_width(strip, target_width) do
@@ -91,11 +115,52 @@ defmodule Drafter.Draw.Strip do
     new(styled_segments)
   end
 
-  @doc "Convert strip to ANSI string for terminal output"
+  @doc """
+  The row as one ANSI string.
+
+  Style codes carry across segments: a segment whose style matches the one before
+  it emits only its text, and the row is reset once at the end. A reset is emitted
+  mid-row only when a segment drops an attribute the previous one set, since
+  colours can be overwritten but flags cannot.
+  """
   @spec to_ansi(t()) :: String.t()
   def to_ansi(%__MODULE__{segments: segments}) do
-    Enum.map_join(segments, &Segment.to_ansi/1)
+    {parts, last_style} =
+      Enum.reduce(segments, {[], %{}}, fn %{text: text, style: style}, {acc, previous} ->
+        {[[transition(previous, style), text] | acc], style}
+      end)
+
+    parts
+    |> Enum.reverse()
+    |> then(&IO.iodata_to_binary([&1, trailing_reset(last_style)]))
   end
+
+  defp trailing_reset(style) when style == %{}, do: ""
+  defp trailing_reset(_style), do: "\e[0m"
+
+  defp transition(previous, style) when previous == style, do: ""
+
+  defp transition(previous, style) do
+    if needs_reset?(previous, style) do
+      ["\e[0m", Segment.style_codes(style)]
+    else
+      Segment.style_codes(newly_set(previous, style))
+    end
+  end
+
+  defp needs_reset?(previous, style) do
+    Enum.any?(previous, fn {key, value} ->
+      set?(value) and not set?(Map.get(style, key))
+    end)
+  end
+
+  defp newly_set(previous, style) do
+    for {key, value} <- style, Map.get(previous, key) != value, into: %{}, do: {key, value}
+  end
+
+  defp set?(false), do: false
+  defp set?(nil), do: false
+  defp set?(_value), do: true
 
   @doc "Get display width of strip"
   @spec width(t()) :: non_neg_integer()
@@ -219,27 +284,31 @@ defmodule Drafter.Draw.Strip do
     end
   end
 
-  defp make_cache_key(segments) do
-    segments
-    |> Enum.map(fn %Segment{text: text, style: style} -> {text, style} end)
-    |> :erlang.phash2()
-  end
+  defp make_cache_key(segments), do: :erlang.phash2(segments)
 
   defp skip_display_width(str, columns_to_skip) do
+    if Drafter.CharacterWidth.printable_ascii?(str) do
+      binary_part(str, columns_to_skip, byte_size(str) - columns_to_skip)
+    else
+      skip_mixed(str, columns_to_skip)
+    end
+  end
+
+  defp skip_mixed(str, columns_to_skip) do
     ansi_pattern = ~r/\e\[[0-9;]*m/
     parts = Regex.split(ansi_pattern, str, include_captures: true)
 
     {_, result} =
-      Enum.reduce(parts, {0, ""}, fn part, {skipped, acc} ->
+      Enum.reduce(parts, {0, []}, fn part, {skipped, acc} ->
         skip_part(part, skipped, acc, columns_to_skip, ansi_pattern)
       end)
 
-    result
+    IO.iodata_to_binary(result)
   end
 
   defp skip_part(part, skipped, acc, columns_to_skip, ansi_pattern) do
     cond do
-      Regex.match?(ansi_pattern, part) and skipped >= columns_to_skip -> {skipped, acc <> part}
+      Regex.match?(ansi_pattern, part) and skipped >= columns_to_skip -> {skipped, [acc, part]}
       Regex.match?(ansi_pattern, part) -> {skipped, acc}
       true -> skip_graphemes(part, skipped, acc, columns_to_skip)
     end
@@ -250,7 +319,7 @@ defmodule Drafter.Draw.Strip do
     |> String.graphemes()
     |> Enum.reduce({skipped, acc}, fn grapheme, {w, a} ->
       gw = char_width(grapheme)
-      if w >= columns_to_skip, do: {w + gw, a <> grapheme}, else: {w + gw, a}
+      if w >= columns_to_skip, do: {w + gw, [a, grapheme]}, else: {w + gw, a}
     end)
   end
 

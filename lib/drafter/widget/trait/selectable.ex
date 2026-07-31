@@ -37,19 +37,19 @@ defmodule Drafter.Widget.Trait.Selectable do
 
   @impl true
   def handle_event({:key, key}, trait_state, _widget_state)
-      when key in [:up, :"ArrowUp"] do
+      when key in [:up, :ArrowUp] do
     new_index = max(0, trait_state._cursor_index - 1)
     {:ok, %{trait_state | _cursor_index: new_index}}
   end
 
   def handle_event({:key, key}, trait_state, _widget_state)
-      when key in [:down, :"ArrowDown"] do
+      when key in [:down, :ArrowDown] do
     max_index = max(0, trait_state._item_count - 1)
     new_index = min(max_index, trait_state._cursor_index + 1)
     {:ok, %{trait_state | _cursor_index: new_index}}
   end
 
-  def handle_event({:key, :space}, trait_state, _widget_state) do
+  def handle_event({:key, :" "}, trait_state, _widget_state) do
     idx = trait_state._cursor_index
 
     new_selected =

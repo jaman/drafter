@@ -5,7 +5,7 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	LDFLAGS += -dynamiclib -undefined dynamic_lookup
 else
-	LDFLAGS += -shared
+	LDFLAGS += -shared -lutil
 endif
 
 ERTS_INCLUDE_DIR ?= $(shell erl -noshell -eval 'io:format("~s/include", [code:root_dir() ++ "/erts-" ++ erlang:system_info(version)])' -s init stop)
@@ -13,8 +13,10 @@ ERTS_INCLUDE_DIR ?= $(shell erl -noshell -eval 'io:format("~s/include", [code:ro
 PRIV_DIR = priv
 NIF_SO = $(PRIV_DIR)/termios_nif.so
 NIF_SRC = c_src/termios_nif.c
+PTY_SPAWN = $(PRIV_DIR)/pty_spawn
+PTY_SPAWN_SRC = c_src/pty_spawn.c
 
-all: $(NIF_SO)
+all: $(NIF_SO) $(PTY_SPAWN)
 
 $(PRIV_DIR):
 	mkdir -p $(PRIV_DIR)
@@ -22,7 +24,10 @@ $(PRIV_DIR):
 $(NIF_SO): $(NIF_SRC) | $(PRIV_DIR)
 	$(CC) $(CFLAGS) -I$(ERTS_INCLUDE_DIR) -o $@ $< $(LDFLAGS)
 
+$(PTY_SPAWN): $(PTY_SPAWN_SRC) | $(PRIV_DIR)
+	$(CC) -O2 -o $@ $<
+
 clean:
-	rm -f $(NIF_SO)
+	rm -f $(NIF_SO) $(PTY_SPAWN)
 
 .PHONY: all clean

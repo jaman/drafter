@@ -123,10 +123,40 @@ defmodule Drafter.Examples.ThemeSandbox do
     ]
 
     menu_tabs = [
-      %{id: "foods", label: "Foods", content: option_list([{"Pizza", "pizza"}, {"Pasta", "pasta"}, {"Salad", "salad"}, {"Soup", "soup"}], on_select: :food_selected)},
-      %{id: "drinks", label: "Drinks", content: option_list([{"Water", "water"}, {"Coffee", "coffee"}, {"Tea", "tea"}, {"Juice", "juice"}], on_select: :drink_selected)},
-      %{id: "desserts", label: "Desserts", content: option_list([{"Cake", "cake"}, {"Ice Cream", "ice_cream"}, {"Pie", "pie"}], on_select: :dessert_selected)},
-      %{id: "extras", label: "Extras", content: option_list([{"Bread", "bread"}, {"Butter", "butter"}, {"Sauce", "sauce"}], on_select: :extra_selected)}
+      %{
+        id: "foods",
+        label: "Foods",
+        content:
+          option_list(
+            [{"Pizza", "pizza"}, {"Pasta", "pasta"}, {"Salad", "salad"}, {"Soup", "soup"}],
+            on_select: :food_selected
+          )
+      },
+      %{
+        id: "drinks",
+        label: "Drinks",
+        content:
+          option_list(
+            [{"Water", "water"}, {"Coffee", "coffee"}, {"Tea", "tea"}, {"Juice", "juice"}],
+            on_select: :drink_selected
+          )
+      },
+      %{
+        id: "desserts",
+        label: "Desserts",
+        content:
+          option_list([{"Cake", "cake"}, {"Ice Cream", "ice_cream"}, {"Pie", "pie"}],
+            on_select: :dessert_selected
+          )
+      },
+      %{
+        id: "extras",
+        label: "Extras",
+        content:
+          option_list([{"Bread", "bread"}, {"Butter", "butter"}, {"Sauce", "sauce"}],
+            on_select: :extra_selected
+          )
+      }
     ]
 
     table_columns = [
@@ -210,29 +240,41 @@ defmodule Drafter.Examples.ThemeSandbox do
       sparkline(state.sparkline_data),
       label(""),
       label("Loading Indicators:"),
-      horizontal([
-        loading_indicator(spinner_type: :default),
-        loading_indicator(spinner_type: :dots),
-        loading_indicator(spinner_type: :line),
-        loading_indicator(spinner_type: :arrow)
-      ], gap: 1),
+      horizontal(
+        [
+          loading_indicator(spinner_type: :default),
+          loading_indicator(spinner_type: :dots),
+          loading_indicator(spinner_type: :line),
+          loading_indicator(spinner_type: :arrow)
+        ],
+        gap: 1
+      ),
       label(""),
       label("Links:"),
-      horizontal([
-        link("Elixir Lang", url: "https://elixir-lang.org"),
-        link("GitHub", url: "https://github.com")
-      ], gap: 1),
+      horizontal(
+        [
+          link("Elixir Lang", url: "https://elixir-lang.org"),
+          link("GitHub", url: "https://github.com")
+        ],
+        gap: 1
+      ),
       label(""),
-      horizontal([
-        vertical([
-          label("Masked Input:"),
-          masked_input(mask: "(###) ###-####", placeholder: "Phone")
-        ], width: 20),
-        vertical([
-          label("Pretty:"),
-          pretty(%{app: :drafter, version: "1.0.0", features: [:widgets, :themes, :css]})
-        ])
-      ], gap: 1),
+      horizontal(
+        [
+          vertical(
+            [
+              label("Masked Input:"),
+              masked_input(mask: "(###) ###-####", placeholder: "Phone")
+            ],
+            width: 20
+          ),
+          vertical([
+            label("Pretty:"),
+            pretty(%{app: :drafter, version: "1.0.0", features: [:widgets, :themes, :css]})
+          ])
+        ],
+        gap: 1
+      ),
       label(""),
       label("Clock:"),
       digits(state.current_time)

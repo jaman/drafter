@@ -198,18 +198,29 @@ defmodule Drafter.Widget.Sparkline do
         Segment.new(char, %{fg: interpolate_color(min_color, max_color, normalized), bg: bg})
       end)
 
-    output = append_sparkline_tail(spark_segments, state, rect.width, sparkline_chars, default_color, bg)
+    output =
+      append_sparkline_tail(spark_segments, state, rect.width, sparkline_chars, default_color, bg)
+
     [Strip.new(output)]
   end
 
-  defp append_sparkline_tail(segments, %{summary: true, data: data}, width, sparkline_chars, _default_color, bg)
+  defp append_sparkline_tail(
+         segments,
+         %{summary: true, data: data},
+         width,
+         sparkline_chars,
+         _default_color,
+         bg
+       )
        when data != [] do
     summary_text = render_summary(data, Enum.min(data), Enum.max(data))
     padding_width = max(0, width - String.length(sparkline_chars) - String.length(summary_text))
-    segments ++ [
-      Segment.new(String.duplicate(" ", padding_width), %{bg: bg}),
-      Segment.new(summary_text, %{fg: {150, 150, 150}, bg: bg})
-    ]
+
+    segments ++
+      [
+        Segment.new(String.duplicate(" ", padding_width), %{bg: bg}),
+        Segment.new(summary_text, %{fg: {150, 150, 150}, bg: bg})
+      ]
   end
 
   defp append_sparkline_tail(segments, _state, width, sparkline_chars, default_color, bg) do

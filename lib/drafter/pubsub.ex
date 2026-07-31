@@ -30,7 +30,8 @@ defmodule Drafter.PubSub do
   @doc """
   Broadcast file content to a topic (convenience function for code viewers).
   """
-  @spec broadcast_file(atom() | String.t(), String.t(), String.t(), atom() | nil) :: :ok | {:error, term()}
+  @spec broadcast_file(atom() | String.t(), String.t(), String.t(), atom() | nil) ::
+          :ok | {:error, term()}
   def broadcast_file(topic, path, content, language \\ nil) do
     broadcast(topic, {:file_content, path, content, language})
   end

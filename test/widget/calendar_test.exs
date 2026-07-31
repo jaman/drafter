@@ -98,11 +98,12 @@ defmodule Drafter.Widget.CalendarTest do
     end
 
     test "navigation within bounds succeeds" do
-      state = Calendar.mount(%{
-        selected_date: ~D[2026-04-15],
-        min_date: ~D[2026-04-01],
-        max_date: ~D[2026-04-30]
-      })
+      state =
+        Calendar.mount(%{
+          selected_date: ~D[2026-04-15],
+          min_date: ~D[2026-04-01],
+          max_date: ~D[2026-04-30]
+        })
 
       {:ok, new_state} = Calendar.handle_key(:right, state)
       assert new_state.cursor_date == ~D[2026-04-16]

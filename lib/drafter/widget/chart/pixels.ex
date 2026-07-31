@@ -41,7 +41,9 @@ defmodule Drafter.Widget.Chart.Pixels do
   def braille_dot_offsets, do: @braille_dot_offsets
 
   def braille_char_for_pixels([], _fg, bg), do: Segment.new(braille_char(0), %{fg: bg, bg: bg})
-  def braille_char_for_pixels(char_pixels, fg, bg), do: Segment.new(build_braille_char(char_pixels), %{fg: fg, bg: bg})
+
+  def braille_char_for_pixels(char_pixels, fg, bg),
+    do: Segment.new(build_braille_char(char_pixels), %{fg: fg, bg: bg})
 
   def render_braille_pixels(pixels, width, height, bg, fg) do
     pixel_height = height * 4
@@ -51,9 +53,9 @@ defmodule Drafter.Widget.Chart.Pixels do
       |> Enum.filter(fn {x, y} -> x >= 0 and x < width * 2 and y >= 0 and y < pixel_height end)
       |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 4)} end)
 
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       segments =
-        for col <- 0..(width - 1) do
+        for col <- 0..(width - 1)//1 do
           braille_char_for_pixels(Map.get(pixels_by_char, {col, row}, []), fg, bg)
         end
 
@@ -69,17 +71,26 @@ defmodule Drafter.Widget.Chart.Pixels do
       |> Enum.filter(fn {x, y} -> x >= 0 and x < width * 2 and y >= 0 and y < pixel_height end)
       |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 2)} end)
 
-    for row <- 0..(height - 1) do
-      segments = for col <- 0..(width - 1), do: quadrant_pixel_segment(pixels_by_char, col, row, fg, bg)
+    for row <- 0..(height - 1)//1 do
+      segments =
+        for col <- 0..(width - 1)//1, do: quadrant_pixel_segment(pixels_by_char, col, row, fg, bg)
+
       Strip.new(segments)
     end
   end
 
   def quadrant_pixel_segment(pixels_by_char, col, row, fg, bg) do
     char_pixels = Map.get(pixels_by_char, {col, row}, [])
-    bits = Enum.reduce(char_pixels, 0, fn {x, y}, acc -> acc ||| quadrant_bit({rem(x, 2), rem(y, 2)}) end)
-    Segment.new(Map.get(@quadrant_chars, bits, " "), %{fg: fg, bg: bg})
+
+    bits =
+      Enum.reduce(char_pixels, 0, fn {x, y}, acc ->
+        acc ||| quadrant_bit({rem(x, 2), rem(y, 2)})
+      end)
+
+    Segment.new(quadrant_char(bits), %{fg: fg, bg: bg})
   end
+
+  def quadrant_char(bits), do: Map.get(@quadrant_chars, bits, " ")
 
   def quadrant_bit({0, 0}), do: 1
   def quadrant_bit({1, 0}), do: 2
@@ -123,12 +134,14 @@ defmodule Drafter.Widget.Chart.Pixels do
 
     pixels_by_char =
       colored_pixels
-      |> Enum.filter(fn {x, y, _c} -> x >= 0 and x < width * 2 and y >= 0 and y < pixel_height end)
+      |> Enum.filter(fn {x, y, _c} ->
+        x >= 0 and x < width * 2 and y >= 0 and y < pixel_height
+      end)
       |> Enum.group_by(fn {x, y, _c} -> {div(x, 2), div(y, 4)} end)
 
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       segments =
-        for col <- 0..(width - 1) do
+        for col <- 0..(width - 1)//1 do
           colored_braille_segment(Map.get(pixels_by_char, {col, row}, []), bg)
         end
 

@@ -35,7 +35,9 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
     if focused_widget_traps_tab?(hierarchy) do
       dispatch_to_focused(hierarchy, event)
     else
-      if :shift in mods, do: {Focus.cycle_focus_reverse(hierarchy), []}, else: {Focus.cycle_focus(hierarchy), []}
+      if :shift in mods,
+        do: {Focus.cycle_focus_reverse(hierarchy), []},
+        else: {Focus.cycle_focus(hierarchy), []}
     end
   end
 
@@ -43,34 +45,67 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
     Focus.try_arrow_navigation(hierarchy, event, dir)
   end
 
-  def handle_key_event(hierarchy, {:key, dir, _} = event) when dir in [:left, :right, :up, :down] do
+  def handle_key_event(hierarchy, {:key, dir, _} = event)
+      when dir in [:left, :right, :up, :down] do
     Focus.try_arrow_navigation(hierarchy, event, dir)
   end
 
   def handle_key_event(hierarchy, event), do: dispatch_to_focused_or_ignore(hierarchy, event)
 
-  def dispatch_to_focused_or_ignore(hierarchy, {:key, _} = event), do: dispatch_to_focused(hierarchy, event)
-  def dispatch_to_focused_or_ignore(hierarchy, {:key, _, _} = event), do: dispatch_to_focused(hierarchy, event)
-  def dispatch_to_focused_or_ignore(hierarchy, {:char, _} = event), do: dispatch_to_focused(hierarchy, event)
-  def dispatch_to_focused_or_ignore(hierarchy, {:bracketed_paste, _} = event), do: dispatch_to_focused(hierarchy, event)
+  def dispatch_to_focused_or_ignore(hierarchy, {:key, _} = event),
+    do: dispatch_to_focused(hierarchy, event)
+
+  def dispatch_to_focused_or_ignore(hierarchy, {:key, _, _} = event),
+    do: dispatch_to_focused(hierarchy, event)
+
+  def dispatch_to_focused_or_ignore(hierarchy, {:char, _} = event),
+    do: dispatch_to_focused(hierarchy, event)
+
+  def dispatch_to_focused_or_ignore(hierarchy, {:bracketed_paste, text}) do
+    dispatch_to_focused(hierarchy, {:bracketed_paste, Drafter.Clipboard.sanitize(text)})
+  end
+
   def dispatch_to_focused_or_ignore(hierarchy, _), do: {hierarchy, []}
 
+  @doc """
+  Route an event and report whether anything in the hierarchy acted on it.
+
+  Returns `{hierarchy, actions, consumed?}`. The event counts as consumed if it
+  produced actions, moved focus, or was marked consumed by a widget that stopped
+  propagation.
+  """
+  @spec handle_event_consumed(WidgetHierarchy.t(), term()) ::
+          {WidgetHierarchy.t(), [term()], boolean()}
   def handle_event_consumed(hierarchy, event) do
-    hierarchy = sync_focused_pid_state(hierarchy)
+    hierarchy = WidgetHierarchy.clear_consumed(hierarchy)
     {new_hierarchy, actions} = handle_event(hierarchy, event)
-    consumed = actions != [] or
-               new_hierarchy.focused_widget != hierarchy.focused_widget or
-               :erlang.phash2(new_hierarchy.widgets) != :erlang.phash2(hierarchy.widgets)
-    {new_hierarchy, actions, consumed}
+
+    consumed =
+      actions != [] or
+        new_hierarchy.focused_widget != hierarchy.focused_widget or
+        new_hierarchy.event_consumed
+
+    {WidgetHierarchy.clear_consumed(new_hierarchy), actions, consumed}
   end
 
   def sync_focused_pid_state(hierarchy) do
     case hierarchy.focused_widget && Map.get(hierarchy.widgets, hierarchy.focused_widget) do
       %{pid: pid} = info when not is_nil(pid) ->
-        WidgetHierarchy.put_widget(hierarchy, hierarchy.focused_widget, %{info | state: WidgetServer.get_state(pid)})
+        fresh = WidgetServer.safe_get_state(pid) || info.state
+        WidgetHierarchy.put_widget(hierarchy, hierarchy.focused_widget, %{info | state: fresh})
 
       _ ->
         hierarchy
+    end
+  end
+
+  @trap_focus_fields [:focused, :trap_focus]
+
+  defp focused_widget_fields(hierarchy) do
+    case hierarchy.focused_widget && Map.get(hierarchy.widgets, hierarchy.focused_widget) do
+      %{pid: pid} when is_pid(pid) -> WidgetServer.get_state_fields(pid, @trap_focus_fields)
+      %{state: state} when is_map(state) -> state
+      _ -> %{}
     end
   end
 
@@ -127,27 +162,85 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
   def dispatch_widget_event(hierarchy, widget_id, widget_info, event) do
     case try_handle_event(widget_info, event) do
       {new_state, actions, :stop} ->
-        {WidgetHierarchy.set_widget_state(hierarchy, widget_id, new_state), actions}
+        hierarchy = WidgetHierarchy.set_widget_state(hierarchy, widget_id, new_state)
+        {WidgetHierarchy.mark_consumed(hierarchy), actions}
 
       {new_state, actions, :bubble} ->
-        new_hierarchy = WidgetHierarchy.set_widget_state(hierarchy, widget_id, new_state)
-        bubble_to_parent(new_hierarchy, widget_info.parent, event, actions)
+        hierarchy
+        |> WidgetHierarchy.set_widget_state(widget_id, new_state)
+        |> bubble_to_parent(widget_info.parent, event, actions)
 
       :not_handled ->
         bubble_to_parent(hierarchy, widget_info.parent, event, [])
     end
   end
 
-  def bubble_to_parent(hierarchy, nil, _event, actions), do: {hierarchy, actions}
+  @doc """
+  Walk an unhandled event up the ancestor chain.
 
+  Each ancestor is dispatched with `:phase` set to `:bubble` and
+  `:current_target` set to itself. The walk ends at the root, or at the first
+  ancestor that stops propagation. Returns the updated hierarchy and the actions
+  gathered along the way, in the order they were produced.
+  """
+  @spec bubble_to_parent(WidgetHierarchy.t(), term(), term(), [term()]) ::
+          {WidgetHierarchy.t(), [term()]}
   def bubble_to_parent(hierarchy, parent_id, event, actions) do
-    {final_hierarchy, parent_actions} = handle_widget_event(hierarchy, parent_id, event)
-    {final_hierarchy, actions ++ parent_actions}
+    {final_hierarchy, reversed} =
+      bubble_up(hierarchy, parent_id, Drafter.Event.from_tuple(event), Enum.reverse(actions))
+
+    {final_hierarchy, Enum.reverse(reversed)}
   end
 
-  def try_handle_event(%{pid: pid} = widget_info, event) when is_pid(pid) do
-    WidgetServer.send_event_sync(pid, event)
-    |> Drafter.EventResult.parse(widget_info.state)
+  defp bubble_up(hierarchy, nil, _event, acc), do: {hierarchy, acc}
+
+  defp bubble_up(hierarchy, widget_id, event, acc) do
+    case Map.get(hierarchy.widgets, widget_id) do
+      nil ->
+        {hierarchy, acc}
+
+      widget_info ->
+        event = %{event | phase: :bubble, current_target: widget_id}
+        dispatch_bubble_step(hierarchy, widget_id, widget_info, event, acc)
+    end
+  end
+
+  defp dispatch_bubble_step(hierarchy, widget_id, widget_info, event, acc) do
+    tuple = Drafter.Event.to_tuple(event)
+
+    case try_handle_event(widget_info, tuple) do
+      {new_state, actions, :stop} ->
+        updated =
+          hierarchy
+          |> WidgetHierarchy.set_widget_state(widget_id, new_state)
+          |> WidgetHierarchy.mark_consumed()
+
+        {updated, prepend_reversed(actions, acc)}
+
+      {new_state, actions, :bubble} ->
+        updated = WidgetHierarchy.set_widget_state(hierarchy, widget_id, new_state)
+        continue_bubble(updated, widget_info.parent, event, prepend_reversed(actions, acc))
+
+      :not_handled ->
+        continue_bubble(hierarchy, widget_info.parent, event, acc)
+    end
+  end
+
+  defp continue_bubble(hierarchy, parent_id, event, acc) do
+    if event.propagation_stopped do
+      {hierarchy, acc}
+    else
+      bubble_up(hierarchy, parent_id, event, acc)
+    end
+  end
+
+  defp prepend_reversed(items, acc), do: Enum.reduce(items, acc, &[&1 | &2])
+
+  def try_handle_event(%{pid: pid, state: cached}, event) when is_pid(pid) do
+    case WidgetServer.dispatch_event(pid, event) do
+      {:not_handled, _actions} -> :not_handled
+      {mode, actions} -> {cached, actions, mode}
+    end
   end
 
   def try_handle_event(widget_info, event) do
@@ -222,10 +315,16 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
 
         case try_handle_event_capture(widget_info, evt) do
           {:continue, updated_event, new_state} ->
-            {:cont, {WidgetHierarchy.set_widget_state(h, widget_id, new_state), updated_event, actions}}
+            {:cont,
+             {WidgetHierarchy.set_widget_state(h, widget_id, new_state), updated_event, actions}}
 
           {:stop, updated_event, new_state, new_actions} ->
-            {:halt, {WidgetHierarchy.set_widget_state(h, widget_id, new_state), updated_event, actions ++ new_actions}}
+            stopped =
+              h
+              |> WidgetHierarchy.set_widget_state(widget_id, new_state)
+              |> WidgetHierarchy.mark_consumed()
+
+            {:halt, {stopped, updated_event, actions ++ new_actions}}
         end
     end
   end
@@ -242,11 +341,7 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
   end
 
   defp focused_widget_traps_tab?(hierarchy) do
-    with widget_id when not is_nil(widget_id) <- hierarchy.focused_widget,
-         %{state: state} when is_map(state) <- Map.get(hierarchy.widgets, widget_id) do
-      Map.get(state, :focused, false) and Map.get(state, :trap_focus, false) == true
-    else
-      _ -> false
-    end
+    fields = focused_widget_fields(hierarchy)
+    Map.get(fields, :focused, false) and Map.get(fields, :trap_focus, false) == true
   end
 end

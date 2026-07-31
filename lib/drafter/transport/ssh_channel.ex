@@ -4,7 +4,7 @@ defmodule Drafter.Transport.SSHChannel do
   @behaviour :ssh_server_channel
 
   alias Drafter.{Compositor, Event, EventHandler, ScreenManager, Session, ThemeManager}
-  alias Drafter.Terminal.ANSI
+  alias Drafter.Terminal.{ANSI, InputBuffer}
 
   defstruct [
     :conn_ref,
@@ -14,7 +14,8 @@ defmodule Drafter.Transport.SSHChannel do
     :mode,
     :mount_props,
     size: {80, 24},
-    raw_mode: false
+    raw_mode: false,
+    buffer: %InputBuffer{}
   ]
 
   @spec write(pid(), iodata()) :: :ok
@@ -85,12 +86,9 @@ defmodule Drafter.Transport.SSHChannel do
   end
 
   def handle_ssh_msg({:ssh_cm, _conn_ref, {:data, _channel_id, _type, data}}, state) do
-    if state.event_manager do
-      {events, _} = ANSI.parse_sequence(data)
-      Enum.each(events, &GenServer.cast(state.event_manager, {:event, &1}))
-    end
-
-    {:ok, state}
+    {events, buffer} = InputBuffer.feed(state.buffer, data)
+    emit_events(state.event_manager, events)
+    {:ok, %{state | buffer: buffer}}
   end
 
   def handle_ssh_msg(
@@ -167,7 +165,6 @@ defmodule Drafter.Transport.SSHChannel do
       ANSI.exit_alt_screen()
     ])
 
-    Process.sleep(50)
     {:ok, %{state | raw_mode: false, event_manager: nil}}
   end
 
@@ -185,7 +182,20 @@ defmodule Drafter.Transport.SSHChannel do
     {:stop, state.channel_id, state}
   end
 
+  def handle_msg(:input_flush, state) do
+    {events, buffer} = InputBuffer.flush(state.buffer)
+    emit_events(state.event_manager, events)
+    {:ok, %{state | buffer: buffer}}
+  end
+
   def handle_msg(_msg, state), do: {:ok, state}
+
+  defp emit_events(nil, _events), do: :ok
+  defp emit_events(_event_manager, []), do: :ok
+
+  defp emit_events(event_manager, events) do
+    Enum.each(events, &GenServer.cast(event_manager, {:event, &1}))
+  end
 
   @impl :ssh_server_channel
   def terminate(_reason, _state), do: :ok
@@ -219,7 +229,13 @@ defmodule Drafter.Transport.SSHChannel do
     {:ok, eh} = EventHandler.start_link(name: nil)
     {:ok, sm} = ScreenManager.start_link(name: nil, event_handler: eh)
 
-    %{event_manager: em, compositor: comp, screen_manager: sm, theme_manager: tm, event_handler: eh}
+    %{
+      event_manager: em,
+      compositor: comp,
+      screen_manager: sm,
+      theme_manager: tm,
+      event_handler: eh
+    }
   end
 
   defp stop_session_services(ctx) do
@@ -230,10 +246,10 @@ defmodule Drafter.Transport.SSHChannel do
 
   defp build_session_opts(app_module, :shared, mount_props) do
     shared_state = Session.SharedState.get_or_start(app_module)
-    [mode: :shared, shared_state: shared_state] ++ Map.to_list(mount_props)
+    [mode: :shared, shared_state: shared_state, props: mount_props]
   end
 
   defp build_session_opts(_app_module, mode, mount_props) do
-    [mode: mode] ++ Map.to_list(mount_props)
+    [mode: mode, props: mount_props]
   end
 end

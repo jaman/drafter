@@ -27,6 +27,7 @@ defmodule Drafter.Widget.Switch do
 
   alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.Style
   alias Drafter.Style.Computed
 
   @animation_step_ms 30
@@ -108,8 +109,8 @@ defmodule Drafter.Widget.Switch do
   def handle_event({:key, :left}, ws), do: handle_turn_off(ws)
   def handle_event({:key, :right}, ws), do: handle_turn_on(ws)
   def handle_event({:mouse, %{type: :mouse_up}}, ws), do: handle_toggle(%{ws | focused: true})
-  def handle_event({:mouse, %{type: :hover}}, ws), do: {:ok, %{ws | hovered: true}}
-  def handle_event({:mouse, %{type: :leave}}, ws), do: {:ok, %{ws | hovered: false}}
+  def handle_event(:hover, ws), do: {:ok, %{ws | hovered: true}}
+  def handle_event(:unhover, ws), do: {:ok, %{ws | hovered: false}}
   def handle_event({:focus}, ws), do: {:ok, %{ws | focused: true}}
   def handle_event({:blur}, ws), do: {:ok, %{ws | focused: false}}
   def handle_event(:tick, ws), do: handle_tick(ws)
@@ -120,36 +121,52 @@ defmodule Drafter.Widget.Switch do
     case widget_state.state do
       :animating_on ->
         new_enabled = Map.get(props, :enabled, true)
+
         if new_enabled do
-          %{widget_state | label: Map.get(props, :label, widget_state.label),
-            on_change: Map.get(props, :on_change, widget_state.on_change),
-            width: Map.get(props, :width, widget_state.width),
-            height: Map.get(props, :height, widget_state.height),
-            size: Map.get(props, :size, widget_state.size)}
+          %{
+            widget_state
+            | label: Map.get(props, :label, widget_state.label),
+              on_change: Map.get(props, :on_change, widget_state.on_change),
+              width: Map.get(props, :width, widget_state.width),
+              height: Map.get(props, :height, widget_state.height),
+              size: Map.get(props, :size, widget_state.size)
+          }
         else
-          %{widget_state | state: :off, slider_position: 0.0,
-            label: Map.get(props, :label, widget_state.label),
-            on_change: Map.get(props, :on_change, widget_state.on_change),
-            width: Map.get(props, :width, widget_state.width),
-            height: Map.get(props, :height, widget_state.height),
-            size: Map.get(props, :size, widget_state.size)}
+          %{
+            widget_state
+            | state: :off,
+              slider_position: 0.0,
+              label: Map.get(props, :label, widget_state.label),
+              on_change: Map.get(props, :on_change, widget_state.on_change),
+              width: Map.get(props, :width, widget_state.width),
+              height: Map.get(props, :height, widget_state.height),
+              size: Map.get(props, :size, widget_state.size)
+          }
         end
 
       :animating_off ->
         new_enabled = Map.get(props, :enabled, false)
+
         if new_enabled do
-          %{widget_state | state: :on, slider_position: 1.0,
-            label: Map.get(props, :label, widget_state.label),
-            on_change: Map.get(props, :on_change, widget_state.on_change),
-            width: Map.get(props, :width, widget_state.width),
-            height: Map.get(props, :height, widget_state.height),
-            size: Map.get(props, :size, widget_state.size)}
+          %{
+            widget_state
+            | state: :on,
+              slider_position: 1.0,
+              label: Map.get(props, :label, widget_state.label),
+              on_change: Map.get(props, :on_change, widget_state.on_change),
+              width: Map.get(props, :width, widget_state.width),
+              height: Map.get(props, :height, widget_state.height),
+              size: Map.get(props, :size, widget_state.size)
+          }
         else
-          %{widget_state | label: Map.get(props, :label, widget_state.label),
-            on_change: Map.get(props, :on_change, widget_state.on_change),
-            width: Map.get(props, :width, widget_state.width),
-            height: Map.get(props, :height, widget_state.height),
-            size: Map.get(props, :size, widget_state.size)}
+          %{
+            widget_state
+            | label: Map.get(props, :label, widget_state.label),
+              on_change: Map.get(props, :on_change, widget_state.on_change),
+              width: Map.get(props, :width, widget_state.width),
+              height: Map.get(props, :height, widget_state.height),
+              size: Map.get(props, :size, widget_state.size)
+          }
         end
 
       _ ->
@@ -168,11 +185,14 @@ defmodule Drafter.Widget.Switch do
               size: Map.get(props, :size, widget_state.size)
           }
         else
-          %{widget_state | label: Map.get(props, :label, widget_state.label),
-            on_change: Map.get(props, :on_change, widget_state.on_change),
-            width: Map.get(props, :width, widget_state.width),
-            height: Map.get(props, :height, widget_state.height),
-            size: Map.get(props, :size, widget_state.size)}
+          %{
+            widget_state
+            | label: Map.get(props, :label, widget_state.label),
+              on_change: Map.get(props, :on_change, widget_state.on_change),
+              width: Map.get(props, :width, widget_state.width),
+              height: Map.get(props, :height, widget_state.height),
+              size: Map.get(props, :size, widget_state.size)
+          }
         end
     end
   end
@@ -185,6 +205,7 @@ defmodule Drafter.Widget.Switch do
     app_state = Keyword.get(opts, :__app_state__, %{})
     rect = Keyword.get(opts, :__rect__, %{width: 12, height: 1})
     enabled = Drafter.Binding.get_bound_value(opts, app_state, Keyword.get(opts, :enabled, false))
+
     %{
       enabled: enabled,
       label: Keyword.get(opts, :label),
@@ -201,9 +222,11 @@ defmodule Drafter.Widget.Switch do
       label: mount_props.label,
       size: mount_props.size
     }
+
     if Drafter.Binding.has_binding?(opts) do
       current_enabled = existing_state.state == :on
       new_enabled = mount_props.enabled
+
       if new_enabled != current_enabled do
         Map.put(base, :enabled, new_enabled)
       else
@@ -282,21 +305,42 @@ defmodule Drafter.Widget.Switch do
     slider_offset = round((widget_state.slider_position || 0.0) * max_offset)
     is_on = widget_state.state in [:on, :animating_on]
 
-    track_style = %{fg: {80, 85, 95}, bg: {50, 55, 65}}
     default_on = {100, 200, 100}
     default_off = {150, 150, 150}
-    thumb_color = if is_on, do: widget_state.on_color || default_on, else: widget_state.off_color || default_off
+
+    base_thumb =
+      if is_on,
+        do: widget_state.on_color || default_on,
+        else: widget_state.off_color || default_off
+
+    track_bg = accent({50, 55, 65}, widget_state, 18)
+    track_fg = accent({80, 85, 95}, widget_state, 40)
+    thumb_color = accent(base_thumb, widget_state, 25)
+
+    track_style = %{fg: track_fg, bg: track_bg}
     thumb_style = %{fg: thumb_color, bg: thumb_color}
 
     segments =
       []
-      |> prepend_if(slider_offset > 0, fn -> Segment.new(String.duplicate(" ", slider_offset), track_style) end)
-      |> then(&[Segment.new(String.duplicate(CharacterSet.fill(:full), slider_width), thumb_style) | &1])
-      |> prepend_if(max_offset - slider_offset > 0, fn -> Segment.new(String.duplicate(" ", max_offset - slider_offset), track_style) end)
-      |> prepend_if(widget_state.label != nil, fn -> Segment.new(" " <> widget_state.label, %{fg: {200, 200, 200}}) end)
+      |> prepend_if(slider_offset > 0, fn ->
+        Segment.new(String.duplicate(" ", slider_offset), track_style)
+      end)
+      |> then(
+        &[Segment.new(String.duplicate(CharacterSet.fill(:full), slider_width), thumb_style) | &1]
+      )
+      |> prepend_if(max_offset - slider_offset > 0, fn ->
+        Segment.new(String.duplicate(" ", max_offset - slider_offset), track_style)
+      end)
+      |> prepend_if(widget_state.label != nil, fn ->
+        Segment.new(" " <> widget_state.label, %{fg: {200, 200, 200}})
+      end)
 
     Strip.new(Enum.reverse(segments))
   end
+
+  defp accent(color, %{hovered: true}, amount), do: Style.lighten(color, amount)
+  defp accent(color, %{focused: true}, amount), do: Style.lighten(color, div(amount, 2))
+  defp accent(color, _widget_state, _amount), do: color
 
   defp track_dimensions(:small), do: {6, 2}
   defp track_dimensions(:compact), do: {4, 2}
@@ -307,7 +351,6 @@ defmodule Drafter.Widget.Switch do
 
   defp trigger_change(widget_state, enabled) do
     if widget_state.on_change do
-
       case Drafter.ScreenManager.get_active_screen() do
         nil ->
           Drafter.AppRegistry.send_to_loop({:app_event, widget_state.on_change, enabled})

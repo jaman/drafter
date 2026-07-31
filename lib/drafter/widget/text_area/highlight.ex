@@ -86,9 +86,13 @@ defmodule Drafter.Widget.TextArea.Highlight do
   def get_keywords(_), do: []
 
   @comment_prefixes %{
-    python: "#", elixir: "#",
-    javascript: "//", js: "//",
-    sql: "--", kdb: "/", q: "/"
+    python: "#",
+    elixir: "#",
+    javascript: "//",
+    js: "//",
+    sql: "--",
+    kdb: "/",
+    q: "/"
   }
 
   @cache :drafter_textarea_token_cache
@@ -136,8 +140,11 @@ defmodule Drafter.Widget.TextArea.Highlight do
 
   defp split_on_comment(line, prefix, language) do
     case String.split(line, prefix, parts: 2) do
-      [^line] -> tokenize_code(line, language)
-      [before, after_comment] -> tokenize_code(before, language) ++ [{:comment, prefix <> after_comment}]
+      [^line] ->
+        tokenize_code(line, language)
+
+      [before, after_comment] ->
+        tokenize_code(before, language) ++ [{:comment, prefix <> after_comment}]
     end
   end
 

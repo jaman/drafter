@@ -57,7 +57,9 @@ defmodule Drafter.Examples.HslColorDemo do
           label("  Muted Magenta", style: %{fg: "hsl(300, 40%, 50%)", bg: "hsl(300, 10%, 20%)"}),
           label(""),
           label("Grayscale (0% saturation):", style: %{fg: {200, 200, 200}, bold: true}),
-          label("  Black: hsl(0, 0%, 0%)", style: %{fg: "hsl(0, 0%, 100%)", bg: "hsl(0, 0%, 0%)"}),
+          label("  Black: hsl(0, 0%, 0%)",
+            style: %{fg: "hsl(0, 0%, 100%)", bg: "hsl(0, 0%, 0%)"}
+          ),
           label("  Dark Gray: hsl(0, 0%, 25%)",
             style: %{fg: "hsl(0, 0%, 100%)", bg: "hsl(0, 0%, 25%)"}
           ),
@@ -71,7 +73,9 @@ defmodule Drafter.Examples.HslColorDemo do
             style: %{fg: "hsl(0, 0%, 0%)", bg: "hsl(0, 0%, 100%)"}
           ),
           label(""),
-          label("Dynamic Hue Demo (changes on timer):", style: %{fg: {200, 200, 200}, bold: true}),
+          label("Dynamic Hue Demo (changes on timer):",
+            style: %{fg: {200, 200, 200}, bold: true}
+          ),
           label("  Current Hue: #{state.hue}°",
             style: %{fg: "hsl(#{state.hue}, 80%, 60%)", bold: true}
           ),

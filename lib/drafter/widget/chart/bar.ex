@@ -29,7 +29,10 @@ defmodule Drafter.Widget.Chart.Bar do
     levels = CharacterSet.sparkline_levels_v()
     label_row? = state.show_labels and state.bar_labels != []
     bar_height = if label_row?, do: max(1, height - 1), else: height
-    {start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, width)
+
+    {start_index, viewport_data} =
+      Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, width)
+
     viewport_labels = Enum.slice(state.bar_labels, start_index, width)
     bars = build_v_bars(state, viewport_data, viewport_labels, levels)
     bar_strips = build_v_bar_strips(bars, bar_height, width, bg, fg)
@@ -64,7 +67,10 @@ defmodule Drafter.Widget.Chart.Bar do
       end)
 
     padding_count = max(0, width - length(label_segs))
-    label_strip = Strip.new(label_segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
+
+    label_strip =
+      Strip.new(label_segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
+
     bar_strips ++ [label_strip]
   end
 
@@ -82,7 +88,10 @@ defmodule Drafter.Widget.Chart.Bar do
 
   defp render_bar_chart_h_data(state, data_src, width, height, bg, fg) do
     scroll_offset = state._internal.scroll_offset || 0
-    {start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, height)
+
+    {start_index, viewport_data} =
+      Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, height)
+
     viewport_labels = Enum.slice(state.bar_labels, start_index, height)
     label_width = h_label_width(state, viewport_labels)
     value_width = h_value_width(state, viewport_data)
@@ -128,13 +137,29 @@ defmodule Drafter.Widget.Chart.Bar do
     end
   end
 
-  defp build_h_bar_strip(value, i, %{state: state, levels: levels, level_count: level_count, full_char: full_char, bar_width: bar_width, label_width: label_width, value_width: value_width, viewport_labels: viewport_labels, fg: fg, bg: bg}) do
+  defp build_h_bar_strip(value, i, %{
+         state: state,
+         levels: levels,
+         level_count: level_count,
+         full_char: full_char,
+         bar_width: bar_width,
+         label_width: label_width,
+         value_width: value_width,
+         viewport_labels: viewport_labels,
+         fg: fg,
+         bg: bg
+       }) do
     normalized = Visualization.normalize(value, state.min_value, state.max_value)
     total_steps = round(normalized * bar_width * level_count)
     full_blocks = div(total_steps, level_count)
     partial_idx = rem(total_steps, level_count)
     full_str = Visualization.safe_duplicate(full_char, full_blocks)
-    partial_str = if partial_idx > 0 and full_blocks < bar_width, do: Enum.at(levels, partial_idx, ""), else: ""
+
+    partial_str =
+      if partial_idx > 0 and full_blocks < bar_width,
+        do: Enum.at(levels, partial_idx, ""),
+        else: ""
+
     bar_used = full_blocks + if(partial_idx > 0 and full_blocks < bar_width, do: 1, else: 0)
     padding = Visualization.safe_duplicate(" ", bar_width - bar_used)
     label_style = %{fg: fg, bg: bg}
@@ -147,7 +172,9 @@ defmodule Drafter.Widget.Chart.Bar do
         []
       end
 
-    segs = segs ++ [Segment.new(IO.iodata_to_binary([full_str, partial_str, padding]), %{fg: fg, bg: bg})]
+    segs =
+      segs ++
+        [Segment.new(IO.iodata_to_binary([full_str, partial_str, padding]), %{fg: fg, bg: bg})]
 
     segs =
       if value_width > 0 do
@@ -164,9 +191,14 @@ defmodule Drafter.Widget.Chart.Bar do
     data = state.data
 
     cond do
-      data == [] -> Shared.empty_strips(height, bg)
-      not is_list(hd(data)) -> render_bar_chart_v(state, width, height, bg, state.color || {100, 200, 100})
-      true -> render_clustered_bar_data(state, data, width, height, bg)
+      data == [] ->
+        Shared.empty_strips(height, bg)
+
+      not is_list(hd(data)) ->
+        render_bar_chart_v(state, width, height, bg, state.color || {100, 200, 100})
+
+      true ->
+        render_clustered_bar_data(state, data, width, height, bg)
     end
   end
 
@@ -187,8 +219,8 @@ defmodule Drafter.Widget.Chart.Bar do
     zero_pb = round((0 - state.min_value) / range * total_px) |> max(0) |> min(total_px)
 
     bars =
-      for g <- 0..(actual_groups - 1) do
-        for s <- 0..(num_series - 1) do
+      for g <- 0..(actual_groups - 1)//1 do
+        for s <- 0..(num_series - 1)//1 do
           val = sliced |> Enum.at(s, []) |> Enum.at(g, 0) || 0
           bar_pb = round((val - state.min_value) / range * total_px) |> max(0) |> min(total_px)
           {zero_pb, bar_pb, Enum.at(colors, s, hd(colors))}
@@ -210,17 +242,28 @@ defmodule Drafter.Widget.Chart.Bar do
       bg: bg
     }
 
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       segments = build_clustered_row_segments(row, ctx)
       padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
       Strip.new(segments ++ padding)
     end
   end
 
-  defp build_clustered_row_segments(row, %{actual_groups: actual_groups, num_series: num_series, group_width: group_width, width: width, bars: bars, height: height, total_px: total_px, gap: gap, gap_seg: gap_seg, bg: bg}) do
-    Enum.flat_map(0..(actual_groups - 1), fn g ->
+  defp build_clustered_row_segments(row, %{
+         actual_groups: actual_groups,
+         num_series: num_series,
+         group_width: group_width,
+         width: width,
+         bars: bars,
+         height: height,
+         total_px: total_px,
+         gap: gap,
+         gap_seg: gap_seg,
+         bg: bg
+       }) do
+    Enum.flat_map(0..(actual_groups - 1)//1, fn g ->
       bar_segs =
-        0..(num_series - 1)
+        0..(num_series - 1)//1
         |> Enum.filter(fn s -> g * group_width + s < width end)
         |> Enum.map(fn s ->
           {zpb, bpb, color} = bars |> Enum.at(g) |> Enum.at(s)
@@ -235,9 +278,14 @@ defmodule Drafter.Widget.Chart.Bar do
     data = state.data
 
     cond do
-      data == [] -> Shared.empty_strips(height, bg)
-      not is_list(hd(data)) -> render_bar_chart_v(state, width, height, bg, state.color || {100, 200, 100})
-      true -> render_stacked_bar_data(state, data, width, height, bg)
+      data == [] ->
+        Shared.empty_strips(height, bg)
+
+      not is_list(hd(data)) ->
+        render_bar_chart_v(state, width, height, bg, state.color || {100, 200, 100})
+
+      true ->
+        render_stacked_bar_data(state, data, width, height, bg)
     end
   end
 
@@ -258,7 +306,7 @@ defmodule Drafter.Widget.Chart.Bar do
     stacks = build_stacks(actual, num_series, sliced, colors, zero_pb, range, total_px)
     gap_seg = Segment.new(String.duplicate(" ", gap), %{bg: bg})
 
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       segments = build_stacked_bar_row(row, height, actual, stacks, total_px, gap, gap_seg, bg)
       padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
       Strip.new(segments ++ padding)
@@ -266,15 +314,16 @@ defmodule Drafter.Widget.Chart.Bar do
   end
 
   defp build_stacked_bar_row(row, height, actual, stacks, total_px, gap, gap_seg, bg) do
-    Enum.flat_map(0..(actual - 1), fn p ->
+    Enum.flat_map(0..(actual - 1)//1, fn p ->
       seg = stacked_bar_char(row, height, Enum.at(stacks, p, []), total_px, bg)
       if gap > 0 and p < actual - 1, do: [seg, gap_seg], else: [seg]
     end)
   end
 
   defp build_stacks(actual, num_series, sliced, colors, zero_pb, range, total_px) do
-    for p <- 0..(actual - 1) do
-      Enum.reduce(0..(num_series - 1), {zero_pb, zero_pb, []}, fn s, {pos_top, neg_top, segs} ->
+    for p <- 0..(actual - 1)//1 do
+      Enum.reduce(0..(num_series - 1)//1, {zero_pb, zero_pb, []}, fn s,
+                                                                     {pos_top, neg_top, segs} ->
         val = sliced |> Enum.at(s, []) |> Enum.at(p, 0) || 0
         px = round(abs(val) / range * total_px)
         color = Enum.at(colors, s, hd(colors))
@@ -299,9 +348,14 @@ defmodule Drafter.Widget.Chart.Bar do
     data = state.data
 
     cond do
-      data == [] -> Shared.empty_strips(height, bg)
-      not is_list(hd(data)) -> render_bar_chart_h(state, width, height, bg, state.color || {100, 200, 100})
-      true -> render_clustered_bar_h_data(state, data, width, height, bg)
+      data == [] ->
+        Shared.empty_strips(height, bg)
+
+      not is_list(hd(data)) ->
+        render_bar_chart_h(state, width, height, bg, state.color || {100, 200, 100})
+
+      true ->
+        render_clustered_bar_h_data(state, data, width, height, bg)
     end
   end
 
@@ -318,7 +372,17 @@ defmodule Drafter.Widget.Chart.Bar do
     sliced = Enum.map(data, fn s -> Enum.slice(s, start_g, actual_groups) end)
     viewport_labels = Enum.slice(state.bar_labels, start_g, actual_groups)
     label_width = h_label_width(state, viewport_labels)
-    value_width = if state.show_values, do: data |> List.flatten() |> Enum.map(fn v -> String.length(Visualization.format_number(v)) end) |> Enum.max(fn -> 0 end) |> Kernel.+(1), else: 0
+
+    value_width =
+      if state.show_values,
+        do:
+          data
+          |> List.flatten()
+          |> Enum.map(fn v -> String.length(Visualization.format_number(v)) end)
+          |> Enum.max(fn -> 0 end)
+          |> Kernel.+(1),
+        else: 0
+
     bar_width = max(1, width - label_width - value_width)
     levels = CharacterSet.sparkline_levels_h()
     level_count = length(levels) - 1
@@ -326,7 +390,7 @@ defmodule Drafter.Widget.Chart.Bar do
     gap_strip = Strip.new([Segment.new(String.duplicate(" ", width), %{bg: bg})])
 
     strips =
-      for g <- 0..(actual_groups - 1) do
+      for g <- 0..(actual_groups - 1)//1 do
         h_ctx = %{
           sliced: sliced,
           colors: colors,
@@ -342,7 +406,7 @@ defmodule Drafter.Widget.Chart.Bar do
         }
 
         group_strips =
-          for s <- 0..(num_series - 1) do
+          for s <- 0..(num_series - 1)//1 do
             build_clustered_h_series_strip(s, g, h_ctx)
           end
 
@@ -355,7 +419,19 @@ defmodule Drafter.Widget.Chart.Bar do
     Enum.take(strips, height)
   end
 
-  defp build_clustered_h_series_strip(s, g, %{sliced: sliced, colors: colors, state: state, levels: levels, level_count: level_count, full_char: full_char, bar_width: bar_width, label_width: label_width, value_width: value_width, viewport_labels: viewport_labels, bg: bg}) do
+  defp build_clustered_h_series_strip(s, g, %{
+         sliced: sliced,
+         colors: colors,
+         state: state,
+         levels: levels,
+         level_count: level_count,
+         full_char: full_char,
+         bar_width: bar_width,
+         label_width: label_width,
+         value_width: value_width,
+         viewport_labels: viewport_labels,
+         bg: bg
+       }) do
     val = sliced |> Enum.at(s, []) |> Enum.at(g, 0) || 0
     color = Enum.at(colors, s, hd(colors))
     normalized = Visualization.normalize(val, state.min_value, state.max_value)
@@ -363,19 +439,30 @@ defmodule Drafter.Widget.Chart.Bar do
     full_blocks = div(total_steps, level_count)
     partial_idx = rem(total_steps, level_count)
     full_str = Visualization.safe_duplicate(full_char, full_blocks)
-    partial_str = if partial_idx > 0 and full_blocks < bar_width, do: Enum.at(levels, partial_idx, ""), else: ""
+
+    partial_str =
+      if partial_idx > 0 and full_blocks < bar_width,
+        do: Enum.at(levels, partial_idx, ""),
+        else: ""
+
     bar_used = full_blocks + if(partial_idx > 0 and full_blocks < bar_width, do: 1, else: 0)
     padding = Visualization.safe_duplicate(" ", bar_width - bar_used)
 
     segs =
       if label_width > 0 do
-        lbl = if s == 0, do: Enum.at(viewport_labels, g, "") |> String.pad_trailing(label_width), else: String.duplicate(" ", label_width)
+        lbl =
+          if s == 0,
+            do: Enum.at(viewport_labels, g, "") |> String.pad_trailing(label_width),
+            else: String.duplicate(" ", label_width)
+
         [Segment.new(lbl, %{fg: color, bg: bg})]
       else
         []
       end
 
-    segs = segs ++ [Segment.new(IO.iodata_to_binary([full_str, partial_str, padding]), %{fg: color, bg: bg})]
+    segs =
+      segs ++
+        [Segment.new(IO.iodata_to_binary([full_str, partial_str, padding]), %{fg: color, bg: bg})]
 
     segs =
       if value_width > 0 do
@@ -392,9 +479,14 @@ defmodule Drafter.Widget.Chart.Bar do
     data = state.data
 
     cond do
-      data == [] -> Shared.empty_strips(height, bg)
-      not is_list(hd(data)) -> render_bar_chart_h(state, width, height, bg, state.color || {100, 200, 100})
-      true -> render_stacked_bar_h_data(state, data, width, height, bg)
+      data == [] ->
+        Shared.empty_strips(height, bg)
+
+      not is_list(hd(data)) ->
+        render_bar_chart_h(state, width, height, bg, state.color || {100, 200, 100})
+
+      true ->
+        render_stacked_bar_h_data(state, data, width, height, bg)
     end
   end
 
@@ -428,7 +520,7 @@ defmodule Drafter.Widget.Chart.Bar do
     }
 
     strips =
-      for p <- 0..(actual - 1) do
+      for p <- 0..(actual - 1)//1 do
         strip = build_stacked_h_strip(p, sh_ctx)
         if gap > 0 and p < actual - 1, do: [strip | List.duplicate(gap_strip, gap)], else: [strip]
       end
@@ -437,7 +529,17 @@ defmodule Drafter.Widget.Chart.Bar do
     Enum.take(strips, height)
   end
 
-  defp build_stacked_h_strip(p, %{sliced: sliced, colors: colors, num_series: num_series, range: range, bar_width: bar_width, full_char: full_char, label_width: label_width, viewport_labels: viewport_labels, bg: bg}) do
+  defp build_stacked_h_strip(p, %{
+         sliced: sliced,
+         colors: colors,
+         num_series: num_series,
+         range: range,
+         bar_width: bar_width,
+         full_char: full_char,
+         label_width: label_width,
+         viewport_labels: viewport_labels,
+         bg: bg
+       }) do
     label_segs =
       if label_width > 0 do
         lbl = Enum.at(viewport_labels, p, "") |> String.pad_trailing(label_width)
@@ -447,7 +549,7 @@ defmodule Drafter.Widget.Chart.Bar do
       end
 
     bar_segs =
-      for s <- 0..(num_series - 1) do
+      for s <- 0..(num_series - 1)//1 do
         val = sliced |> Enum.at(s, []) |> Enum.at(p, 0) || 0
         color = Enum.at(colors, s, hd(colors))
         seg_width = round(abs(val) / range * bar_width)
@@ -459,7 +561,8 @@ defmodule Drafter.Widget.Chart.Bar do
     Strip.new(label_segs ++ bar_segs ++ [Segment.new(padding, %{bg: bg})])
   end
 
-  def render_range_bar(state, _width, height, bg, _fg) when state.data == [], do: Shared.empty_strips(height, bg)
+  def render_range_bar(state, _width, height, bg, _fg) when state.data == [],
+    do: Shared.empty_strips(height, bg)
 
   def render_range_bar(state, width, height, bg, fg) do
     scroll_offset = state._internal.scroll_offset || 0
@@ -483,8 +586,12 @@ defmodule Drafter.Widget.Chart.Bar do
   end
 
   defp render_range_bar_rows(bars, height, width, total_px, fg, bg) do
-    for row <- 0..(height - 1) do
-      segments = Enum.map(bars, fn {lo_pb, hi_pb} -> half_block_bar_char(row, height, lo_pb, hi_pb, total_px, fg, bg) end)
+    for row <- 0..(height - 1)//1 do
+      segments =
+        Enum.map(bars, fn {lo_pb, hi_pb} ->
+          half_block_bar_char(row, height, lo_pb, hi_pb, total_px, fg, bg)
+        end)
+
       padding = List.duplicate(Segment.new(" ", %{bg: bg}), max(0, width - length(segments)))
       Strip.new(segments ++ padding)
     end
@@ -537,7 +644,11 @@ defmodule Drafter.Widget.Chart.Bar do
       viewport
       |> Enum.flat_map(fn item ->
         {lo, hi} = extract_range_item(item, state)
-        [String.length(Visualization.format_number(lo)), String.length(Visualization.format_number(hi))]
+
+        [
+          String.length(Visualization.format_number(lo)),
+          String.length(Visualization.format_number(hi))
+        ]
       end)
       |> Enum.max(fn -> 0 end)
       |> Kernel.+(1)
@@ -546,7 +657,18 @@ defmodule Drafter.Widget.Chart.Bar do
     end
   end
 
-  defp build_range_bar_h_strip(item, i, %{state: state, levels: levels, level_count: level_count, full_char: full_char, bar_width: bar_width, label_width: label_width, value_width: value_width, viewport_labels: viewport_labels, fg: fg, bg: bg}) do
+  defp build_range_bar_h_strip(item, i, %{
+         state: state,
+         levels: levels,
+         level_count: level_count,
+         full_char: full_char,
+         bar_width: bar_width,
+         label_width: label_width,
+         value_width: value_width,
+         viewport_labels: viewport_labels,
+         fg: fg,
+         bg: bg
+       }) do
     {lo, hi} = extract_range_item(item, state)
     lo_norm = Visualization.normalize(lo, state.min_value, state.max_value)
     hi_norm = Visualization.normalize(hi, state.min_value, state.max_value)
@@ -557,8 +679,14 @@ defmodule Drafter.Widget.Chart.Bar do
     hi_partial = rem(hi_steps, level_count)
     empty_before = Visualization.safe_duplicate(" ", lo_full)
     bar_fill = Visualization.safe_duplicate(full_char, max(0, hi_full - lo_full))
-    partial_str = if hi_partial > 0 and hi_full < bar_width, do: Enum.at(levels, hi_partial, ""), else: ""
-    used = lo_full + max(0, hi_full - lo_full) + if(hi_partial > 0 and hi_full < bar_width, do: 1, else: 0)
+
+    partial_str =
+      if hi_partial > 0 and hi_full < bar_width, do: Enum.at(levels, hi_partial, ""), else: ""
+
+    used =
+      lo_full + max(0, hi_full - lo_full) +
+        if(hi_partial > 0 and hi_full < bar_width, do: 1, else: 0)
+
     padding = Visualization.safe_duplicate(" ", max(0, bar_width - used))
 
     segs =
@@ -569,7 +697,14 @@ defmodule Drafter.Widget.Chart.Bar do
         []
       end
 
-    segs = segs ++ [Segment.new(IO.iodata_to_binary([empty_before, bar_fill, partial_str, padding]), %{fg: fg, bg: bg})]
+    segs =
+      segs ++
+        [
+          Segment.new(IO.iodata_to_binary([empty_before, bar_fill, partial_str, padding]), %{
+            fg: fg,
+            bg: bg
+          })
+        ]
 
     segs =
       if value_width > 0 do
@@ -652,7 +787,7 @@ defmodule Drafter.Widget.Chart.Bar do
 
     pixel_height = height * 2
 
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       row_top = (height - 1 - row) * 2
       row_bottom = row_top + 1
 
@@ -666,8 +801,16 @@ defmodule Drafter.Widget.Chart.Bar do
     end
   end
 
-  defp tall_bar_segment(bar_pixel, row_top, _row_bottom, _color, bg) when bar_pixel <= row_top, do: Segment.new(" ", %{bg: bg})
-  defp tall_bar_segment(bar_pixel, _row_top, row_bottom, color, bg) when bar_pixel >= row_bottom + 1, do: Segment.new(CharacterSet.fill(:full), %{fg: color, bg: bg})
-  defp tall_bar_segment(bar_pixel, row_top, _row_bottom, color, bg) when bar_pixel == row_top + 1, do: Segment.new(CharacterSet.fill(:lower_half), %{fg: color, bg: bg})
-  defp tall_bar_segment(_bar_pixel, _row_top, _row_bottom, _color, bg), do: Segment.new(" ", %{bg: bg})
+  defp tall_bar_segment(bar_pixel, row_top, _row_bottom, _color, bg) when bar_pixel <= row_top,
+    do: Segment.new(" ", %{bg: bg})
+
+  defp tall_bar_segment(bar_pixel, _row_top, row_bottom, color, bg)
+       when bar_pixel >= row_bottom + 1,
+       do: Segment.new(CharacterSet.fill(:full), %{fg: color, bg: bg})
+
+  defp tall_bar_segment(bar_pixel, row_top, _row_bottom, color, bg) when bar_pixel == row_top + 1,
+    do: Segment.new(CharacterSet.fill(:lower_half), %{fg: color, bg: bg})
+
+  defp tall_bar_segment(_bar_pixel, _row_top, _row_bottom, _color, bg),
+    do: Segment.new(" ", %{bg: bg})
 end

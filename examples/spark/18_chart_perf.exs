@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule ChartPerf do
   use Drafter
@@ -74,6 +74,7 @@ defmodule ChartPerf do
         [
           label("Series A (line, #{format_count(count)} pts):"),
           chart(state.series_a,
+            renderer: :pixel,
             chart_type: :line,
             height: 8,
             color: {100, 200, 255},
@@ -82,6 +83,7 @@ defmodule ChartPerf do
           label(""),
           label("Series B (area inverted, #{format_count(count)} pts):"),
           chart(state.series_b,
+            renderer: :pixel,
             chart_type: :area,
             height: 8,
             color: {255, 150, 80},
@@ -91,6 +93,7 @@ defmodule ChartPerf do
           label(""),
           label("Series C (line, #{format_count(count)} pts):"),
           chart(state.series_c,
+            renderer: :pixel,
             chart_type: :line,
             height: 8,
             color: {150, 255, 150},
@@ -99,6 +102,7 @@ defmodule ChartPerf do
           label(""),
           label("Series D (area, #{format_count(count)} pts):"),
           chart(state.series_d,
+            renderer: :pixel,
             chart_type: :area,
             height: 8,
             color: {255, 100, 200},
@@ -107,6 +111,7 @@ defmodule ChartPerf do
           label(""),
           label("Multi-series line A+B (#{format_count(count)} pts each):"),
           chart([state.series_a, state.series_b],
+            renderer: :pixel,
             chart_type: :line,
             height: 8,
             colors: [{100, 200, 255}, {255, 150, 80}]
@@ -114,6 +119,7 @@ defmodule ChartPerf do
           label(""),
           label("Multi-series line C+D (#{format_count(count)} pts each):"),
           chart([state.series_c, state.series_d],
+            renderer: :pixel,
             chart_type: :line,
             height: 8,
             colors: [{150, 255, 150}, {255, 100, 200}]
@@ -121,6 +127,7 @@ defmodule ChartPerf do
           label(""),
           label("Multi-series scope-style raw A+B+C+D (#{format_count(count)} pts each):"),
           chart([state.series_a, state.series_b, state.series_c, state.series_d],
+            renderer: :pixel,
             chart_type: :line,
             height: 10,
             raw_data: true,
@@ -130,6 +137,7 @@ defmodule ChartPerf do
           label(""),
           label("Clustered bar A+B (#{format_count(count)} pts):"),
           chart([state.series_a, state.series_b],
+            renderer: :pixel,
             chart_type: :clustered_bar,
             height: 6,
             colors: [{100, 200, 255}, {255, 150, 80}]
@@ -137,6 +145,7 @@ defmodule ChartPerf do
           label(""),
           label("Bar chart A (#{format_count(count)} pts):"),
           chart(state.series_a,
+            renderer: :pixel,
             chart_type: :bar,
             height: 3,
             color: {150, 255, 150}

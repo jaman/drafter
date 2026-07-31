@@ -27,11 +27,21 @@ defmodule Drafter.Transport.Telnet do
   defp do_accept(listen_socket, opts) do
     case :gen_tcp.accept(listen_socket) do
       {:ok, client_socket} ->
-        spawn(fn -> handle_connection(client_socket, opts) end)
+        handler = spawn(fn -> await_socket(client_socket, opts) end)
+        :ok = :gen_tcp.controlling_process(client_socket, handler)
+        send(handler, :socket_ready)
         do_accept(listen_socket, opts)
 
       {:error, :closed} ->
         :ok
+    end
+  end
+
+  defp await_socket(socket, opts) do
+    receive do
+      :socket_ready -> handle_connection(socket, opts)
+    after
+      5_000 -> :gen_tcp.close(socket)
     end
   end
 
@@ -41,7 +51,9 @@ defmodule Drafter.Transport.Telnet do
     mode = Keyword.get(server_opts, :mode, :isolated)
     mount_props = Keyword.get(server_opts, :mount_props, %{})
 
-    {:ok, driver_pid} = TelnetDriver.start_link(socket: socket)
+    {:ok, driver_pid} = TelnetDriver.start_link(socket: socket, session: self())
+    :ok = :gen_tcp.controlling_process(socket, driver_pid)
+    :ok = :inet.setopts(socket, [{:active, true}])
 
     session_ctx = start_session_services(driver_pid)
     TelnetDriver.setup(driver_pid, session_ctx.event_manager)
@@ -59,11 +71,11 @@ defmodule Drafter.Transport.Telnet do
 
   defp build_session_opts(app_module, :shared, mount_props) do
     shared_state = Session.SharedState.get_or_start(app_module)
-    [mode: :shared, shared_state: shared_state] ++ Map.to_list(mount_props)
+    [mode: :shared, shared_state: shared_state, props: mount_props]
   end
 
   defp build_session_opts(_app_module, mode, mount_props) do
-    [mode: mode] ++ Map.to_list(mount_props)
+    [mode: mode, props: mount_props]
   end
 
   defp start_session_services(driver_pid) do
@@ -80,7 +92,13 @@ defmodule Drafter.Transport.Telnet do
     {:ok, eh} = EventHandler.start_link(name: nil)
     {:ok, sm} = ScreenManager.start_link(name: nil, event_handler: eh)
 
-    %{event_manager: em, compositor: comp, screen_manager: sm, theme_manager: tm, event_handler: eh}
+    %{
+      event_manager: em,
+      compositor: comp,
+      screen_manager: sm,
+      theme_manager: tm,
+      event_handler: eh
+    }
   end
 
   defp stop_session_services(ctx) do

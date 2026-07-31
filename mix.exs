@@ -23,7 +23,9 @@ defmodule Drafter.MixProject do
           "README.md",
           "CHANGELOG.md",
           "guides/remote_tui.md": [title: "Remote TUI"],
-          "guides/writing_widgets.md": [title: "Writing Widgets & Libraries"]
+          "guides/writing_widgets.md": [title: "Writing Widgets & Libraries"],
+          "guides/large_text.md": [title: "Large Text"],
+          "guides/design_notes.md": [title: "Design Notes"]
         ],
         groups_for_modules: [
           "Remote Servers": [Drafter.Server],

@@ -33,7 +33,10 @@ defmodule Drafter.Widget.TextInput.Clipboard do
   def cut_selection(state) do
     copy_selection(state)
     {sel_start, sel_end} = Selection.get_selection_range(state)
-    {before, _middle, after_text} = Selection.split_text_at_selection(state.text, sel_start, sel_end)
+
+    {before, _middle, after_text} =
+      Selection.split_text_at_selection(state.text, sel_start, sel_end)
+
     new_text = before <> after_text
 
     %{
@@ -66,7 +69,10 @@ defmodule Drafter.Widget.TextInput.Clipboard do
 
     if Selection.has_selection?(state) do
       {sel_start, sel_end} = Selection.get_selection_range(state)
-      {before, _middle, after_text} = Selection.split_text_at_selection(state.text, sel_start, sel_end)
+
+      {before, _middle, after_text} =
+        Selection.split_text_at_selection(state.text, sel_start, sel_end)
+
       new_text = before <> clipboard_text <> after_text
       new_position = sel_start + String.length(clipboard_text)
 

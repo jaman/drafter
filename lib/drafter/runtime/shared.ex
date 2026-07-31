@@ -8,8 +8,8 @@ defmodule Drafter.Runtime.Shared do
   session. Each session merges its per-session `mount_props` over the shared state and
   re-renders, so all clients stay in sync while keeping their own view-local props.
 
-  Selected per shared session at runtime (via the session's process dictionary), not by
-  the app module — the same app can run standalone or shared.
+  Selected per shared session at runtime, via the session's process dictionary, rather
+  than by the app module. The same app can run standalone or shared.
   """
 
   @behaviour Drafter.Runtime
@@ -32,7 +32,8 @@ defmodule Drafter.Runtime.Shared do
   def handle_input(app, event, state), do: push(Callback.handle_input(app, event, state))
 
   @impl true
-  def handle_message(app, name, data, state), do: push(Callback.handle_message(app, name, data, state))
+  def handle_message(app, name, data, state),
+    do: push(Callback.handle_message(app, name, data, state))
 
   @impl true
   def timer(app, timer_id, state), do: Callback.timer(app, timer_id, state)

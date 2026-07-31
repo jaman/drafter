@@ -272,12 +272,16 @@ defmodule Drafter.Widget.TextInput do
   defp handle_unfocused_event(:activate, state), do: {:ok, %{state | focused: true}}
   defp handle_unfocused_event({:focus}, state), do: handle_focus_event(state)
   defp handle_unfocused_event({:blur}, state), do: handle_blur_event(state)
-  defp handle_unfocused_event({:mouse, %{type: :mouse_up, x: x}}, state), do: handle_mouse_click(state, x)
+
+  defp handle_unfocused_event({:mouse, %{type: :mouse_up, x: x}}, state),
+    do: handle_mouse_click(state, x)
+
   defp handle_unfocused_event(:validate, state), do: {:ok, Validation.do_validate(state)}
   defp handle_unfocused_event(:clear_error, state), do: {:ok, %{state | error: nil}}
   defp handle_unfocused_event(_, state), do: {:noreply, state}
 
-  defp handle_focused_event({:key, dir, [:shift]}, state) when dir in [:left, :right, :home, :end] do
+  defp handle_focused_event({:key, dir, [:shift]}, state)
+       when dir in [:left, :right, :home, :end] do
     new_state = Selection.handle_shift_selection(state, dir)
     trigger_change(new_state)
     {:ok, new_state}
@@ -290,16 +294,28 @@ defmodule Drafter.Widget.TextInput do
   defp handle_focused_event({:key, :backspace}, state), do: handle_backspace(state)
   defp handle_focused_event({:key, :delete}, state), do: handle_delete_key(state)
   defp handle_focused_event({:key, key, [:ctrl]}, state), do: handle_ctrl_key(state, key)
-  defp handle_focused_event({:key, key, [:ctrl, :shift]}, state) when key in [:left, :right], do: handle_word_selection(state, key)
+
+  defp handle_focused_event({:key, key, [:ctrl, :shift]}, state) when key in [:left, :right],
+    do: handle_word_selection(state, key)
+
   defp handle_focused_event({:key, _key, [:ctrl | _]}, state), do: {:bubble, state}
 
   defp handle_focused_event({:key, :enter}, state) when state.on_submit != nil do
-    new_state = %{state | text: "", cursor_position: 0, scroll_offset: 0, selection_start: nil, selection_end: nil}
+    new_state = %{
+      state
+      | text: "",
+        cursor_position: 0,
+        scroll_offset: 0,
+        selection_start: nil,
+        selection_end: nil
+    }
+
     actions =
       case trigger_submit(state) do
         {:app_callback, _, _} = cb -> [cb]
         _ -> []
       end
+
     {:ok, new_state, actions}
   end
 
@@ -321,8 +337,12 @@ defmodule Drafter.Widget.TextInput do
     try_insert_char(state, Atom.to_string(key))
   end
 
-  defp handle_focused_event({:mouse, %{type: :mouse_up, x: x}}, state), do: handle_mouse_click(state, x)
-  defp handle_focused_event({:mouse, %{type: :drag, x: x}}, state), do: handle_mouse_drag(state, x)
+  defp handle_focused_event({:mouse, %{type: :mouse_up, x: x}}, state),
+    do: handle_mouse_click(state, x)
+
+  defp handle_focused_event({:mouse, %{type: :drag, x: x}}, state),
+    do: handle_mouse_drag(state, x)
+
   defp handle_focused_event(:activate, state), do: {:ok, %{state | focused: true}}
   defp handle_focused_event({:focus}, state), do: handle_focus_event(state)
   defp handle_focused_event({:blur}, state), do: handle_blur_event(state)
@@ -332,27 +352,46 @@ defmodule Drafter.Widget.TextInput do
 
   defp handle_cursor_move(state, :left) do
     new_position = max(0, state.cursor_position - 1)
-    new_state = Selection.clear_selection(state) |> Map.put(:cursor_position, new_position) |> Rendering.adjust_scroll_offset()
+
+    new_state =
+      Selection.clear_selection(state)
+      |> Map.put(:cursor_position, new_position)
+      |> Rendering.adjust_scroll_offset()
+
     trigger_change(new_state)
     {:ok, new_state}
   end
 
   defp handle_cursor_move(state, :right) do
     new_position = min(String.length(state.text), state.cursor_position + 1)
-    new_state = Selection.clear_selection(state) |> Map.put(:cursor_position, new_position) |> Rendering.adjust_scroll_offset()
+
+    new_state =
+      Selection.clear_selection(state)
+      |> Map.put(:cursor_position, new_position)
+      |> Rendering.adjust_scroll_offset()
+
     trigger_change(new_state)
     {:ok, new_state}
   end
 
   defp handle_cursor_move(state, :home) do
-    new_state = Selection.clear_selection(state) |> Map.put(:cursor_position, 0) |> Map.put(:scroll_offset, 0)
+    new_state =
+      Selection.clear_selection(state)
+      |> Map.put(:cursor_position, 0)
+      |> Map.put(:scroll_offset, 0)
+
     trigger_change(new_state)
     {:ok, new_state}
   end
 
   defp handle_cursor_move(state, :end) do
     text_length = String.length(state.text)
-    new_state = Selection.clear_selection(state) |> Map.put(:cursor_position, text_length) |> Rendering.adjust_scroll_offset()
+
+    new_state =
+      Selection.clear_selection(state)
+      |> Map.put(:cursor_position, text_length)
+      |> Rendering.adjust_scroll_offset()
+
     trigger_change(new_state)
     {:ok, new_state}
   end
@@ -372,9 +411,11 @@ defmodule Drafter.Widget.TextInput do
   defp delete_char_before_cursor(state) do
     {before, after_text} = String.split_at(state.text, state.cursor_position)
     new_text = String.slice(before, 0..-2//1) <> after_text
+
     new_state =
       %{state | text: new_text, cursor_position: state.cursor_position - 1}
       |> Rendering.adjust_scroll_offset()
+
     trigger_change(new_state)
     {:ok, new_state}
   end
@@ -424,14 +465,25 @@ defmodule Drafter.Widget.TextInput do
 
   defp handle_ctrl_key(state, :a) do
     text_length = String.length(state.text)
-    new_state = %{state | selection_start: 0, selection_end: text_length, cursor_position: text_length}
+
+    new_state = %{
+      state
+      | selection_start: 0,
+        selection_end: text_length,
+        cursor_position: text_length
+    }
+
     trigger_change(new_state)
     {:ok, new_state}
   end
 
   defp handle_ctrl_key(state, :u) do
     after_text = String.slice(state.text, state.cursor_position..-1//1)
-    new_state = %{state | text: after_text, cursor_position: 0, scroll_offset: 0} |> Selection.clear_selection()
+
+    new_state =
+      %{state | text: after_text, cursor_position: 0, scroll_offset: 0}
+      |> Selection.clear_selection()
+
     trigger_change(new_state)
     {:ok, new_state}
   end
@@ -485,7 +537,13 @@ defmodule Drafter.Widget.TextInput do
   defp handle_mouse_click(state, x) do
     click_pos = max(0, x - 1)
     actual_pos = min(click_pos + state.scroll_offset, String.length(state.text))
-    new_state = Selection.clear_selection(state) |> Map.put(:focused, true) |> Map.put(:cursor_position, actual_pos) |> Rendering.adjust_scroll_offset()
+
+    new_state =
+      Selection.clear_selection(state)
+      |> Map.put(:focused, true)
+      |> Map.put(:cursor_position, actual_pos)
+      |> Rendering.adjust_scroll_offset()
+
     trigger_change(new_state)
     {:ok, new_state}
   end
@@ -493,7 +551,14 @@ defmodule Drafter.Widget.TextInput do
   defp handle_mouse_drag(state, x) do
     drag_pos = max(0, x - 1)
     actual_pos = min(drag_pos + state.scroll_offset, String.length(state.text))
-    new_state = state |> Map.put(:focused, true) |> Map.put(:cursor_position, actual_pos) |> Selection.extend_selection(actual_pos) |> Rendering.adjust_scroll_offset()
+
+    new_state =
+      state
+      |> Map.put(:focused, true)
+      |> Map.put(:cursor_position, actual_pos)
+      |> Selection.extend_selection(actual_pos)
+      |> Rendering.adjust_scroll_offset()
+
     trigger_change(new_state)
     {:ok, new_state}
   end
@@ -502,10 +567,18 @@ defmodule Drafter.Widget.TextInput do
     new_state =
       if state.select_on_focus do
         text_length = String.length(state.text)
-        %{state | focused: true, selection_start: 0, selection_end: text_length, cursor_position: text_length}
+
+        %{
+          state
+          | focused: true,
+            selection_start: 0,
+            selection_end: text_length,
+            cursor_position: text_length
+        }
       else
         %{state | focused: true}
       end
+
     {:ok, new_state}
   end
 
@@ -564,6 +637,7 @@ defmodule Drafter.Widget.TextInput do
     session_pid = self()
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
     on_submit_fn = build_submit_fn(on_submit, keep_focus, session_pid, widget_id)
+
     %{
       text: value,
       placeholder: Keyword.get(opts, :placeholder, ""),
@@ -594,17 +668,23 @@ defmodule Drafter.Widget.TextInput do
       type: mount_props.type,
       select_on_focus: mount_props.select_on_focus
     }
-    base = if existing_state.width != mount_props.width do
-      Map.put(base, :width, mount_props.width)
-    else
-      base
-    end
-    base = if existing_state.placeholder != mount_props.placeholder do
-      Map.put(base, :placeholder, mount_props.placeholder)
-    else
-      base
-    end
-    if (Keyword.has_key?(opts, :bind) or Keyword.has_key?(opts, :value)) and existing_state.text != mount_props.text do
+
+    base =
+      if existing_state.width != mount_props.width do
+        Map.put(base, :width, mount_props.width)
+      else
+        base
+      end
+
+    base =
+      if existing_state.placeholder != mount_props.placeholder do
+        Map.put(base, :placeholder, mount_props.placeholder)
+      else
+        base
+      end
+
+    if (Keyword.has_key?(opts, :bind) or Keyword.has_key?(opts, :value)) and
+         existing_state.text != mount_props.text do
       Map.put(base, :text, mount_props.text)
     else
       base
@@ -636,7 +716,13 @@ defmodule Drafter.Widget.TextInput do
     new_text = before <> str <> after_text
 
     new_state =
-      %{state | text: new_text, cursor_position: state.cursor_position + String.length(str), selection_start: nil, selection_end: nil}
+      %{
+        state
+        | text: new_text,
+          cursor_position: state.cursor_position + String.length(str),
+          selection_start: nil,
+          selection_end: nil
+      }
       |> Rendering.adjust_scroll_offset()
 
     trigger_change(new_state)
@@ -646,6 +732,7 @@ defmodule Drafter.Widget.TextInput do
   defp trigger_change(state) do
     if state.on_change do
       validation_result = Validation.build_validation_result(state)
+
       try do
         state.on_change.({state.text, validation_result})
       rescue
@@ -657,6 +744,7 @@ defmodule Drafter.Widget.TextInput do
   defp trigger_submit(state) do
     if state.on_submit do
       validation_result = Validation.build_validation_result(state)
+
       try do
         state.on_submit.({state.text, validation_result})
       rescue

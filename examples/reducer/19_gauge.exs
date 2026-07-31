@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule GaugeDemo do
   use Drafter, runtime: :reducer
@@ -66,10 +66,10 @@ defmodule GaugeDemo do
       header("GAUGE DEMO"),
       horizontal(
         [
-          gauge(value: 0.27, label: "CPU Busy", flex: 1, height: 6),
-          gauge(value: 0.73, label: "RAM Used", flex: 1, height: 6),
-          gauge(value: 0.96, label: "Root FS", flex: 1, height: 6),
-          gauge(value: state.animated_value, label: "Sys Load", flex: 1, height: 6)
+          gauge(renderer: :pixel, value: 0.27, label: "CPU Busy", flex: 1, height: 6),
+          gauge(renderer: :pixel, value: 0.73, label: "RAM Used", flex: 1, height: 6),
+          gauge(renderer: :pixel, value: 0.96, label: "Root FS", flex: 1, height: 6),
+          gauge(renderer: :pixel, value: state.animated_value, label: "Sys Load", flex: 1, height: 6)
         ],
         gap: 2
       ),
@@ -82,7 +82,7 @@ defmodule GaugeDemo do
         ],
         gap: 1
       ),
-      gauge(value: 0.95, label: "Resize Me", height: state.gauge_height, flex: 1),
+      gauge(renderer: :pixel, value: 0.95, label: "Resize Me", height: state.gauge_height),
       footer(bindings: [{"q", "Quit"}, {"+/-", "Resize"}])
     ])
   end

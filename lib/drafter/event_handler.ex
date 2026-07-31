@@ -3,6 +3,8 @@ defmodule Drafter.EventHandler do
 
   use GenServer
 
+  alias Drafter.Session.Context
+
   defstruct [:handlers, :monitors]
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -52,9 +54,14 @@ defmodule Drafter.EventHandler do
   end
 
   @impl true
-  def handle_call({:register, event_pattern, handler_fn, owner_pid, passthrough, :top}, _from, state) do
+  def handle_call(
+        {:register, event_pattern, handler_fn, owner_pid, passthrough, :top},
+        _from,
+        state
+      ) do
     if Process.alive?(owner_pid) do
       ref = Process.monitor(owner_pid)
+
       handler = %{
         event_pattern: event_pattern,
         handler_fn: handler_fn,
@@ -71,9 +78,14 @@ defmodule Drafter.EventHandler do
     end
   end
 
-  def handle_call({:register, event_pattern, handler_fn, owner_pid, passthrough, :bottom}, _from, state) do
+  def handle_call(
+        {:register, event_pattern, handler_fn, owner_pid, passthrough, :bottom},
+        _from,
+        state
+      ) do
     if Process.alive?(owner_pid) do
       ref = Map.get(state.monitors, owner_pid) || Process.monitor(owner_pid)
+
       handler = %{
         event_pattern: event_pattern,
         handler_fn: handler_fn,
@@ -90,9 +102,14 @@ defmodule Drafter.EventHandler do
     end
   end
 
-  def handle_call({:register, event_pattern, handler_fn, owner_pid, passthrough, {:after, target_pid}}, _from, state) do
+  def handle_call(
+        {:register, event_pattern, handler_fn, owner_pid, passthrough, {:after, target_pid}},
+        _from,
+        state
+      ) do
     if Process.alive?(owner_pid) do
       ref = Map.get(state.monitors, owner_pid) || Process.monitor(owner_pid)
+
       handler = %{
         event_pattern: event_pattern,
         handler_fn: handler_fn,
@@ -192,10 +209,7 @@ defmodule Drafter.EventHandler do
     {:noreply, state}
   end
 
-  defp resolve do
-    Process.get(:drafter_event_handler) ||
-      raise "No EventHandler in process dictionary. Ensure a Drafter session is running."
-  end
+  defp resolve, do: Context.fetch!(:event_handler)
 
   defp insert_after(handlers, target_pid, new_level) do
     Enum.flat_map(handlers, fn level ->
@@ -218,9 +232,10 @@ defmodule Drafter.EventHandler do
 
   defp dispatch_to_handlers(handlers, event) do
     Enum.reduce_while(handlers, :passthrough, fn level, _acc ->
-      matched_handlers = Enum.filter(level, fn handler ->
-        matches_event?(handler.event_pattern, event)
-      end)
+      matched_handlers =
+        Enum.filter(level, fn handler ->
+          matches_event?(handler.event_pattern, event)
+        end)
 
       level_results =
         Enum.map(matched_handlers, fn handler ->
@@ -238,7 +253,8 @@ defmodule Drafter.EventHandler do
         has_non_passthrough and :handled in level_results ->
           {:halt, :handled}
 
-        has_non_passthrough and :handled not in level_results and :passthrough not in level_results ->
+        has_non_passthrough and :handled not in level_results and
+            :passthrough not in level_results ->
           {:cont, :passthrough}
 
         has_passthrough ->

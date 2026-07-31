@@ -10,13 +10,12 @@ defmodule Drafter.ThemeManager do
 
   use GenServer
 
+  alias Drafter.Session.Context
   alias Drafter.Theme
 
-  defstruct [
-    current_theme: nil,
-    available_themes: [],
-    app_pid: nil
-  ]
+  defstruct current_theme: nil,
+            available_themes: [],
+            app_pid: nil
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -80,8 +79,5 @@ defmodule Drafter.ThemeManager do
     {:noreply, %{state | app_pid: app_pid}}
   end
 
-  defp resolve do
-    Process.get(:drafter_theme_manager) ||
-      raise "No ThemeManager in process dictionary. Ensure a Drafter session is running."
-  end
+  defp resolve, do: Context.fetch!(:theme_manager)
 end

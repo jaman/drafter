@@ -183,7 +183,12 @@ defmodule Drafter.Widget.Meter do
     if state.show_label and state.label do
       label_str = truncate(state.label, rect.width)
       padding = max(0, rect.width - String.length(label_str))
-      label_strip = Strip.new([Segment.new(label_str <> String.duplicate(" ", padding), %{fg: {160, 160, 160}})])
+
+      label_strip =
+        Strip.new([
+          Segment.new(label_str <> String.duplicate(" ", padding), %{fg: {160, 160, 160}})
+        ])
+
       [label_strip, bar_strip]
     else
       [bar_strip]
@@ -211,7 +216,7 @@ defmodule Drafter.Widget.Meter do
     full_rows = div(total_eighths, 8)
     remainder = rem(total_eighths, 8)
 
-    for row <- 0..(bar_height - 1) do
+    for row <- 0..(bar_height - 1)//1 do
       row_from_bottom = bar_height - 1 - row
       {char, fg} = vertical_row_char(row_from_bottom, full_rows, remainder, color, track_color)
       bar_str = center_text(char, width)

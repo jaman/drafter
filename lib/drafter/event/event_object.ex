@@ -39,22 +39,36 @@ defmodule Drafter.Event.Object do
     timestamp: nil
   ]
 
-  @type event_type :: :key | :char | :mouse | :focus | :blur | :focus_in | :focus_out |
-                      :mount | :unmount | :show | :hide | :load | :custom | :resize | :timer
+  @type event_type ::
+          :key
+          | :char
+          | :mouse
+          | :focus
+          | :blur
+          | :focus_in
+          | :focus_out
+          | :mount
+          | :unmount
+          | :show
+          | :hide
+          | :load
+          | :custom
+          | :resize
+          | :timer
 
   @type phase :: :capture | :target | :bubble
 
   @type t :: %__MODULE__{
-    type: event_type(),
-    data: term(),
-    target: atom() | String.t() | nil,
-    current_target: atom() | String.t() | nil,
-    phase: phase(),
-    default_prevented: boolean(),
-    propagation_stopped: boolean(),
-    immediate_propagation_stopped: boolean(),
-    timestamp: integer() | nil
-  }
+          type: event_type(),
+          data: term(),
+          target: atom() | String.t() | nil,
+          current_target: atom() | String.t() | nil,
+          phase: phase(),
+          default_prevented: boolean(),
+          propagation_stopped: boolean(),
+          immediate_propagation_stopped: boolean(),
+          timestamp: integer() | nil
+        }
 
   def new(type, data, opts \\ []) do
     %__MODULE__{
@@ -168,6 +182,7 @@ defmodule Drafter.Event.Object do
       2 ->
         {type, data} = event
         new(type, data)
+
       _ ->
         new(:custom, event)
     end

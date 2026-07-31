@@ -51,7 +51,11 @@ defmodule Drafter.Runtime.Renderer do
     case render_result do
       component_tree when is_tuple(component_tree) ->
         ComponentRenderer.render_tree(
-          component_tree, screen_rect, current_theme, app_state, existing_hierarchy,
+          component_tree,
+          screen_rect,
+          current_theme,
+          app_state,
+          existing_hierarchy,
           app_module: app_module
         )
 
@@ -64,7 +68,16 @@ defmodule Drafter.Runtime.Renderer do
     app_hash = :erlang.phash2(app_state)
     prev_hash = RenderCache.get_app_state_hash()
     layout_dirty = Process.get(:render_cache_layout_dirty, true)
-    ctrace(["FP eq=", to_string(prev_hash == app_hash), " ld=", to_string(layout_dirty), " h=", to_string(existing_hierarchy != nil), "\n"])
+
+    ctrace([
+      "FP eq=",
+      to_string(prev_hash == app_hash),
+      " ld=",
+      to_string(layout_dirty),
+      " h=",
+      to_string(existing_hierarchy != nil),
+      "\n"
+    ])
 
     if prev_hash == app_hash and existing_hierarchy != nil and not layout_dirty do
       RenderCache.put_app_state_hash(app_hash)
@@ -86,7 +99,16 @@ defmodule Drafter.Runtime.Renderer do
         end
 
       t1 = System.monotonic_time(:microsecond)
-      out = apply_render_result(render_result, app_module, app_state, screen_rect, current_theme, existing_hierarchy)
+
+      out =
+        apply_render_result(
+          render_result,
+          app_module,
+          app_state,
+          screen_rect,
+          current_theme,
+          existing_hierarchy
+        )
 
       if Drafter.Trace.enabled?() do
         t2 = System.monotonic_time(:microsecond)
@@ -104,23 +126,50 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
-  defp apply_render_result(component_tree, app_module, app_state, screen_rect, theme, existing_hierarchy)
+  defp apply_render_result(
+         component_tree,
+         app_module,
+         app_state,
+         screen_rect,
+         theme,
+         existing_hierarchy
+       )
        when is_tuple(component_tree) do
     ta = System.monotonic_time(:microsecond)
 
     hierarchy =
       ComponentRenderer.render_tree(
-        component_tree, screen_rect, theme, app_state, existing_hierarchy, app_module: app_module
+        component_tree,
+        screen_rect,
+        theme,
+        app_state,
+        existing_hierarchy,
+        app_module: app_module
       )
 
     tb = System.monotonic_time(:microsecond)
     render_hierarchy_layers(hierarchy, screen_rect, theme)
     tc = System.monotonic_time(:microsecond)
-    ctrace(["A tree_us=", Integer.to_string(tb - ta), " layers_us=", Integer.to_string(tc - tb), "\n"])
+
+    ctrace([
+      "A tree_us=",
+      Integer.to_string(tb - ta),
+      " layers_us=",
+      Integer.to_string(tc - tb),
+      "\n"
+    ])
+
     {:ok, hierarchy}
   end
 
-  defp apply_render_result(strips, _app_module, _app_state, _screen_rect, _theme, _existing_hierarchy)
+  defp apply_render_result(
+         strips,
+         _app_module,
+         _app_state,
+         _screen_rect,
+         _theme,
+         _existing_hierarchy
+       )
        when is_list(strips) do
     Compositor.render_strips(strips, 0, 0)
     {:ok, nil}
@@ -131,7 +180,10 @@ defmodule Drafter.Runtime.Renderer do
   defp render_hierarchy_layers(hierarchy, screen_rect, theme) do
     background_strips = create_app_background(screen_rect, theme)
     t0 = System.monotonic_time(:microsecond)
-    {widget_layers, dirty_ids, stale_bounds} = create_widget_layers_tracking_dirty(hierarchy, screen_rect)
+
+    {widget_layers, dirty_ids, stale_bounds} =
+      create_widget_layers_tracking_dirty(hierarchy, screen_rect)
+
     t1 = System.monotonic_time(:microsecond)
 
     if widget_layers == [] do
@@ -150,7 +202,14 @@ defmodule Drafter.Runtime.Renderer do
       RenderCache.put_composited(final_strips)
       RenderCache.put_layer_count(length(all_layers))
       Compositor.render_strips(final_strips, 0, 0)
-      ctrace(["A build_us=", Integer.to_string(t1 - t0), " comp_us=", Integer.to_string(t2 - t1), "\n"])
+
+      ctrace([
+        "A build_us=",
+        Integer.to_string(t1 - t0),
+        " comp_us=",
+        Integer.to_string(t2 - t1),
+        "\n"
+      ])
     end
   end
 
@@ -162,7 +221,9 @@ defmodule Drafter.Runtime.Renderer do
     background_strips = create_app_background(screen_rect, current_theme)
     viewport = %{width: screen_rect.width, height: screen_rect.height}
     background_layer = LayerCompositor.background_layer(background_strips, screen_rect)
-    {base_layers, dirty_ids, stale_bounds} = create_widget_layers_tracking_dirty(hierarchy, screen_rect)
+
+    {base_layers, dirty_ids, stale_bounds} =
+      create_widget_layers_tracking_dirty(hierarchy, screen_rect)
 
     if screens == [] and toasts == [] do
       if base_layers == [] do
@@ -206,7 +267,15 @@ defmodule Drafter.Runtime.Renderer do
     current_theme = ThemeManager.get_current_theme()
     background_strips = create_app_background(screen_rect, current_theme)
 
-    base_layers = compute_base_layers(screens, existing_hierarchy, app_module, app_state, screen_rect, current_theme)
+    base_layers =
+      compute_base_layers(
+        screens,
+        existing_hierarchy,
+        app_module,
+        app_state,
+        screen_rect,
+        current_theme
+      )
 
     {screen_layers, overlay_layers} =
       Enum.reduce(screens, {[], []}, fn screen, acc ->
@@ -240,15 +309,32 @@ defmodule Drafter.Runtime.Renderer do
     end)
   end
 
-  defp compute_base_layers(screens, existing_hierarchy, _app_module, _app_state, screen_rect, _theme)
+  defp compute_base_layers(
+         screens,
+         existing_hierarchy,
+         _app_module,
+         _app_state,
+         screen_rect,
+         _theme
+       )
        when screens != [] and not is_nil(existing_hierarchy) do
     create_widget_layers_from_hierarchy(existing_hierarchy, screen_rect)
   end
 
-  defp compute_base_layers(_screens, _existing_hierarchy, nil, _app_state, _screen_rect, _theme), do: []
-  defp compute_base_layers(_screens, _existing_hierarchy, _app_module, nil, _screen_rect, _theme), do: []
+  defp compute_base_layers(_screens, _existing_hierarchy, nil, _app_state, _screen_rect, _theme),
+    do: []
 
-  defp compute_base_layers(_screens, existing_hierarchy, app_module, app_state, screen_rect, theme) do
+  defp compute_base_layers(_screens, _existing_hierarchy, _app_module, nil, _screen_rect, _theme),
+    do: []
+
+  defp compute_base_layers(
+         _screens,
+         existing_hierarchy,
+         app_module,
+         app_state,
+         screen_rect,
+         theme
+       ) do
     render_result =
       case app_module.render(app_state) do
         [] -> app_module.render(app_state, screen_rect)
@@ -259,7 +345,12 @@ defmodule Drafter.Runtime.Renderer do
       component_tree when is_tuple(component_tree) ->
         hierarchy =
           ComponentRenderer.render_tree(
-            component_tree, screen_rect, theme, app_state, existing_hierarchy, app_module: app_module
+            component_tree,
+            screen_rect,
+            theme,
+            app_state,
+            existing_hierarchy,
+            app_module: app_module
           )
 
         create_widget_layers_from_hierarchy(hierarchy, screen_rect)
@@ -300,8 +391,12 @@ defmodule Drafter.Runtime.Renderer do
     case screen.module.render(screen.state) do
       component_tree when is_tuple(component_tree) ->
         ComponentRenderer.render_tree(
-          component_tree, content_rect, current_theme, screen.state,
-          screen.widget_hierarchy, app_module: screen.module
+          component_tree,
+          content_rect,
+          current_theme,
+          screen.state,
+          screen.widget_hierarchy,
+          app_module: screen.module
         )
 
       _ ->
@@ -316,11 +411,15 @@ defmodule Drafter.Runtime.Renderer do
       has_border = screen.type in [:modal, :popover] and Map.get(screen.options, :border, false)
       content_rect = if has_border, do: inset_rect(screen_local_rect), else: screen_local_rect
 
-      content_layers = create_widget_layers_from_hierarchy(screen.widget_hierarchy, content_rect, 80)
+      content_layers =
+        create_widget_layers_from_hierarchy(screen.widget_hierarchy, content_rect, 80)
 
       new_overlay_layers =
         if has_border do
-          [create_modal_border_layer(screen_local_rect, current_theme, screen.options) | overlay_acc]
+          [
+            create_modal_border_layer(screen_local_rect, current_theme, screen.options)
+            | overlay_acc
+          ]
         else
           overlay_acc
         end
@@ -354,25 +453,14 @@ defmodule Drafter.Runtime.Renderer do
   defp create_widget_layers_tracking_dirty(hierarchy, _rect, z_base \\ 0) do
     hidden = Map.get(hierarchy, :hidden_widgets, MapSet.new())
 
-    {layers, dirty_rows, stale_bounds} =
+    {reversed_layers, dirty_rows, stale_bounds} =
       hierarchy.widgets
       |> Map.keys()
-      |> Enum.reduce({[], MapSet.new(), []}, fn widget_id, {layer_acc, dirty_acc, stale_acc} ->
-        case build_widget_layer(hierarchy, widget_id, hidden, z_base) do
-          [] ->
-            {layer_acc, dirty_acc, stale_acc}
-
-          widget_layers ->
-            {new_dirty, new_stale} =
-              if simple_render?() do
-                {dirty_acc, stale_acc}
-              else
-                track_widget_dirty(widget_id, hd(widget_layers), dirty_acc, stale_acc)
-              end
-
-            {layer_acc ++ widget_layers, new_dirty, new_stale}
-        end
+      |> Enum.reduce({[], MapSet.new(), []}, fn widget_id, acc ->
+        accumulate_widget_layer(hierarchy, widget_id, hidden, z_base, acc)
       end)
+
+    layers = Enum.reverse(reversed_layers)
 
     if simple_render?() do
       {layers, MapSet.new(), []}
@@ -382,6 +470,26 @@ defmodule Drafter.Runtime.Renderer do
       {layers, dirty_rows, stale_bounds ++ vanished_bounds}
     end
   end
+
+  defp accumulate_widget_layer(hierarchy, widget_id, hidden, z_base, acc) do
+    case build_widget_layer(hierarchy, widget_id, hidden, z_base) do
+      [] -> acc
+      widget_layers -> merge_widget_layers(widget_id, widget_layers, acc)
+    end
+  end
+
+  defp merge_widget_layers(widget_id, widget_layers, {layer_acc, dirty_acc, stale_acc}) do
+    {new_dirty, new_stale} =
+      if simple_render?() do
+        {dirty_acc, stale_acc}
+      else
+        track_widget_dirty(widget_id, hd(widget_layers), dirty_acc, stale_acc)
+      end
+
+    {prepend_reversed(widget_layers, layer_acc), new_dirty, new_stale}
+  end
+
+  defp prepend_reversed(items, acc), do: Enum.reduce(items, acc, &[&1 | &2])
 
   defp simple_render? do
     case Process.get(:drafter_simple_render) do
@@ -396,7 +504,8 @@ defmodule Drafter.Runtime.Renderer do
   end
 
   defp track_widget_dirty(widget_id, layer, dirty_rows, stale_acc) do
-    row_keys = Enum.map(layer.strips, & &1.cache_key)
+    alpha = Map.get(layer, :opacity, 1.0)
+    row_keys = Enum.map(layer.strips, &{&1.cache_key, alpha})
     prev_bounds = RenderCache.get_widget_bounds(widget_id)
     prev_row_keys = RenderCache.get_widget_rowkeys(widget_id)
 
@@ -441,21 +550,59 @@ defmodule Drafter.Runtime.Renderer do
         previous
 
       has_cache ->
-        dirty_rows = add_bounds_rows(widget_dirty_rows, stale_bounds)
-
-        if MapSet.size(dirty_rows) >= viewport.height do
-          ctrace(["C full dirty=", Integer.to_string(MapSet.size(dirty_rows)), ">=h=", Integer.to_string(viewport.height), " lc=", Integer.to_string(length(all_layers)), " stale=", Integer.to_string(length(stale_bounds)), "\n"])
-          LayerCompositor.composite(all_layers, viewport)
-        else
-          ctrace(["C incr dirty=", Integer.to_string(MapSet.size(dirty_rows)), "\n"])
-          LayerCompositor.composite_incremental(all_layers, viewport, previous, dirty_rows)
-        end
+        reuse_cache(all_layers, viewport, previous, widget_dirty_rows, stale_bounds)
 
       true ->
-        ctrace(["C full nocache prevnil=", to_string(previous == nil), " plc=", inspect(prev_layer_count), " lc=", Integer.to_string(length(all_layers)), " ph=", inspect(previous && length(previous)), " h=", Integer.to_string(viewport.height), "\n"])
+        trace_no_cache(all_layers, viewport, previous, prev_layer_count)
         LayerCompositor.composite(all_layers, viewport)
     end
   end
+
+  defp reuse_cache(all_layers, viewport, previous, widget_dirty_rows, stale_bounds) do
+    dirty_rows = add_bounds_rows(widget_dirty_rows, stale_bounds)
+
+    if MapSet.size(dirty_rows) >= incremental_cutoff(viewport.height) do
+      trace_full(all_layers, viewport, dirty_rows, stale_bounds)
+      LayerCompositor.composite(all_layers, viewport)
+    else
+      ctrace(["C incr dirty=", Integer.to_string(MapSet.size(dirty_rows)), "\n"])
+      LayerCompositor.composite_incremental(all_layers, viewport, previous, dirty_rows)
+    end
+  end
+
+  defp trace_full(all_layers, viewport, dirty_rows, stale_bounds) do
+    ctrace([
+      "C full dirty=",
+      Integer.to_string(MapSet.size(dirty_rows)),
+      ">=h=",
+      Integer.to_string(viewport.height),
+      " lc=",
+      Integer.to_string(length(all_layers)),
+      " stale=",
+      Integer.to_string(length(stale_bounds)),
+      "\n"
+    ])
+  end
+
+  defp trace_no_cache(all_layers, viewport, previous, prev_layer_count) do
+    ctrace([
+      "C full nocache prevnil=",
+      to_string(previous == nil),
+      " plc=",
+      inspect(prev_layer_count),
+      " lc=",
+      Integer.to_string(length(all_layers)),
+      " ph=",
+      inspect(previous && length(previous)),
+      " h=",
+      Integer.to_string(viewport.height),
+      "\n"
+    ])
+  end
+
+  @incremental_cutoff_ratio 0.4
+
+  defp incremental_cutoff(height), do: max(1, trunc(height * @incremental_cutoff_ratio))
 
   defp ctrace(iodata) do
     if Drafter.Trace.enabled?(), do: Drafter.Trace.log(iodata)
@@ -524,29 +671,51 @@ defmodule Drafter.Runtime.Renderer do
     {render_rect, widget_strips} = fetch_widget_strips(widget_id, widget_info, widget_rect)
     scroll_parent_id = WidgetHierarchy.get_widget_scroll_parent(hierarchy, widget_id)
 
-    {final_rect, final_strips} =
+    {clipped_rect, clipped_strips} =
       if scroll_parent_id do
         apply_scroll_clipping(hierarchy, scroll_parent_id, render_rect, widget_strips)
       else
         {render_rect, widget_strips}
       end
 
-    overlay_image(
-      widget_id,
-      widget_info,
-      final_rect,
-      fully_visible?(widget_strips, final_strips) and not scroll_active?() and not resize_active?()
-    )
+    {overflowed_rect, overflowed_strips} =
+      apply_overflow(
+        clipped_rect,
+        clipped_strips,
+        widget_info,
+        overflow_for(hierarchy, widget_id)
+      )
+
+    final_rect = apply_animated_presentation(overflowed_rect, widget_info)
+    final_strips = overflowed_strips
+
+    overlay_image(widget_id, widget_info, final_rect, paintable_region(final_strips, final_rect))
 
     if final_strips != [] do
-      [LayerCompositor.widget_layer(widget_id, final_strips, final_rect, z_base, widget_info.module)]
+      [
+        LayerCompositor.widget_layer(
+          widget_id,
+          final_strips,
+          final_rect,
+          z_base,
+          widget_info.module,
+          layer_opacity(widget_info)
+        )
+      ]
     else
       []
     end
   end
 
-  defp fully_visible?(full_strips, final_strips) do
-    final_strips != [] and length(final_strips) == length(full_strips)
+  defp paintable_region([], _rect), do: false
+  defp paintable_region(_strips, _rect) when false, do: false
+
+  defp paintable_region(final_strips, final_rect) do
+    if scroll_active?() or resize_active?() do
+      false
+    else
+      %{final_rect | height: length(final_strips)}
+    end
   end
 
   defp scroll_active?, do: Process.get(:scroll_gesture_active, false)
@@ -565,10 +734,10 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
-  defp overlay_image(widget_id, %{module: module} = widget_info, rect, paint?) do
+  defp overlay_image(widget_id, %{module: module} = widget_info, rect, region) do
     if function_exported?(module, :image, 3) do
-      WidgetStripCache.mark_visible(widget_id, paint?)
-      do_overlay_image(widget_id, widget_info, rect, paint?)
+      WidgetStripCache.mark_visible(widget_id, region)
+      do_overlay_image(widget_id, widget_info, rect, region)
     else
       :ok
     end
@@ -578,12 +747,14 @@ defmodule Drafter.Runtime.Renderer do
     Drafter.Compositor.clear_image(widget_id)
   end
 
-  defp do_overlay_image(widget_id, widget_info, rect, true) do
+  defp do_overlay_image(widget_id, widget_info, rect, _region) do
     Drafter.Compositor.place_image(widget_id, rect.x, rect.y)
     request_image_gen(widget_info)
   end
 
-  defp request_image_gen(%{pid: pid}) when is_pid(pid), do: GenServer.cast(pid, :maybe_generate_image)
+  defp request_image_gen(%{pid: pid}) when is_pid(pid),
+    do: GenServer.cast(pid, :maybe_generate_image)
+
   defp request_image_gen(_widget_info), do: :ok
 
   defp fetch_uncached_strips(_widget_id, %{pid: pid}, _widget_rect) when is_pid(pid) do
@@ -612,8 +783,8 @@ defmodule Drafter.Runtime.Renderer do
   def update_hierarchy_preferred_sizes(hierarchy) do
     Enum.reduce(hierarchy.widgets, hierarchy, fn {widget_id, widget_info}, acc ->
       case widget_info do
-        %{pid: pid, module: module, state: _state} when is_pid(pid) ->
-          new_state = WidgetServer.get_state(pid)
+        %{pid: pid, module: module, state: cached} when is_pid(pid) ->
+          new_state = WidgetServer.safe_get_state(pid) || cached
           updated_widget = %{widget_info | state: new_state}
           new_widgets = Map.put(acc.widgets, widget_id, updated_widget)
 
@@ -629,8 +800,7 @@ defmodule Drafter.Runtime.Renderer do
 
   defp update_widget_preferred_size(hierarchy, widget_id, module, state) do
     case {module, state} do
-      {Collapsible,
-       %{expanded: true, content: content, content_height: content_height}} ->
+      {Collapsible, %{expanded: true, content: content, content_height: content_height}} ->
         lines =
           cond do
             is_binary(content) -> length(String.split(content, "\n"))
@@ -670,9 +840,14 @@ defmodule Drafter.Runtime.Renderer do
     viewport_bottom = viewport_top + viewport.height
 
     cond do
-      virtual_bottom <= viewport_top -> {widget_rect, []}
-      virtual_top >= viewport_bottom -> {widget_rect, []}
-      true -> do_clip(widget_rect, widget_strips, viewport, scroll_y, viewport_top, viewport_bottom)
+      virtual_bottom <= viewport_top ->
+        {widget_rect, []}
+
+      virtual_top >= viewport_bottom ->
+        {widget_rect, []}
+
+      true ->
+        do_clip(widget_rect, widget_strips, viewport, scroll_y, viewport_top, viewport_bottom)
     end
   end
 
@@ -690,9 +865,56 @@ defmodule Drafter.Runtime.Renderer do
       |> Enum.map(&Strip.crop(&1, max_width))
 
     screen_y = max(viewport.y, widget_rect.y - scroll_y)
-    new_rect = %{widget_rect | y: screen_y, height: length(clipped_strips), width: min(widget_rect.width, max_width)}
+
+    new_rect = %{
+      widget_rect
+      | y: screen_y,
+        height: length(clipped_strips),
+        width: min(widget_rect.width, max_width)
+    }
+
     {new_rect, clipped_strips}
   end
+
+  defp apply_overflow(rect, strips, _widget_info, :ellipsis) do
+    {rect, Enum.map(strips, &Strip.overflow(&1, rect.width, :ellipsis))}
+  end
+
+  defp apply_overflow(rect, strips, %{state: state}, _mode) when is_map(state) do
+    case Map.get(state, :text_overflow) do
+      :ellipsis -> {rect, Enum.map(strips, &Strip.overflow(&1, rect.width, :ellipsis))}
+      _ -> {rect, strips}
+    end
+  end
+
+  defp apply_overflow(rect, strips, _widget_info, _mode), do: {rect, strips}
+
+  defp overflow_for(hierarchy, widget_id) do
+    WidgetHierarchy.widget_overflow(hierarchy, widget_id)
+  end
+
+  defp apply_animated_presentation(rect, %{state: state}) when is_map(state) do
+    offset_rect(rect, Map.get(state, :offset_x, 0), Map.get(state, :offset_y, 0))
+  end
+
+  defp apply_animated_presentation(rect, _widget_info), do: rect
+
+  defp layer_opacity(%{state: state}) when is_map(state) do
+    case Map.get(state, :opacity) do
+      alpha when is_number(alpha) -> alpha |> max(0.0) |> min(1.0)
+      _ -> 1.0
+    end
+  end
+
+  defp layer_opacity(_widget_info), do: 1.0
+
+  defp offset_rect(rect, 0, 0), do: rect
+
+  defp offset_rect(rect, dx, dy) when is_number(dx) and is_number(dy) do
+    %{rect | x: rect.x + round(dx), y: rect.y + round(dy)}
+  end
+
+  defp offset_rect(rect, _dx, _dy), do: rect
 
   defp create_modal_border_layer(rect, theme, options) do
     border_style = %{fg: theme.primary, bg: theme.panel}
@@ -764,11 +986,18 @@ defmodule Drafter.Runtime.Renderer do
         padding = max_width - String.length(line) - 2
         left_pad = div(padding, 2)
         right_pad = padding - left_pad
-        full_line = "│" <> String.duplicate(" ", left_pad) <> line <> String.duplicate(" ", right_pad) <> "│"
+
+        full_line =
+          "│" <>
+            String.duplicate(" ", left_pad) <> line <> String.duplicate(" ", right_pad) <> "│"
+
         Strip.new([Segment.new(full_line, style)])
       end)
 
-    all_strips = [Strip.new([Segment.new(top_border, style)])] ++ content_strips ++ [Strip.new([Segment.new(bottom_border, style)])]
+    all_strips =
+      [Strip.new([Segment.new(top_border, style)])] ++
+        content_strips ++ [Strip.new([Segment.new(bottom_border, style)])]
+
     LayerCompositor.content_layer(toast.id, all_strips, toast_rect)
   end
 
@@ -790,11 +1019,13 @@ defmodule Drafter.Runtime.Renderer do
   end
 
   defp toast_position(:middle_right, screen_rect, max_width, height, stack_offset) do
-    {div(screen_rect.height - height, 2) - div(stack_offset, 2), screen_rect.width - max_width - 2}
+    {div(screen_rect.height - height, 2) - div(stack_offset, 2),
+     screen_rect.width - max_width - 2}
   end
 
   defp toast_position(:middle_center, screen_rect, max_width, height, stack_offset) do
-    {div(screen_rect.height - height, 2) - div(stack_offset, 2), div(screen_rect.width - max_width, 2)}
+    {div(screen_rect.height - height, 2) - div(stack_offset, 2),
+     div(screen_rect.width - max_width, 2)}
   end
 
   defp toast_position(:middle_left, screen_rect, _max_width, height, stack_offset) do
@@ -829,9 +1060,6 @@ defmodule Drafter.Runtime.Renderer do
   defp create_app_background(rect, theme) do
     empty_style = %{bg: theme.background, fg: theme.text_primary}
     empty_line = String.duplicate(" ", rect.width)
-
-    for _row <- 0..(rect.height - 1) do
-      Strip.new([Segment.new(empty_line, empty_style)])
-    end
+    List.duplicate(Strip.new([Segment.new(empty_line, empty_style)]), max(rect.height, 0))
   end
 end

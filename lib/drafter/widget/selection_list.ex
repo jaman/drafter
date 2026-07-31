@@ -130,24 +130,31 @@ defmodule Drafter.Widget.SelectionList do
   end
 
   def handle_event({:key, :down}, state) do
-    {:ok, %{state | highlighted_index: min(length(state.options) - 1, state.highlighted_index + 1)} |> ensure_visible()}
+    {:ok,
+     %{state | highlighted_index: min(length(state.options) - 1, state.highlighted_index + 1)}
+     |> ensure_visible()}
   end
 
-  def handle_event({:key, :home}, state), do: {:ok, %{state | highlighted_index: 0, scroll_offset: 0}}
+  def handle_event({:key, :home}, state),
+    do: {:ok, %{state | highlighted_index: 0, scroll_offset: 0}}
 
   def handle_event({:key, :end}, state) do
     {:ok, %{state | highlighted_index: length(state.options) - 1} |> ensure_visible()}
   end
 
   def handle_event({:char, 1}, %{selection_mode: :multiple} = state) do
-    all_indices = MapSet.new(0..(length(state.options) - 1))
-    new_selected = if MapSet.equal?(state.selected_indices, all_indices), do: MapSet.new(), else: all_indices
+    all_indices = MapSet.new(0..(length(state.options) - 1)//1)
+
+    new_selected =
+      if MapSet.equal?(state.selected_indices, all_indices), do: MapSet.new(), else: all_indices
+
     new_state = %{state | selected_indices: new_selected}
     trigger_change(new_state)
     {:ok, new_state}
   end
 
-  def handle_event({:key, key}, state) when key in [:enter, :" "], do: select_at(state, state.highlighted_index)
+  def handle_event({:key, key}, state) when key in [:enter, :" "],
+    do: select_at(state, state.highlighted_index)
 
   def handle_event({:mouse, %{type: :mouse_up, y: y}}, state) do
     actual_index = state.scroll_offset + y

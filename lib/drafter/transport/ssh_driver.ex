@@ -3,9 +3,9 @@ defmodule Drafter.Transport.SSHDriver do
 
   use GenServer
 
-  alias Drafter.Terminal.ANSI
+  alias Drafter.Terminal.{ANSI, Driver, InputBuffer}
 
-  defstruct [:event_manager, :size, raw_mode: false, mouse_enabled: false]
+  defstruct [:event_manager, :size, buffer: %InputBuffer{}, raw_mode: false, mouse_enabled: false]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -29,24 +29,37 @@ defmodule Drafter.Transport.SSHDriver do
     gl = Keyword.fetch!(opts, :group_leader)
     Process.group_leader(self(), gl)
     size = detect_size()
-    {:ok, %__MODULE__{size: size}}
+    {:ok, %__MODULE__{size: size, buffer: InputBuffer.new()}}
   end
 
   @impl GenServer
   def handle_call({:setup, event_manager}, _from, state) do
     :io.setopts([:binary, {:encoding, :unicode}, {:echo, false}])
     size = detect_size()
-    IO.write([ANSI.enter_alt_screen(), ANSI.clear_screen(), ANSI.cursor_to(1, 1), ANSI.hide_cursor(), ANSI.enable_mouse()])
+
+    IO.write([
+      ANSI.enter_alt_screen(),
+      ANSI.clear_screen(),
+      ANSI.cursor_to(1, 1),
+      ANSI.hide_cursor(),
+      ANSI.enable_mouse()
+    ])
+
     driver_pid = self()
     spawn_link(fn -> stdin_reader(driver_pid) end)
     spawn_link(fn -> size_poller(driver_pid, size) end)
-    {:reply, :ok, %{state | event_manager: event_manager, size: size, raw_mode: true, mouse_enabled: true}}
+
+    {:reply, :ok,
+     %{state | event_manager: event_manager, size: size, raw_mode: true, mouse_enabled: true}}
   end
 
   def handle_call(:cleanup, _from, state) do
     if state.raw_mode do
-      IO.write([ANSI.disable_mouse(), ANSI.show_cursor(), ANSI.exit_alt_screen()])
-      Process.sleep(50)
+      Driver.write_synchronously([
+        ANSI.disable_mouse(),
+        ANSI.show_cursor(),
+        ANSI.exit_alt_screen()
+      ])
     end
 
     {:reply, :ok, %{state | raw_mode: false, mouse_enabled: false}}
@@ -77,12 +90,15 @@ defmodule Drafter.Transport.SSHDriver do
 
   @impl GenServer
   def handle_info({:stdin, data}, state) do
-    if state.event_manager do
-      {events, _} = ANSI.parse_sequence(data)
-      Enum.each(events, &GenServer.cast(state.event_manager, {:event, &1}))
-    end
+    {events, buffer} = InputBuffer.feed(state.buffer, data)
+    emit_events(state.event_manager, events)
+    {:noreply, %{state | buffer: buffer}}
+  end
 
-    {:noreply, state}
+  def handle_info(:input_flush, state) do
+    {events, buffer} = InputBuffer.flush(state.buffer)
+    emit_events(state.event_manager, events)
+    {:noreply, %{state | buffer: buffer}}
   end
 
   def handle_info({:resize, new_size}, state) do
@@ -94,6 +110,13 @@ defmodule Drafter.Transport.SSHDriver do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp emit_events(nil, _events), do: :ok
+  defp emit_events(_event_manager, []), do: :ok
+
+  defp emit_events(event_manager, events) do
+    Enum.each(events, &GenServer.cast(event_manager, {:event, &1}))
+  end
 
   defp detect_size do
     case {:io.columns(), :io.rows()} do

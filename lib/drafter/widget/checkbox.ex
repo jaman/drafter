@@ -23,6 +23,7 @@ defmodule Drafter.Widget.Checkbox do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+
   defstruct [
     :label,
     :checked,
@@ -67,7 +68,13 @@ defmodule Drafter.Widget.Checkbox do
     label_segment = render_checkbox_label(ns, fg, bg, rect.width, theme)
     strip = Strip.new(checkbox_segments ++ [label_segment])
 
-    pad_strips([strip], rect.height, rect.width, fg || Map.get(theme, :text_primary, {200, 200, 200}), bg)
+    pad_strips(
+      [strip],
+      rect.height,
+      rect.width,
+      fg || Map.get(theme, :text_primary, {200, 200, 200}),
+      bg
+    )
   end
 
   defp render_checkbox_indicator(ns, fg, bg, theme) do
@@ -75,6 +82,7 @@ defmodule Drafter.Widget.Checkbox do
 
     if ns.checked do
       checkbox_fg = fg || Map.get(theme, :primary, {100, 200, 100})
+
       [
         Segment.new(" ", %{fg: checkbox_bg, bg: bg}),
         Segment.new("X", %{fg: checkbox_fg, bg: checkbox_bg, bold: true}),
@@ -142,6 +150,7 @@ defmodule Drafter.Widget.Checkbox do
     app_state = Keyword.get(opts, :__app_state__, %{})
     checked = Drafter.Binding.get_bound_value(opts, app_state, Keyword.get(opts, :checked, false))
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+
     %{
       label: label,
       checked: checked,
@@ -156,6 +165,7 @@ defmodule Drafter.Widget.Checkbox do
       on_change: mount_props.on_change,
       classes: mount_props.classes
     }
+
     if Drafter.Binding.has_binding?(opts) do
       Map.put(base, :checked, mount_props.checked)
     else

@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule GaugeDemo do
   use Drafter.App
@@ -83,7 +83,7 @@ defmodule GaugeDemo do
         ],
         gap: 1
       ),
-      gauge(renderer: :pixel, value: 0.95, label: "Resize Me", height: state.gauge_height, flex: 1),
+      gauge(renderer: :pixel, value: 0.95, label: "Resize Me", height: state.gauge_height),
       footer(bindings: [{"q", "Quit"}, {"+/-", "Resize"}])
     ])
   end

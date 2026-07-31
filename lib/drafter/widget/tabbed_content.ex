@@ -527,7 +527,15 @@ defmodule Drafter.Widget.TabbedContent do
          active_tab
        ) do
     active_child = Enum.at(child_widgets, active_tab)
-    render_active_child(active_child, content_lines, width, content_height, border_style, bg_style)
+
+    render_active_child(
+      active_child,
+      content_lines,
+      width,
+      content_height,
+      border_style,
+      bg_style
+    )
   end
 
   defp render_active_child(nil, content_lines, width, content_height, border_style, bg_style) do
@@ -550,7 +558,9 @@ defmodule Drafter.Widget.TabbedContent do
       )
 
     Enum.map(content_strips, fn strip ->
-      Strip.new([Segment.new("│ ", border_style)] ++ strip.segments ++ [Segment.new(" │", border_style)])
+      Strip.new(
+        [Segment.new("│ ", border_style)] ++ strip.segments ++ [Segment.new(" │", border_style)]
+      )
     end)
   end
 

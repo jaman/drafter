@@ -154,7 +154,8 @@ defmodule Drafter.Widget.TextArea.Render do
 
   defp recolor(segments, style), do: Enum.map(segments, fn s -> Segment.new(s.text, style) end)
 
-  defp segments_len(segments), do: Enum.reduce(segments, 0, fn s, acc -> acc + String.length(s.text) end)
+  defp segments_len(segments),
+    do: Enum.reduce(segments, 0, fn s, acc -> acc + String.length(s.text) end)
 
   defp pad_run(n, _style) when n <= 0, do: []
   defp pad_run(n, style), do: [Segment.new(String.duplicate(" ", n), style)]

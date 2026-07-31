@@ -1,6 +1,7 @@
 defmodule Drafter.WidgetHierarchy do
   @moduledoc false
 
+  alias Drafter.Session.Context
   alias Drafter.WidgetServer
 
   defstruct [
@@ -14,7 +15,9 @@ defmodule Drafter.WidgetHierarchy do
     :widget_scroll_parents,
     :drag_capture_widget,
     :preferred_sizes,
-    hidden_widgets: MapSet.new()
+    hidden_widgets: MapSet.new(),
+    event_consumed: false,
+    widget_overflow: %{}
   ]
 
   @type widget_id :: atom() | String.t()
@@ -47,15 +50,6 @@ defmodule Drafter.WidgetHierarchy do
           scroll_containers: %{widget_id() => scroll_info()},
           widget_scroll_parents: %{widget_id() => widget_id()}
         }
-
-  @session_pdict_keys [
-    :drafter_event_manager,
-    :drafter_compositor,
-    :drafter_theme_manager,
-    :drafter_screen_manager,
-    :drafter_event_handler,
-    :drafter_skin_manager
-  ]
 
   @spec new(keyword()) :: t()
   def new(_opts \\ []) do
@@ -112,9 +106,9 @@ defmodule Drafter.WidgetHierarchy do
       session_ctx: session_ctx
     ]
 
-    {:ok, pid} = WidgetServer.start_link(base_opts ++ server_opts)
+    {:ok, pid} = WidgetServer.start_supervised(base_opts ++ server_opts)
 
-    widget_state = WidgetServer.get_state(pid)
+    widget_state = WidgetServer.safe_get_state(pid) || mount_props
     order = hierarchy.widget_counter
 
     widget_info = %{
@@ -170,7 +164,9 @@ defmodule Drafter.WidgetHierarchy do
             :exit, _ -> :ok
           end
         end
-      _ -> :ok
+
+      _ ->
+        :ok
     end)
 
     :ok
@@ -220,7 +216,9 @@ defmodule Drafter.WidgetHierarchy do
 
   defp detach_from_parent(widgets, widget_id, parent_id) do
     case Map.get(widgets, parent_id) do
-      nil -> widgets
+      nil ->
+        widgets
+
       parent_info ->
         updated_children = List.delete(parent_info.children, widget_id)
         Map.put(widgets, parent_id, %{parent_info | children: updated_children})
@@ -243,19 +241,14 @@ defmodule Drafter.WidgetHierarchy do
     end
   end
 
-  defp apply_widget_update(hierarchy, _widget_id, %{pid: pid} = _widget_info, new_props) when is_pid(pid) do
+  defp apply_widget_update(hierarchy, _widget_id, %{pid: pid} = _widget_info, new_props)
+       when is_pid(pid) do
     WidgetServer.update_props(pid, new_props)
     hierarchy
   end
 
   defp apply_widget_update(hierarchy, widget_id, widget_info, new_props) do
-    new_state =
-      if function_exported?(widget_info.module, :update, 2) do
-        widget_info.module.update(new_props, widget_info.state)
-      else
-        Map.merge(widget_info.state, new_props)
-      end
-
+    new_state = Drafter.Widget.apply_props(widget_info.module, new_props, widget_info.state)
     updated_widget = %{widget_info | state: new_state}
     %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, updated_widget)}
   end
@@ -287,27 +280,29 @@ defmodule Drafter.WidgetHierarchy do
     update_widget_info(hierarchy, widget_id, &%{&1 | state: new_state})
   end
 
+  @doc """
+  Record a widget's rect and re-render it.
+
+  The widget is re-rendered on every call, including when the rect is unchanged,
+  so its strips reflect any state that moved since the last pass.
+  """
   @spec update_widget_rect(t(), widget_id(), rect()) :: t()
   def update_widget_rect(hierarchy, widget_id, rect) do
     mark_widget_rendered(widget_id)
 
     case Map.get(hierarchy.widgets, widget_id) do
-      %{pid: pid} when is_pid(pid) ->
-        WidgetServer.update_rect(pid, rect)
-
-      _ ->
-        :ok
+      %{pid: pid} when is_pid(pid) -> WidgetServer.update_rect(pid, rect)
+      _ -> :ok
     end
 
-    new_rects = Map.put(hierarchy.widget_rects, widget_id, rect)
-    %{hierarchy | widget_rects: new_rects}
+    %{hierarchy | widget_rects: Map.put(hierarchy.widget_rects, widget_id, rect)}
   end
 
   @spec get_widget_state(t(), widget_id()) :: map() | nil
   def get_widget_state(hierarchy, widget_id) do
     case Map.get(hierarchy.widgets, widget_id) do
       nil -> nil
-      %{pid: pid} when is_pid(pid) -> WidgetServer.get_state(pid)
+      %{pid: pid, state: cached} when is_pid(pid) -> WidgetServer.safe_get_state(pid) || cached
       widget_info -> widget_info.state
     end
   end
@@ -318,12 +313,45 @@ defmodule Drafter.WidgetHierarchy do
       nil ->
         hierarchy
 
+      %{state: ^new_state} ->
+        hierarchy
+
       widget_info ->
         updated_widget = %{widget_info | state: new_state}
-        new_widgets = Map.put(hierarchy.widgets, widget_id, updated_widget)
-        %{hierarchy | widgets: new_widgets}
+        %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, updated_widget)}
     end
   end
+
+  @doc """
+  Record that a widget handled the event currently being routed.
+
+  Consumption comes from the handler's own verdict, not from whether its state
+  changed. Cleared before each dispatch by `clear_consumed/1`.
+  """
+  @spec mark_consumed(t()) :: t()
+  def mark_consumed(hierarchy), do: %{hierarchy | event_consumed: true}
+
+  @doc """
+  Record how a widget should mark content that does not fit its width.
+
+  `:clip` is the default and is not stored. Read back with `widget_overflow/2`.
+  """
+  @spec set_widget_overflow(t(), widget_id(), :clip | :ellipsis) :: t()
+  def set_widget_overflow(hierarchy, _widget_id, :clip), do: hierarchy
+
+  def set_widget_overflow(hierarchy, widget_id, mode) do
+    %{hierarchy | widget_overflow: Map.put(hierarchy.widget_overflow, widget_id, mode)}
+  end
+
+  @doc "How a widget marks content that does not fit, defaulting to clipping."
+  @spec widget_overflow(t(), widget_id()) :: :clip | :ellipsis
+  def widget_overflow(hierarchy, widget_id) do
+    Map.get(hierarchy.widget_overflow || %{}, widget_id, :clip)
+  end
+
+  @doc "Clear the per-dispatch consumption flag before routing a new event."
+  @spec clear_consumed(t()) :: t()
+  def clear_consumed(hierarchy), do: %{hierarchy | event_consumed: false}
 
   def put_widget(hierarchy, widget_id, widget_info) do
     %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, widget_info)}
@@ -351,17 +379,12 @@ defmodule Drafter.WidgetHierarchy do
     end
   end
 
-  def live_widget_state(%{pid: pid}) when is_pid(pid), do: WidgetServer.get_state(pid)
+  def live_widget_state(%{pid: pid, state: cached}) when is_pid(pid),
+    do: WidgetServer.safe_get_state(pid) || cached
+
   def live_widget_state(%{state: state}), do: state
 
-  def collect_session_pdict do
-    Enum.reduce(@session_pdict_keys, %{}, fn key, acc ->
-      case Process.get(key) do
-        nil -> acc
-        val -> Map.put(acc, key, val)
-      end
-    end)
-  end
+  def collect_session_pdict, do: Context.capture()
 
   defdelegate focus_widget(hierarchy, widget_id), to: __MODULE__.Focus
   defdelegate focus_widget(hierarchy, widget_id, direction), to: __MODULE__.Focus

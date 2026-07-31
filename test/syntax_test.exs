@@ -58,6 +58,7 @@ defmodule Drafter.SyntaxTest do
 
     test "each capture is a 5-tuple with correct types" do
       captures = ElixirHighlighter.highlight("def foo, do: :ok", :elixir)
+
       Enum.each(captures, fn {sl, sc, el, ec, name} ->
         assert is_integer(sl) and sl >= 1
         assert is_integer(sc) and sc >= 0

@@ -67,63 +67,114 @@ defmodule Drafter.Examples.NewWidgetsDemo do
       header("NEW WIDGETS DEMO - TEST BUILD", show_clock: true),
       rule(),
       label("Loading Indicators (animated):"),
-      horizontal([
-        loading_indicator(spinner_type: :default, running: true),
-        loading_indicator(spinner_type: :dots, running: true),
-        loading_indicator(spinner_type: :line, running: true),
-        loading_indicator(spinner_type: :arrow, running: true)
-      ], gap: 1),
+      horizontal(
+        [
+          loading_indicator(spinner_type: :default, running: true),
+          loading_indicator(spinner_type: :dots, running: true),
+          loading_indicator(spinner_type: :line, running: true),
+          loading_indicator(spinner_type: :arrow, running: true)
+        ],
+        gap: 1
+      ),
       label(""),
       label("Links (Tab to focus, Enter to open):"),
-      card([
-        horizontal([
-          link("Elixir Homepage", url: "https://elixir-lang.org"),
-          link("GitHub", url: "https://github.com"),
-          link("Textual Docs", url: "https://textual.textualize.io")
-        ], gap: 1)
-      ], padding: 1),
+      card(
+        [
+          horizontal(
+            [
+              link("Elixir Homepage", url: "https://elixir-lang.org"),
+              link("GitHub", url: "https://github.com"),
+              link("Textual Docs", url: "https://textual.textualize.io")
+            ],
+            gap: 1
+          )
+        ],
+        padding: 1
+      ),
       label(""),
       label("Logs (Page Up/Down to scroll):"),
-      horizontal([
-        card([
-          vertical([
-            label("Drafter Log:"),
-            log(file_path: "drafter.log", height: 8, max_lines: 1000)
-          ], gap: 0)
-        ], flex: 1, padding: 1),
-        card([
-          vertical([
-            label("Debug Log:"),
-            log(file_path: "tui_debug.log", height: 8, max_lines: 1000)
-          ], gap: 0)
-        ], flex: 1, padding: 1)
-      ], gap: 1),
+      horizontal(
+        [
+          card(
+            [
+              vertical(
+                [
+                  label("Drafter Log:"),
+                  log(file_path: "drafter.log", height: 8, max_lines: 1000)
+                ],
+                gap: 0
+              )
+            ],
+            flex: 1,
+            padding: 1
+          ),
+          card(
+            [
+              vertical(
+                [
+                  label("Debug Log:"),
+                  log(file_path: "tui_debug.log", height: 8, max_lines: 1000)
+                ],
+                gap: 0
+              )
+            ],
+            flex: 1,
+            padding: 1
+          )
+        ],
+        gap: 1
+      ),
       label(""),
       label("Masked Input (Tab between fields):"),
-      card([
-        horizontal([
-          vertical([label("Phone:"), masked_input(mask: "(###) ###-####", id: :phone)], gap: 0),
-          vertical([label("Date:"), masked_input(mask: "##/##/####", id: :date)], gap: 0),
-          vertical([label("SSN:"), masked_input(mask: "###-##-####", id: :ssn)], gap: 0)
-        ], gap: 2)
-      ], padding: 1),
+      card(
+        [
+          horizontal(
+            [
+              vertical([label("Phone:"), masked_input(mask: "(###) ###-####", id: :phone)],
+                gap: 0
+              ),
+              vertical([label("Date:"), masked_input(mask: "##/##/####", id: :date)], gap: 0),
+              vertical([label("SSN:"), masked_input(mask: "###-##-####", id: :ssn)], gap: 0)
+            ],
+            gap: 2
+          )
+        ],
+        padding: 1
+      ),
       label("Mask Patterns: # (any), 9 (digit), a (lowercase), A (letter)"),
       label(""),
       label("Sparkline (animated with summary):"),
-      horizontal([
-        card([
-          vertical([
-            label("Basic:"),
-            sparkline(state.sparkline_data, color: {100, 200, 100})
-          ], gap: 0)
-        ], flex: 1, padding: 1),
-        card([
-          vertical([
-            label("With Summary:"),
-            sparkline(state.sparkline_data, color: {100, 200, 100}, summary: true)
-          ], gap: 0)
-        ], flex: 1, padding: 1)
-      ], gap: 2),
+      horizontal(
+        [
+          card(
+            [
+              vertical(
+                [
+                  label("Basic:"),
+                  sparkline(state.sparkline_data, color: {100, 200, 100})
+                ],
+                gap: 0
+              )
+            ],
+            flex: 1,
+            padding: 1
+          ),
+          card(
+            [
+              vertical(
+                [
+                  label("With Summary:"),
+                  sparkline(state.sparkline_data, color: {100, 200, 100}, summary: true)
+                ],
+                gap: 0
+              )
+            ],
+            flex: 1,
+            padding: 1
+          )
+        ],
+        gap: 2
+      ),
       label(""),
       label("Pretty (Elixir data structures):"),
       card([pretty(state.pretty_data, expand: true, height: 10)], padding: 1),
@@ -149,6 +200,7 @@ defmodule Drafter.Examples.NewWidgetsDemo do
 
     if File.exists?(path) do
       {result, _} = System.cmd("tail", ["-n", "#{count}", path], stderr_to_stdout: true)
+
       result
       |> String.split("\n", trim: true)
       |> Enum.take(-count)

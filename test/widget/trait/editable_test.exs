@@ -122,7 +122,14 @@ defmodule Drafter.Widget.Trait.EditableTest do
     end
 
     test "cursor movement clears selection" do
-      state = %{Editable.default_state() | _text: "hello", _cursor_position: 3, _selection_start: 1, _selection_end: 4}
+      state = %{
+        Editable.default_state()
+        | _text: "hello",
+          _cursor_position: 3,
+          _selection_start: 1,
+          _selection_end: 4
+      }
+
       {:ok, new_state} = Editable.handle_event({:key, :left}, state, %{})
       assert new_state._selection_start == nil
       assert new_state._selection_end == nil

@@ -12,6 +12,19 @@ defmodule Drafter.Widget do
 
   **Trait mode** (composable traits):
       use Drafter.Widget, traits: [:focusable, :scrollable]
+
+  ## Paste
+
+  A widget receives pasted text only if it asks for it:
+
+      use Drafter.Widget, handles: [:keyboard, :paste], focusable: true
+
+      def handle_paste(text, state), do: {:ok, %{state | value: state.value <> text}}
+
+  The text has already been through `Drafter.Clipboard.sanitize/1`, so it carries no
+  escape sequences that would turn a paste into keystrokes. A widget that does not
+  declare `:paste` bubbles the event rather than receiving a mangled version of it.
+  Use `Drafter.Clipboard.copy/1` for the other direction.
   """
 
   alias Drafter.Draw.Strip
@@ -20,11 +33,18 @@ defmodule Drafter.Widget do
   @type props :: map()
   @type state :: term()
   @type render_result :: [Strip.t()] | {:error, term()}
-  @type event_result :: {:ok, state()} | {:error, term()} | {:noreply, state()} | {:bubble, state()}
-  @type rect :: %{x: non_neg_integer(), y: non_neg_integer(), width: pos_integer(), height: pos_integer()}
+  @type event_result ::
+          {:ok, state()} | {:error, term()} | {:noreply, state()} | {:bubble, state()}
+  @type rect :: %{
+          x: non_neg_integer(),
+          y: non_neg_integer(),
+          width: pos_integer(),
+          height: pos_integer()
+        }
   @type expand_option :: :fill | :content | pos_integer()
   @type scroll_direction :: :up | :down
   @type key :: atom()
+  @type modifiers :: [:ctrl | :alt | :shift | :meta]
   @type layout_impact :: :self | :below | :above | :left | :right | :all | :parent
 
   @callback mount(props()) :: state()
@@ -34,6 +54,8 @@ defmodule Drafter.Widget do
   @callback unmount(state()) :: :ok
   @callback handle_scroll(scroll_direction(), state()) :: event_result()
   @callback handle_key(key(), state()) :: event_result()
+  @callback handle_key(key(), modifiers(), state()) :: event_result()
+  @callback handle_paste(text :: String.t(), state()) :: event_result()
   @callback handle_press(x :: integer(), y :: integer(), state()) :: event_result()
   @callback handle_mouse_up(x :: integer(), y :: integer(), state()) :: event_result()
   @callback handle_drag(x :: integer(), y :: integer(), state()) :: event_result()
@@ -52,6 +74,8 @@ defmodule Drafter.Widget do
     unmount: 1,
     handle_scroll: 2,
     handle_key: 2,
+    handle_key: 3,
+    handle_paste: 2,
     handle_press: 3,
     handle_mouse_up: 3,
     handle_drag: 3,
@@ -67,6 +91,24 @@ defmodule Drafter.Widget do
   def update(_props, state), do: state
   def unmount(_state), do: :ok
 
+  @doc """
+  Apply re-render props to a widget's state, however that widget defines `update/2`.
+
+  The single answer to "this widget was rendered again with these props" — used by both
+  the in-hierarchy path and `Drafter.WidgetServer`, so a widget behaves the same whether
+  or not it runs in its own process. A widget that defines no `update/2` keeps its state:
+  it has not said how props map onto it, and guessing is what silently loses scroll and
+  drag positions.
+  """
+  @spec apply_props(module(), map(), state()) :: state()
+  def apply_props(module, props, state) do
+    if function_exported?(module, :update, 2) do
+      module.update(props, state)
+    else
+      update(props, state)
+    end
+  end
+
   defmacro __using__(opts) do
     traits = Keyword.get(opts, :traits, [])
 
@@ -77,9 +119,26 @@ defmodule Drafter.Widget do
     end
   end
 
+  @handle_aliases %{click: :press}
+
+  @doc """
+  The event names a `handles:` list resolves to.
+
+  `:click` is accepted for `:press`, the name the router dispatches on. The two have
+  been used interchangeably in widgets and in the authoring guide, and a widget that
+  declared the name the router did not know received no mouse events at all rather
+  than failing to compile.
+  """
+  @spec normalize_handles([atom()]) :: [atom()]
+  def normalize_handles(handles) when is_list(handles) do
+    handles |> Enum.map(&Map.get(@handle_aliases, &1, &1)) |> Enum.uniq()
+  end
+
+  def normalize_handles(handles), do: handles
+
   defp generate_trait_based_widget(trait_specs, opts) do
     escaped_opts = Macro.escape(opts)
-    extra_handles = Keyword.get(opts, :handles, [])
+    extra_handles = opts |> Keyword.get(:handles, []) |> normalize_handles()
     layout_impact = Keyword.get(opts, :layout_impact, :self)
 
     quote do
@@ -90,7 +149,9 @@ defmodule Drafter.Widget do
 
       @__trait_modules__ Trait.resolve_all(unquote(trait_specs), unquote(escaped_opts))
       @__extra_handles__ unquote(extra_handles)
-      @__trait_handles__ Enum.uniq(Trait.collect_handles(@__trait_modules__) ++ @__extra_handles__)
+      @__trait_handles__ Enum.uniq(
+                           Trait.collect_handles(@__trait_modules__) ++ @__extra_handles__
+                         )
       @__trait_focusable__ Trait.any_focusable?(@__trait_modules__)
       @__trait_default_state__ Trait.merge_default_states(@__trait_modules__)
       @__trait_bitmap__ Trait.build_bitmap(@__trait_modules__)
@@ -117,7 +178,14 @@ defmodule Drafter.Widget do
       def __layout_impact__, do: @__layout_impact__
 
       def handle_event(event, state) do
-        Pipeline.run(__MODULE__, @__trait_modules__, event, state, @__trait_handles__, @__trait_focusable__)
+        Pipeline.run(
+          __MODULE__,
+          @__trait_modules__,
+          event,
+          state,
+          @__trait_handles__,
+          @__trait_focusable__
+        )
       end
 
       unquote(shared_widget_defaults())
@@ -125,7 +193,7 @@ defmodule Drafter.Widget do
   end
 
   defp generate_handles_based_widget(opts) do
-    handles = Keyword.get(opts, :handles, [])
+    handles = opts |> Keyword.get(:handles, []) |> normalize_handles()
     capture_handles = Keyword.get(opts, :capture_handles, [])
     focusable = Keyword.get(opts, :focusable, :keyboard in handles)
     scroll_config = parse_scroll_config(Keyword.get(opts, :scroll), :scroll in handles)
@@ -156,7 +224,12 @@ defmodule Drafter.Widget do
 
       def handle_event(event, state) do
         EventRouter.route_event(
-          __MODULE__, event, state, @__widget_handles__, @__widget_focusable__, @__widget_scroll_config__
+          __MODULE__,
+          event,
+          state,
+          @__widget_handles__,
+          @__widget_focusable__,
+          @__widget_scroll_config__
         )
       end
 
@@ -178,7 +251,11 @@ defmodule Drafter.Widget do
       def preferred_height(_args, _opts), do: 1
 
       defoverridable Drafter.Widget
-      defoverridable focused: 1, update_props_from_mount: 3, preferred_height: 2, __layout_impact__: 0
+
+      defoverridable focused: 1,
+                     update_props_from_mount: 3,
+                     preferred_height: 2,
+                     __layout_impact__: 0
     end
   end
 

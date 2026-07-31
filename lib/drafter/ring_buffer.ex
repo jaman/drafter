@@ -1,10 +1,28 @@
 defmodule Drafter.RingBuffer do
   @moduledoc """
-  Bounded circular buffer backed by an integer-keyed map.
+  A bounded circular buffer backed by an integer-keyed map.
 
-  Provides O(1) push, O(1) single-element access, and O(k) slice reads
-  where k is the requested slice length — without materializing the full buffer.
-  When the buffer is full, the oldest entry is overwritten.
+  Push and single-element access are O(1); a slice is O(k) in the length
+  requested, without materializing the whole buffer. Once the buffer is full,
+  each push overwrites the oldest entry.
+
+  Implements `Enumerable`, in oldest-to-newest order.
+
+  ## Examples
+
+      iex> buffer = Drafter.RingBuffer.new(3)
+      iex> buffer = Drafter.RingBuffer.push_many(buffer, [1, 2, 3, 4])
+      iex> Drafter.RingBuffer.to_list(buffer)
+      [2, 3, 4]
+      iex> Drafter.RingBuffer.count(buffer)
+      3
+      iex> Drafter.RingBuffer.last(buffer)
+      4
+      iex> Drafter.RingBuffer.at(buffer, 0)
+      2
+      iex> Drafter.RingBuffer.last_n(buffer, 2)
+      [3, 4]
+
   """
 
   defstruct store: %{}, max_size: 0, count: 0, write_pos: 0
@@ -69,7 +87,7 @@ defmodule Drafter.RingBuffer do
     if actual_length <= 0 do
       []
     else
-      for i <- 0..(actual_length - 1) do
+      for i <- 0..(actual_length - 1)//1 do
         pos = read_pos(buf, offset + i)
         Map.fetch!(buf.store, pos)
       end

@@ -53,8 +53,15 @@ defmodule Drafter.Style.StylesheetLoader do
 
   @impl true
   def handle_call({:load_stylesheet, app_module}, _from, state) do
-    result = do_load_stylesheet(app_module, state.cache)
-    {:reply, {:ok, result.stylesheet}, state}
+    case Map.fetch(state.cache, {:app, app_module}) do
+      {:ok, stylesheet} ->
+        {:reply, {:ok, stylesheet}, state}
+
+      :error ->
+        result = do_load_stylesheet(app_module, state.cache)
+        cache = Map.put(state.cache, {:app, app_module}, result.stylesheet)
+        {:reply, {:ok, result.stylesheet}, %{state | cache: cache}}
+    end
   end
 
   @impl true

@@ -1,19 +1,24 @@
 defmodule Drafter.Widget.Digits do
   @moduledoc """
-  Renders numbers and symbols as large ASCII art using box-drawing characters.
+  Renders text as large characters, drawn with box outlines or with pixels
+  packed into braille, quadrant, or half-block cells.
 
-  Supports the digits `0`–`9`, punctuation (`.`, `,`, `:`, `/`), arithmetic
-  operators (`+`, `-`), currency symbols (`$`, `£`, `€`, `¥`, `%`), SI-prefix
-  letters (`K`, `k`, `M`, `m`, `B`, `G`, `T`), unit letters (`C`, `s`, `°`),
-  and the scientific-notation letter `e`. Characters not in the pattern set are
-  rendered as blank cells.
+  Covers the digits `0`–`9`, the full alphabet, and common punctuation. Lower
+  case falls back to the upper-case form, and a character no font can draw
+  renders as blanks of the same width.
+
+  The glyphs live in `Drafter.Widget.Digits.Font`, which also accepts FIGlet
+  fonts loaded at runtime. See the [large text guide](large_text.md) for the
+  catalogue and how to choose between fonts.
 
   ## Options
 
     * `:text` - string of characters to render (default `""`)
     * `:style` - map of style properties applied to all characters
     * `:align` - horizontal alignment within the available width: `:left` (default), `:center`, `:right`
-    * `:size` - character size: `:large` (default, 7×5 chars) or `:small` (5×3 chars)
+    * `:font` - a name from `Drafter.Widget.Digits.Font.names/0`, or a font map; overrides `:size`
+    * `:size` - coarse size when no `:font` is given: `:large` (default, 7×5) or `:small` (5×3)
+    * `:renderer` - `:text` (default) draws cells; `:graphics` transmits an image on a terminal that supports kitty, iTerm2, or sixel, falling back to cells where none is available
     * `:bg_data` - optional list of numbers; when set, renders an area-chart fill behind the digits using per-cell bg colors (same composite as Grafana's graphMode: area stat panel)
     * `:color` - `{r, g, b}` fill color for the area chart (default `{0, 150, 255}`); digit glyphs are rendered with an auto-contrasting fg color
 
@@ -21,6 +26,8 @@ defmodule Drafter.Widget.Digits do
 
       digits("12:34", size: :large, style: %{fg: {0, 200, 100}})
       digits("99%", size: :small, align: :center)
+      digits("CPU 42", font: :braille)
+      digits("Vellum", font: :slant, renderer: :graphics)
       digits("42%", bg_data: history, color: {0, 180, 120}, size: :large, align: :center)
   """
 
@@ -29,77 +36,20 @@ defmodule Drafter.Widget.Digits do
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
 
-  @large_patterns %{
-    "0" => ["╭─────╮", "│     │", "│     │", "│     │", "╰─────╯"],
-    "1" => ["   ╷   ", "   │   ", "   │   ", "   │   ", "   ╵   "],
-    "2" => ["╭─────╮", "      │", "╭─────╯", "│      ", "╰─────╯"],
-    "3" => ["╭─────╮", "      │", " ─────┤", "      │", "╰─────╯"],
-    "4" => ["╷     ╷", "│     │", "╰─────┤", "      │", "      ╵"],
-    "5" => ["╭─────╮", "│      ", "╰─────╮", "      │", "╰─────╯"],
-    "6" => ["╭─────╮", "│      ", "├─────╮", "│     │", "╰─────╯"],
-    "7" => ["╭─────╮", "      │", "      │", "      │", "      ╵"],
-    "8" => ["╭─────╮", "│     │", "├─────┤", "│     │", "╰─────╯"],
-    "9" => ["╭─────╮", "│     │", "╰─────┤", "      │", "╰─────╯"],
-    ":" => ["      ", "  ●   ", "      ", "  ●   ", "      "],
-    "." => ["      ", "      ", "      ", "      ", "  ●   "],
-    "," => ["      ", "      ", "      ", "  ●   ", " ╱    "],
-    "-" => ["       ", "       ", "╶─────╴", "       ", "       "],
-    "+" => ["       ", "   │   ", "╶──┼──╴", "   │   ", "       "],
-    "$" => ["   ╷╷  ", "╭──┼┼─╮", "╰──┼┼─╮", "╭──┼┼─╯", "   ╵╵  "],
-    "£" => ["  ╭────", "  │    ", "╶─┼───╴", "  │    ", "╰─┴───╴"],
-    "€" => [" ╭────╮", "╶┤     ", "╶┤     ", " │     ", " ╰────╯"],
-    "¥" => ["╲     ╱", " ╲   ╱ ", "╶──┬──╴", "   │   ", "   ╵   "],
-    "%" => ["●    ╱ ", "    ╱  ", "   ╱   ", "  ╱    ", " ╱    ●"],
-    "K" => ["│    ╱ ", "│   ╱  ", "├──╱   ", "│   ╲  ", "╵    ╲ "],
-    "k" => ["│      ", "│   ╱  ", "├──╱   ", "│   ╲  ", "╵    ╲ "],
-    "M" => ["╭─┬─╮  ", "│ │ │  ", "│   │  ", "│   │  ", "╵   ╵  "],
-    "m" => ["       ", " ╭─┬─╮ ", " │ │ │ ", " │   │ ", " ╵   ╵ "],
-    "B" => ["╭───── ", "│     ╲", "├─────╱", "│     ╲", "├─────╯"],
-    "G" => ["╭─────╮", "│      ", "│   ──╮", "│     │", "╰─────╯"],
-    "T" => ["───┬───", "   │   ", "   │   ", "   │   ", "   ╵   "],
-    "C" => ["╭─────╮", "│      ", "│      ", "│      ", "╰─────╯"],
-    "s" => [" ╭────╮", " │     ", " ╰────╮", "      │", " ╰────╯"],
-    "e" => ["       ", " ╭───╮ ", " ├───╯ ", " │     ", " ╰───╯ "],
-    "°" => [" ╭─╮   ", " ╰─╯   ", "       ", "       ", "       "],
-    "/" => ["      ╱", "     ╱ ", "    ╱  ", "   ╱   ", "  ╱    "],
-    " " => ["      ", "      ", "      ", "      ", "      "]
-  }
+  alias Drafter.Widget.Digits.{Font, Image}
 
-  @small_patterns %{
-    "0" => ["╭───╮", "│   │", "╰───╯"],
-    "1" => ["  ╷  ", "  │  ", "  ╵  "],
-    "2" => ["╭───╮", "╭───╯", "╰───╴"],
-    "3" => ["╭───╮", " ───┤", "╰───╯"],
-    "4" => ["╷   ╷", "╰───┤", "    ╵"],
-    "5" => ["╭───╴", "╰───╮", "╰───╯"],
-    "6" => ["╭───╴", "├───╮", "╰───╯"],
-    "7" => ["╭───╮", "    │", "    ╵"],
-    "8" => ["╭───╮", "├───┤", "╰───╯"],
-    "9" => ["╭───╮", "╰───┤", "╰───╯"],
-    ":" => ["     ", "  ●  ", "  ●  "],
-    "." => ["     ", "     ", "  ●  "],
-    "," => ["     ", "  ●  ", " ╱   "],
-    "-" => ["     ", "╶───╴", "     "],
-    "+" => ["  │  ", "──┼──", "  │  "],
-    "$" => ["╭─┼─╮", "╰─┼─╮", "╰─┼─╯"],
-    "£" => [" ╭─╮ ", " ├─  ", "╰──  "],
-    "€" => ["╭═══", "╞══ ", "╰═══"],
-    "¥" => ["╲ ╱ ", "═══ ", " │  "],
-    "%" => ["●  ╱ ", "  ╱  ", " ╱  ●"],
-    "K" => ["│  ╱ ", "├─╱  ", "╵  ╲ "],
-    "k" => ["│    ", "├─╱  ", "╵  ╲ "],
-    "M" => ["╭─┬─╮", "│ │ │", "╵   ╵"],
-    "m" => [" ╭┬╮ ", " │ │ ", " ╵ ╵ "],
-    "B" => ["╭───╮", "├─╲─┤", "├───╯"],
-    "G" => ["╭───╮", "│ ──┤", "╰───╯"],
-    "T" => ["──┬──", "  │  ", "  ╵  "],
-    "C" => ["╭───╮", "│    ", "╰───╯"],
-    "s" => ["╭──╴ ", " ╰──╮", "╶──╯ "],
-    "e" => [" ╭─╮ ", " ├─╯ ", " ╰─╯ "],
-    "°" => ["╭─╮  ", "╰─╯  ", "     "],
-    "/" => ["   ╱ ", "  ╱  ", " ╱   "],
-    " " => ["     ", "     ", "     "]
-  }
+  defp selected_font(state) do
+    Font.get(font_name(state))
+  end
+
+  defp font_name(state) do
+    Map.get(state, :font) || size_font(Map.get(state, :size, :large))
+  end
+
+  defp size_font(:small), do: :compact
+  defp size_font(_large), do: :block
+
+  defp glyph(font, character), do: Font.glyph(font, character)
 
   @impl Drafter.Widget
   def mount(props) do
@@ -108,6 +58,8 @@ defmodule Drafter.Widget.Digits do
       style: Map.get(props, :style, %{}),
       align: Map.get(props, :align, :left),
       size: Map.get(props, :size, :large),
+      font: Map.get(props, :font),
+      renderer: Map.get(props, :renderer, :text),
       bg_data: Map.get(props, :bg_data),
       color: Map.get(props, :color, {0, 150, 255}),
       bg_min: Map.get(props, :bg_min, 0),
@@ -152,7 +104,10 @@ defmodule Drafter.Widget.Digits do
   }
 
   def preferred_height(_args, opts) do
-    if Keyword.get(opts, :size, :large) == :small, do: 3, else: 5
+    opts
+    |> Keyword.get(:font)
+    |> Kernel.||(size_font(Keyword.get(opts, :size, :large)))
+    |> Font.height()
   end
 
   def component_tag, do: :digits
@@ -163,6 +118,8 @@ defmodule Drafter.Widget.Digits do
       style: Keyword.get(opts, :style, %{}),
       align: Keyword.get(opts, :align, :left),
       size: Keyword.get(opts, :size, :large),
+      font: Keyword.get(opts, :font),
+      renderer: Keyword.get(opts, :renderer, :text),
       bg_data: Keyword.get(opts, :bg_data),
       color: Keyword.get(opts, :color, {0, 150, 255}),
       bg_min: Keyword.get(opts, :bg_min, 0),
@@ -174,12 +131,42 @@ defmodule Drafter.Widget.Digits do
     %{
       text: mount_props.text,
       size: mount_props.size,
+      font: mount_props.font,
+      style: mount_props.style,
+      align: mount_props.align,
+      renderer: mount_props.renderer,
       bg_data: mount_props.bg_data,
       color: mount_props.color,
       bg_min: mount_props.bg_min,
       bg_max: mount_props.bg_max
     }
   end
+
+  def image(state, rect, id) do
+    with renderer when renderer != :text <- Map.get(state, :renderer, :text),
+         cols when cols > 0 <- rect.width,
+         rows when rows > 0 <- rect.height do
+      paint_image(state, {cols, rows}, renderer, id)
+    else
+      _ -> nil
+    end
+  end
+
+  defp paint_image(state, {cols, rows}, renderer, id) do
+    color =
+      Map.get(
+        Computed.to_segment_style(Computed.for_widget(:digits, state, style: state.style)),
+        :fg
+      )
+
+    case Image.render(state.text, {cols, rows}, color, image_renderer(renderer), id) do
+      nil -> nil
+      {paint, clear} -> {paint, clear, %{dx: 0, dy: 0, cols: cols, rows: rows}}
+    end
+  end
+
+  defp image_renderer(:graphics), do: :auto
+  defp image_renderer(renderer), do: renderer
 
   @impl Drafter.Widget
   def apply_data_buffer(state, buffer, _rect) do
@@ -190,20 +177,24 @@ defmodule Drafter.Widget.Digits do
   end
 
   defp render_with_bg(digits, data, state, rect) do
-    {patterns, digit_height} =
-      if state.size == :small, do: {@small_patterns, 3}, else: {@large_patterns, 5}
+    font = selected_font(state)
 
     computed = Computed.for_widget(:digits, state, style: state.style)
     digit_fg = Map.get(Computed.to_segment_style(computed), :fg)
 
-    glyph_width = Enum.reduce(digits, 0, &(&2 + (Map.get(patterns, &1, patterns[" "]) |> hd() |> String.length())))
+    glyph_width = Enum.reduce(digits, 0, &(&2 + Font.glyph_width(font, &1)))
     left_offset = alignment_offset(state.align, rect.width, glyph_width)
-    top_offset = max(0, div(rect.height - digit_height, 2))
-    glyph_map = build_glyph_map(digits, patterns, left_offset, top_offset)
+    top_offset = max(0, div(rect.height - font.height, 2))
+    glyph_map = build_glyph_map(digits, font, left_offset, top_offset)
     braille_map = build_braille_map(data, rect, state)
 
-    Enum.map(0..(rect.height - 1), fn row ->
-      segments = Enum.map(0..(rect.width - 1), &render_bg_cell(glyph_map, braille_map, row, &1, digit_fg, state.color))
+    Enum.map(0..(rect.height - 1)//1, fn row ->
+      segments =
+        Enum.map(
+          0..(rect.width - 1)//1,
+          &render_bg_cell(glyph_map, braille_map, row, &1, digit_fg, state.color)
+        )
+
       Strip.new(segments)
     end)
   end
@@ -219,8 +210,10 @@ defmodule Drafter.Widget.Digits do
     cond do
       glyph_char && glyph_char != " " ->
         Segment.new(glyph_char, if(digit_fg, do: %{fg: digit_fg}, else: %{}))
+
       braille ->
         Segment.new(braille, %{fg: line_color})
+
       true ->
         Segment.new(" ", %{})
     end
@@ -242,18 +235,21 @@ defmodule Drafter.Widget.Digits do
     |> Enum.filter(fn {x, y} -> x >= 0 and x < pixel_width and y >= 0 and y < pixel_height end)
     |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 4)} end)
     |> Map.new(fn {key, pixels} ->
-      bits = Enum.reduce(pixels, 0, fn {x, y}, acc -> acc + Map.get(@braille_dot_offsets, {rem(x, 2), rem(y, 4)}, 0) end)
+      bits =
+        Enum.reduce(pixels, 0, fn {x, y}, acc ->
+          acc + Map.get(@braille_dot_offsets, {rem(x, 2), rem(y, 4)}, 0)
+        end)
+
       {key, <<@braille_base + bits::utf8>>}
     end)
   end
 
-  defp build_glyph_map(digits, patterns, left_offset, top_offset) do
+  defp build_glyph_map(digits, font, left_offset, top_offset) do
     digits
     |> Enum.reduce({%{}, left_offset}, fn digit, {map, col_offset} ->
-      pattern = Map.get(patterns, digit, patterns[" "])
-      char_width = pattern |> hd() |> String.length()
-      row_map = place_pattern(pattern, map, col_offset, top_offset)
-      {row_map, col_offset + char_width}
+      rows = glyph(font, digit)
+      row_map = place_pattern(rows, map, col_offset, top_offset)
+      {row_map, col_offset + Font.glyph_width(font, digit)}
     end)
     |> elem(0)
   end
@@ -279,10 +275,14 @@ defmodule Drafter.Widget.Digits do
     len = length(data)
 
     cond do
-      len == 0 -> List.duplicate(0, width)
-      len == width -> data
+      len == 0 ->
+        List.duplicate(0, width)
+
+      len == width ->
+        data
+
       true ->
-        Enum.map(0..(width - 1), fn i ->
+        Enum.map(0..(width - 1)//1, fn i ->
           idx = round(i * (len - 1) / max(width - 1, 1))
           Enum.at(data, idx)
         end)
@@ -293,20 +293,15 @@ defmodule Drafter.Widget.Digits do
     computed = Computed.for_widget(:digits, state, style: state.style)
     effective_style = Computed.to_segment_style(computed)
 
-    {patterns, digit_height} =
-      if state.size == :small do
-        {@small_patterns, 3}
-      else
-        {@large_patterns, 5}
-      end
+    font = selected_font(state)
+    digit_height = font.height
 
     digit_rows =
-      0..(digit_height - 1)
+      0..(digit_height - 1)//1
       |> Enum.map(fn row ->
         line_text =
           Enum.map_join(digits, fn digit ->
-            pattern = Map.get(patterns, digit, patterns[" "])
-            Enum.at(pattern, row, "     ")
+            Enum.at(glyph(font, digit), row, String.duplicate(" ", Font.glyph_width(font, digit)))
           end)
 
         segment = Segment.new(line_text, effective_style)

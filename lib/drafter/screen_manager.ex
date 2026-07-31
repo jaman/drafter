@@ -4,6 +4,7 @@ defmodule Drafter.ScreenManager do
   use GenServer
 
   alias Drafter.{EventHandler, Screen}
+  alias Drafter.Session.Context
 
   defstruct [
     :app_pid,
@@ -167,7 +168,13 @@ defmodule Drafter.ScreenManager do
 
       [top | rest] ->
         Screen.unmount_screen(top)
-        mounted = screen_module |> Screen.new(props, opts) |> Map.put(:parent_id, top.parent_id) |> Screen.mount_screen()
+
+        mounted =
+          screen_module
+          |> Screen.new(props, opts)
+          |> Map.put(:parent_id, top.parent_id)
+          |> Screen.mount_screen()
+
         new_state = %{state | screen_stack: [mounted | rest]}
         notify_render_needed(state.app_pid)
         {:reply, {:ok, mounted.id}, new_state}
@@ -176,10 +183,11 @@ defmodule Drafter.ScreenManager do
 
   @impl true
   def handle_call(:get_active_screen, _from, state) do
-    active = case state.screen_stack do
-      [top | _] -> top
-      [] -> nil
-    end
+    active =
+      case state.screen_stack do
+        [top | _] -> top
+        [] -> nil
+      end
 
     {:reply, active, state}
   end
@@ -296,10 +304,7 @@ defmodule Drafter.ScreenManager do
     {:noreply, new_state}
   end
 
-  defp resolve do
-    Process.get(:drafter_screen_manager) ||
-      raise "No ScreenManager in process dictionary. Ensure a Drafter session is running."
-  end
+  defp resolve, do: Context.fetch!(:screen_manager)
 
   defp top_screen_id([top | _]), do: top.id
   defp top_screen_id([]), do: nil
@@ -347,7 +352,8 @@ defmodule Drafter.ScreenManager do
         GenServer.call(sm, {:pop, :dismissed})
         :handled
 
-      screen.widget_hierarchy != nil and should_forward_to_widget_hierarchy?(screen, screen_rect, event) ->
+      screen.widget_hierarchy != nil and
+          should_forward_to_widget_hierarchy?(screen, screen_rect, event) ->
         case handle_widget_hierarchy_result(
                handle_widget_hierarchy_event_direct(screen, screen_rect, event),
                screen,
@@ -388,7 +394,12 @@ defmodule Drafter.ScreenManager do
     :handled
   end
 
-  defp handle_widget_hierarchy_result({:show_modal, mod, props, opts}, _screen, sm, _manager_state) do
+  defp handle_widget_hierarchy_result(
+         {:show_modal, mod, props, opts},
+         _screen,
+         sm,
+         _manager_state
+       ) do
     GenServer.call(sm, {:push, mod, props, Keyword.put(opts, :type, :modal)})
     :handled
   end
@@ -405,6 +416,7 @@ defmodule Drafter.ScreenManager do
 
   defp handle_widget_hierarchy_result({:passthrough, updated_screen}, screen, sm, manager_state) do
     GenServer.cast(sm, {:update_screen, screen.id, updated_screen})
+
     handle_screen_event_result(
       Screen.handle_screen_event(updated_screen, :passthrough_event),
       updated_screen,
@@ -414,7 +426,8 @@ defmodule Drafter.ScreenManager do
     )
   end
 
-  defp handle_widget_hierarchy_result(:passthrough, _screen, _sm, _manager_state), do: :passthrough
+  defp handle_widget_hierarchy_result(:passthrough, _screen, _sm, _manager_state),
+    do: :passthrough
 
   defp handle_screen_event_result({:ok, updated_screen}, _screen, sm, manager_state, _noreply_val) do
     GenServer.cast(sm, {:update_screen, updated_screen.id, updated_screen})
@@ -422,7 +435,13 @@ defmodule Drafter.ScreenManager do
     :handled
   end
 
-  defp handle_screen_event_result({:noreply, _updated_screen}, _screen, _sm, _manager_state, noreply_val) do
+  defp handle_screen_event_result(
+         {:noreply, _updated_screen},
+         _screen,
+         _sm,
+         _manager_state,
+         noreply_val
+       ) do
     noreply_val
   end
 
@@ -431,22 +450,41 @@ defmodule Drafter.ScreenManager do
     :handled
   end
 
-  defp handle_screen_event_result({:show_modal, mod, props, opts}, _screen, sm, _manager_state, _noreply_val) do
+  defp handle_screen_event_result(
+         {:show_modal, mod, props, opts},
+         _screen,
+         sm,
+         _manager_state,
+         _noreply_val
+       ) do
     GenServer.call(sm, {:push, mod, props, Keyword.put(opts, :type, :modal)})
     :handled
   end
 
-  defp handle_screen_event_result({:push, mod, props, opts}, _screen, sm, _manager_state, _noreply_val) do
+  defp handle_screen_event_result(
+         {:push, mod, props, opts},
+         _screen,
+         sm,
+         _manager_state,
+         _noreply_val
+       ) do
     GenServer.call(sm, {:push, mod, props, opts})
     :handled
   end
 
-  defp handle_screen_event_result({:replace, mod, props, opts}, _screen, sm, _manager_state, _noreply_val) do
+  defp handle_screen_event_result(
+         {:replace, mod, props, opts},
+         _screen,
+         sm,
+         _manager_state,
+         _noreply_val
+       ) do
     GenServer.call(sm, {:replace, mod, props, opts})
     :handled
   end
 
-  defp handle_screen_event_result(_other, _screen, _sm, _manager_state, _noreply_val), do: :passthrough
+  defp handle_screen_event_result(_other, _screen, _sm, _manager_state, _noreply_val),
+    do: :passthrough
 
   defp should_capture_event?(%Screen{type: :modal, options: opts}, {:key, :escape}) do
     opts.dismissable
@@ -579,12 +617,7 @@ defmodule Drafter.ScreenManager do
   end
 
   defp invoke_screen_callback(screen, callback, data) do
-    result =
-      if function_exported?(screen.module, :handle_event, 3) do
-        screen.module.handle_event(callback, data, screen.state)
-      else
-        screen.module.handle_event(callback, screen.state)
-      end
+    result = screen.module.handle_event(callback, data, screen.state)
 
     map_screen_callback_result(result, screen)
   end
@@ -643,7 +676,10 @@ defmodule Drafter.ScreenManager do
     end
   end
 
-  defp shift_stack_index(%{position: pos, stack_index: idx} = toast, %{position: pos, stack_index: removed_idx})
+  defp shift_stack_index(%{position: pos, stack_index: idx} = toast, %{
+         position: pos,
+         stack_index: removed_idx
+       })
        when idx > removed_idx do
     %{toast | stack_index: idx - 1}
   end

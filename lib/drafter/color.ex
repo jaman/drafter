@@ -2,10 +2,31 @@ defmodule Drafter.Color do
   @moduledoc """
   Color representation and parsing for terminal styling.
 
-  Supports hex (`"#RGB"`, `"#RRGGBB"`), RGB (`"rgb(r,g,b)"`, `"rgba(r,g,b,a)"`),
-  and HSL (`"hsl(h,s%,l%)"`, `"hsla(h,s%,l%,a)"`) color string formats, as well
-  as `{r, g, b}` and `{r, g, b, a}` tuples. The `normalize/1` function converts
-  any supported format into a plain `{r, g, b}` tuple suitable for use in segment styles.
+  Accepts hex (`"#RGB"`, `"#RRGGBB"`), RGB (`"rgb(r,g,b)"`, `"rgba(r,g,b,a)"`),
+  and HSL (`"hsl(h,s%,l%)"`, `"hsla(h,s%,l%,a)"`) strings, as well as
+  `{r, g, b}` and `{r, g, b, a}` tuples and named-color atoms.
+
+  `parse/1` returns `{:ok, t()}` or `{:error, reason}`. `normalize/1` converts
+  any supported format to a plain `{r, g, b}` tuple for segment styles, falling
+  back to white on anything it does not recognise.
+
+  ## Examples
+
+      iex> Drafter.Color.normalize("#f00")
+      {255, 0, 0}
+
+      iex> Drafter.Color.normalize("rgb(10, 20, 30)")
+      {10, 20, 30}
+
+      iex> Drafter.Color.normalize(:black)
+      {0, 0, 0}
+
+      iex> Drafter.Color.normalize("not a color")
+      {255, 255, 255}
+
+      iex> Drafter.Color.parse("nope")
+      {:error, :invalid_format}
+
   """
 
   defstruct [:r, :g, :b, :a]
@@ -96,6 +117,31 @@ defmodule Drafter.Color do
 
   def normalize(_), do: {255, 255, 255}
 
+  @doc """
+  Normalize a colour to `{{r, g, b}, alpha}`, keeping the alpha channel.
+
+  `normalize/1` flattens to the RGB triple every style, segment and SGR encoder in
+  the tree expects. This keeps the alpha alongside it so the compositor can blend the
+  colour against whatever is beneath before that flattening happens. Colours with no
+  alpha channel come back as `1.0`.
+  """
+  @spec normalize_with_alpha(term()) :: {{0..255, 0..255, 0..255}, float()}
+  def normalize_with_alpha(color) when is_binary(color) do
+    case parse(color) do
+      {:ok, parsed} -> {to_tuple(parsed), parsed.a}
+      {:error, _reason} -> {{255, 255, 255}, 1.0}
+    end
+  end
+
+  def normalize_with_alpha({r, g, b, a}) when r in 0..255 and g in 0..255 and b in 0..255 do
+    {{r, g, b}, clamp_alpha(a)}
+  end
+
+  def normalize_with_alpha(color), do: {normalize(color), 1.0}
+
+  defp clamp_alpha(a) when is_number(a), do: a |> max(0.0) |> min(1.0) |> :erlang.float()
+  defp clamp_alpha(_a), do: 1.0
+
   defp parse_hex("#" <> hex) do
     case String.length(hex) do
       6 ->
@@ -129,7 +175,8 @@ defmodule Drafter.Color do
         {:ok, new(String.to_integer(r), String.to_integer(g), String.to_integer(b))}
 
       [_, r, g, b, a] ->
-        {:ok, new(String.to_integer(r), String.to_integer(g), String.to_integer(b), String.to_float(a))}
+        {:ok,
+         new(String.to_integer(r), String.to_integer(g), String.to_integer(b), String.to_float(a))}
 
       _ ->
         {:error, :invalid_rgb}

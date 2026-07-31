@@ -19,26 +19,57 @@ defmodule Drafter.ContentRenderer do
   end
 
   defp render_component_to_strips({:label, text, opts}, rect), do: render_label(text, opts, rect)
-  defp render_component_to_strips({:button, text, opts}, rect), do: render_button(text, opts, rect)
-  defp render_component_to_strips({:checkbox, label, opts}, rect), do: render_checkbox(label, opts, rect)
+
+  defp render_component_to_strips({:button, text, opts}, rect),
+    do: render_button(text, opts, rect)
+
+  defp render_component_to_strips({:checkbox, label, opts}, rect),
+    do: render_checkbox(label, opts, rect)
+
   defp render_component_to_strips({:text_input, opts}, rect), do: render_text_input(opts, rect)
   defp render_component_to_strips({:text_area, opts}, rect), do: render_text_area(opts, rect)
-  defp render_component_to_strips({:loading_indicator, opts}, rect), do: render_loading_indicator(opts, rect)
+
+  defp render_component_to_strips({:loading_indicator, opts}, rect),
+    do: render_loading_indicator(opts, rect)
+
   defp render_component_to_strips({:link, text, opts}, rect), do: render_link(text, opts, rect)
-  defp render_component_to_strips({:masked_input, opts}, rect), do: render_masked_input(opts, rect)
+
+  defp render_component_to_strips({:masked_input, opts}, rect),
+    do: render_masked_input(opts, rect)
+
   defp render_component_to_strips({:log, opts}, rect), do: render_log(opts, rect)
   defp render_component_to_strips({:rich_log, opts}, rect), do: render_rich_log(opts, rect)
-  defp render_component_to_strips({:pretty, data, opts}, rect), do: render_pretty(data, opts, rect)
-  defp render_component_to_strips({:sparkline, data, opts}, rect), do: render_sparkline(data, opts, rect)
-  defp render_component_to_strips({:progress_bar, opts}, rect), do: render_progress_bar(opts, rect)
+
+  defp render_component_to_strips({:pretty, data, opts}, rect),
+    do: render_pretty(data, opts, rect)
+
+  defp render_component_to_strips({:sparkline, data, opts}, rect),
+    do: render_sparkline(data, opts, rect)
+
+  defp render_component_to_strips({:progress_bar, opts}, rect),
+    do: render_progress_bar(opts, rect)
+
   defp render_component_to_strips({:switch, opts}, rect), do: render_switch(opts, rect)
-  defp render_component_to_strips({:digits, value, opts}, rect), do: render_digits(value, opts, rect)
-  defp render_component_to_strips({:markdown, content, opts}, rect), do: render_markdown(content, opts, rect)
+
+  defp render_component_to_strips({:digits, value, opts}, rect),
+    do: render_digits(value, opts, rect)
+
+  defp render_component_to_strips({:markdown, content, opts}, rect),
+    do: render_markdown(content, opts, rect)
+
   defp render_component_to_strips({:placeholder, opts}, rect), do: render_placeholder(opts, rect)
-  defp render_component_to_strips({:static, content, opts}, rect), do: render_static(content, opts, rect)
+
+  defp render_component_to_strips({:static, content, opts}, rect),
+    do: render_static(content, opts, rect)
+
   defp render_component_to_strips({:rule, opts}, rect), do: render_rule(opts, rect)
-  defp render_component_to_strips({:layout, :vertical, children, _opts}, rect), do: render_vertical_layout(children, rect.width, rect.height)
-  defp render_component_to_strips({:layout, :horizontal, children, _opts}, rect), do: render_horizontal_layout(children, rect)
+
+  defp render_component_to_strips({:layout, :vertical, children, _opts}, rect),
+    do: render_vertical_layout(children, rect.width, rect.height)
+
+  defp render_component_to_strips({:layout, :horizontal, children, _opts}, rect),
+    do: render_horizontal_layout(children, rect)
+
   defp render_component_to_strips(_, rect), do: render_empty(rect)
 
   defp render_label(text, opts, rect) do
@@ -111,10 +142,11 @@ defmodule Drafter.ContentRenderer do
     fg = computed[:color] || {200, 200, 200}
     bg = computed[:background] || {40, 40, 40}
 
-    lines = 1..rect.height
-    |> Enum.map(fn _ ->
-      String.duplicate(" ", rect.width - 2)
-    end)
+    lines =
+      1..rect.height
+      |> Enum.map(fn _ ->
+        String.duplicate(" ", rect.width - 2)
+      end)
 
     lines
     |> Enum.map(fn line ->
@@ -134,16 +166,17 @@ defmodule Drafter.ContentRenderer do
     fg = computed[:color] || {100, 200, 100}
     bg = computed[:background] || {30, 30, 30}
 
-    spinner_char = if running do
-      case spinner_type do
-        :dots -> "⣾"
-        :line -> "-"
-        :arrow -> "→"
-        _ -> "⠋"
+    spinner_char =
+      if running do
+        case spinner_type do
+          :dots -> "⣾"
+          :line -> "-"
+          :arrow -> "→"
+          _ -> "⠋"
+        end
+      else
+        "✓"
       end
-    else
-      "✓"
-    end
 
     display_text = "#{spinner_char} #{text}"
     stripped_text = String.slice(display_text, 0, rect.width)
@@ -254,11 +287,12 @@ defmodule Drafter.ContentRenderer do
 
     sparkline = render_sparkline_bars(data, min_val, max_val, rect.width - 20)
 
-    summary_str = if summary do
-      " min: #{min_val} max: #{max_val} avg: #{round(Enum.sum(data) / length(data))}"
-    else
-      ""
-    end
+    summary_str =
+      if summary do
+        " min: #{min_val} max: #{max_val} avg: #{round(Enum.sum(data) / length(data))}"
+      else
+        ""
+      end
 
     display_text = IO.iodata_to_binary([sparkline, summary_str])
     padded = String.pad_trailing(display_text, rect.width, " ")
@@ -295,14 +329,16 @@ defmodule Drafter.ContentRenderer do
     filled = round(progress * bar_width)
     empty = bar_width - filled
 
-    bar = IO.iodata_to_binary(["[", String.duplicate("█", filled), String.duplicate("░", empty), "]"])
+    bar =
+      IO.iodata_to_binary(["[", String.duplicate("█", filled), String.duplicate("░", empty), "]"])
 
-    display_text = if show_percentage do
-      pct = round(progress * 100)
-      "#{bar} #{pct}%"
-    else
-      bar
-    end
+    display_text =
+      if show_percentage do
+        pct = round(progress * 100)
+        "#{bar} #{pct}%"
+      else
+        bar
+      end
 
     padded = String.pad_trailing(display_text, rect.width, " ")
 
@@ -405,54 +441,59 @@ defmodule Drafter.ContentRenderer do
   defp render_horizontal_layout(children, rect) do
     gap = 2
 
-    total_gap = gap * (max(0, length(children) - 1))
+    total_gap = gap * max(0, length(children) - 1)
     available_width = rect.width - total_gap
 
     child_widths = calculate_child_widths(children, available_width)
 
     children_with_widths = Enum.zip(children, child_widths)
 
-    all_child_strips = Enum.map(children_with_widths, fn {child, width} ->
-      render_component_to_strips(child, %{rect | width: width})
-    end)
+    all_child_strips =
+      Enum.map(children_with_widths, fn {child, width} ->
+        render_component_to_strips(child, %{rect | width: width})
+      end)
 
-    max_height = all_child_strips
-    |> Enum.map(&length/1)
-    |> Enum.max(fn -> 0 end)
+    max_height =
+      all_child_strips
+      |> Enum.map(&length/1)
+      |> Enum.max(fn -> 0 end)
 
     if max_height == 0 do
       render_empty(rect)
     else
-      Enum.map(0..(max_height - 1), fn line_index ->
+      Enum.map(0..(max_height - 1)//1, fn line_index ->
         render_horizontal_line(children_with_widths, all_child_strips, line_index, gap)
       end)
     end
   end
 
   defp render_horizontal_line(children_with_widths, all_child_strips, line_index, gap) do
-    segments = Enum.with_index(children_with_widths)
-    |> Enum.flat_map(fn {{_child, width}, child_index} ->
-      child_strips = Enum.at(all_child_strips, child_index, [])
-      strip = Enum.at(child_strips, line_index)
+    segments =
+      Enum.with_index(children_with_widths)
+      |> Enum.flat_map(fn {{_child, width}, child_index} ->
+        child_strips = Enum.at(all_child_strips, child_index, [])
+        strip = Enum.at(child_strips, line_index)
 
-      item_segments = if strip do
-        strip.segments
-      else
-        fg = {200, 200, 200}
-        bg = {30, 30, 30}
-        [Segment.new(String.duplicate(" ", width), %{fg: fg, bg: bg})]
-      end
+        item_segments =
+          if strip do
+            strip.segments
+          else
+            fg = {200, 200, 200}
+            bg = {30, 30, 30}
+            [Segment.new(String.duplicate(" ", width), %{fg: fg, bg: bg})]
+          end
 
-      gap_segments = if child_index < length(children_with_widths) - 1 do
-        fg = {200, 200, 200}
-        bg = {30, 30, 30}
-        [Segment.new(String.duplicate(" ", gap), %{fg: fg, bg: bg})]
-      else
-        []
-      end
+        gap_segments =
+          if child_index < length(children_with_widths) - 1 do
+            fg = {200, 200, 200}
+            bg = {30, 30, 30}
+            [Segment.new(String.duplicate(" ", gap), %{fg: fg, bg: bg})]
+          else
+            []
+          end
 
-      item_segments ++ gap_segments
-    end)
+        item_segments ++ gap_segments
+      end)
 
     Strip.new(segments)
   end
@@ -464,7 +505,7 @@ defmodule Drafter.ContentRenderer do
     base_width = div(available_width, num_children)
     remainder = rem(available_width, num_children)
 
-    Enum.map(0..(num_children - 1), fn index ->
+    Enum.map(0..(num_children - 1)//1, fn index ->
       child_width(base_width, index, remainder)
     end)
   end
@@ -507,6 +548,7 @@ defmodule Drafter.ContentRenderer do
   end
 
   defp format_list(data, false), do: "[#{Enum.map_join(data, ", ", &format_simple/1)}]"
+
   defp format_list(data, true) do
     inner = Enum.map_join(data, ",\n  ", &format_simple/1)
     "[\n  #{inner}\n]"
@@ -516,6 +558,7 @@ defmodule Drafter.ContentRenderer do
     pairs = Enum.map(data, fn {k, v} -> "#{format_simple(k)}: #{format_simple(v)}" end)
     "[#{Enum.join(pairs, ", ")}]"
   end
+
   defp format_keyword(data, true) do
     pairs = Enum.map(data, fn {k, v} -> "#{format_simple(k)}: #{format_simple(v)}" end)
     "[\n  #{Enum.join(pairs, ",\n  ")}\n]"
@@ -525,18 +568,28 @@ defmodule Drafter.ContentRenderer do
     pairs = Enum.map(data, fn {k, v} -> "#{format_simple(k)} => #{format_simple(v)}" end)
     "%{#{Enum.join(pairs, ", ")}}"
   end
+
   defp format_map(data, true) do
     pairs = Enum.map(data, fn {k, v} -> "#{format_simple(k)} => #{format_simple(v)}" end)
     "%{\n  #{Enum.join(pairs, ",\n  ")}\n}"
   end
 
   defp format_struct(data, false) do
-    fields = data |> Map.delete(:__struct__) |> Enum.map(fn {k, v} -> "#{format_simple(k)}: #{format_simple(v)}" end)
+    fields =
+      data
+      |> Map.delete(:__struct__)
+      |> Enum.map(fn {k, v} -> "#{format_simple(k)}: #{format_simple(v)}" end)
+
     struct_name = data.__struct__ |> Module.split() |> List.last()
     "%#{struct_name}{#{Enum.join(fields, ", ")}}"
   end
+
   defp format_struct(data, true) do
-    fields = data |> Map.delete(:__struct__) |> Enum.map(fn {k, v} -> "#{format_simple(k)}: #{format_simple(v)}" end)
+    fields =
+      data
+      |> Map.delete(:__struct__)
+      |> Enum.map(fn {k, v} -> "#{format_simple(k)}: #{format_simple(v)}" end)
+
     struct_name = data.__struct__ |> Module.split() |> List.last()
     "%#{struct_name}{\n  #{Enum.join(fields, ",\n  ")}\n}"
   end

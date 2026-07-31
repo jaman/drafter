@@ -142,7 +142,13 @@ defmodule Drafter.Widget.ProgressBar do
   end
 
   defp render_determinate(state, rect, bar_color, empty_color, text_color, bg_color) do
-    percentage = if state.max_value > 0, do: min(1.0, state.progress / state.max_value), else: 0.0
+    percentage =
+      if state.max_value > 0 do
+        (state.progress / state.max_value) |> min(1.0) |> max(0.0)
+      else
+        0.0
+      end
+
     status_text = build_status_text(state, percentage)
 
     status_width = String.length(status_text)
@@ -175,6 +181,8 @@ defmodule Drafter.Widget.ProgressBar do
       segments
     end
   end
+
+  defp render_indeterminate(_state, %{width: width}, _bar, _empty, _bg) when width <= 0, do: []
 
   defp render_indeterminate(state, rect, bar_color, empty_color, bg_color) do
     bar_width = rect.width
@@ -220,7 +228,8 @@ defmodule Drafter.Widget.ProgressBar do
 
   defp build_status_text(%{show_percentage: true}, percentage), do: " #{round(percentage * 100)}%"
 
-  defp build_status_text(%{show_eta: true} = state, percentage), do: " #{calculate_eta(state, percentage)}"
+  defp build_status_text(%{show_eta: true} = state, percentage),
+    do: " #{calculate_eta(state, percentage)}"
 
   defp build_status_text(_, _percentage), do: ""
 
@@ -266,6 +275,7 @@ defmodule Drafter.Widget.ProgressBar do
   def from_component_opts(_args, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 50, height: 1})
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+
     %{
       progress: Keyword.get(opts, :progress, 0.0),
       max_value: Keyword.get(opts, :max_value, 100.0),

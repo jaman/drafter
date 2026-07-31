@@ -76,7 +76,10 @@ defmodule Drafter.Widget.CodeView do
   def render(state, rect) do
     theme = ThemeManager.get_current_theme()
     syntax_colors = theme.syntax || %{}
-    line_num_width = if state.show_line_numbers, do: line_number_width(length(state.lines)), else: 0
+
+    line_num_width =
+      if state.show_line_numbers, do: line_number_width(length(state.lines)), else: 0
+
     content_width = max(1, rect.width - line_num_width)
 
     state.lines
@@ -85,8 +88,14 @@ defmodule Drafter.Widget.CodeView do
     |> Enum.take(rect.height)
     |> Enum.map(fn {line, line_number} ->
       render_line(
-        line, line_number, line_num_width, content_width,
-        state.highlights, syntax_colors, theme, state.h_scroll_offset
+        line,
+        line_number,
+        line_num_width,
+        content_width,
+        state.highlights,
+        syntax_colors,
+        theme,
+        state.h_scroll_offset
       )
     end)
   end
@@ -156,14 +165,15 @@ defmodule Drafter.Widget.CodeView do
     raw_source = resolve_source(path, source, state.lines, path_changed, hex_changed)
     {lines, highlights} = content_to_lines(raw_source, language, path, hex_view)
 
-    %{state |
-      lines: lines,
-      highlights: highlights,
-      language: language,
-      path: path,
-      hex_view: hex_view,
-      scroll_offset: 0,
-      h_scroll_offset: 0
+    %{
+      state
+      | lines: lines,
+        highlights: highlights,
+        language: language,
+        path: path,
+        hex_view: hex_view,
+        scroll_offset: 0,
+        h_scroll_offset: 0
     }
   end
 
@@ -211,6 +221,7 @@ defmodule Drafter.Widget.CodeView do
         {:ok, content} -> content
         _ -> ""
       end
+
     content_to_lines(raw, language, path, hex_view)
   end
 
@@ -273,8 +284,18 @@ defmodule Drafter.Widget.CodeView do
     total_lines |> Integer.to_string() |> String.length() |> Kernel.+(1)
   end
 
-  defp render_line(line, line_number, line_num_width, content_width, highlights, syntax_colors, theme, h_scroll_offset) do
+  defp render_line(
+         line,
+         line_number,
+         line_num_width,
+         content_width,
+         highlights,
+         syntax_colors,
+         theme,
+         h_scroll_offset
+       ) do
     bg = theme.background
+
     num_segments =
       if line_num_width > 0 do
         num_str = line_number |> Integer.to_string() |> String.pad_leading(line_num_width - 1)
@@ -326,7 +347,17 @@ defmodule Drafter.Widget.CodeView do
   end
 
   defp apply_span(ctx, segs, pos, sc, ec, capture_type) do
-    segs = if sc > pos, do: segs ++ [Segment.new(String.slice(ctx.line, pos, sc - pos), %{fg: ctx.default_color, bg: ctx.bg})], else: segs
+    segs =
+      if sc > pos,
+        do:
+          segs ++
+            [
+              Segment.new(String.slice(ctx.line, pos, sc - pos), %{
+                fg: ctx.default_color,
+                bg: ctx.bg
+              })
+            ],
+        else: segs
 
     segs =
       if ec > sc do

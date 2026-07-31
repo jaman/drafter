@@ -1,8 +1,6 @@
 defmodule Drafter.Examples.SimpleDemo do
   @moduledoc """
-  A simple demonstration of the new declarative TUI API.
-
-  Compare this ~30 line implementation to the 200+ line ThemeSandbox!
+  A demonstration of the declarative TUI API.
   """
 
   use Drafter.App
@@ -18,10 +16,7 @@ defmodule Drafter.Examples.SimpleDemo do
 
   def render(state) do
     horizontal([
-      # Left side: Theme selector (automatically managed)
       theme_selector(),
-
-      # Right side: Main content
       vertical([
         label("TUI Demo Application"),
         horizontal([
@@ -43,7 +38,6 @@ defmodule Drafter.Examples.SimpleDemo do
     ])
   end
 
-  # Simple event handlers - no complex message routing needed
   def handle_event(:primary_clicked, _, state) do
     {:ok, %{state | click_count: state.click_count + 1}}
   end

@@ -117,6 +117,7 @@ defmodule Drafter.Widget.FilePicker do
                 path: state.tree_root,
                 show_hidden: state.show_hidden,
                 on_file_select: :fp_file_selected,
+                on_select: :fp_item_selected,
                 flex: 1
               )
             ],
@@ -183,6 +184,14 @@ defmodule Drafter.Widget.FilePicker do
     {:ok, %{state | selected_path: path}}
   end
 
+  def handle_event(:fp_item_selected, path, state) when is_binary(path) do
+    if selectable?(state, path) do
+      {:ok, %{state | selected_path: path}}
+    else
+      {:noreply, state}
+    end
+  end
+
   def handle_event(:fp_location_selected, path, state) when is_binary(path) do
     {:ok, %{state | tree_root: path, selected_path: nil}}
   end
@@ -239,6 +248,14 @@ defmodule Drafter.Widget.FilePicker do
   end
 
   def handle_event(_event, state), do: {:noreply, state}
+
+  defp selectable?(state, path) do
+    cond do
+      File.regular?(path) -> true
+      File.dir?(path) -> state.allow_dirs
+      true -> false
+    end
+  end
 
   defp call_callback(nil, _value), do: :ok
   defp call_callback(cb, value) when is_function(cb, 1), do: cb.(value)

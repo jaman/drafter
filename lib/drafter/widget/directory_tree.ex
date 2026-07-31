@@ -146,7 +146,10 @@ defmodule Drafter.Widget.DirectoryTree do
     state = ensure_mounted(state)
     tree_items = build_tree(state)
     new_pos = max(0, state.cursor_pos - 1)
-    new_scroll = if new_pos < state.scroll_offset, do: state.scroll_offset - 1, else: state.scroll_offset
+
+    new_scroll =
+      if new_pos < state.scroll_offset, do: state.scroll_offset - 1, else: state.scroll_offset
+
     new_state = %{state | cursor_pos: new_pos, scroll_offset: max(0, new_scroll)}
     actions = cursor_actions_for_pos(new_state, tree_items, new_pos)
     {:ok, new_state, actions}
@@ -157,7 +160,10 @@ defmodule Drafter.Widget.DirectoryTree do
     tree_items = build_tree(state)
     new_pos = min(length(tree_items) - 1, state.cursor_pos + 1)
     last_visible_idx = state.scroll_offset + state.viewport_height - 1
-    new_scroll = if new_pos > last_visible_idx, do: state.scroll_offset + 1, else: state.scroll_offset
+
+    new_scroll =
+      if new_pos > last_visible_idx, do: state.scroll_offset + 1, else: state.scroll_offset
+
     new_state = %{state | cursor_pos: new_pos, scroll_offset: new_scroll}
     actions = cursor_actions_for_pos(new_state, tree_items, new_pos)
     {:ok, new_state, actions}
@@ -169,7 +175,7 @@ defmodule Drafter.Widget.DirectoryTree do
     activate_cursor_item(state, tree_items)
   end
 
-  def handle_key(:space, state) do
+  def handle_key(:" ", state) do
     state = ensure_mounted(state)
     tree_items = build_tree(state)
     activate_cursor_item_space(state, tree_items)
@@ -449,9 +455,11 @@ defmodule Drafter.Widget.DirectoryTree do
   defp build_items(entries, path, expanded_dirs, show_hidden, depth, acc) do
     {dirs, files} = Enum.split_with(entries, fn entry -> File.dir?(Path.join([path, entry])) end)
 
-    dirs_with_children = Enum.flat_map(dirs, fn dir -> expand_dir(dir, path, expanded_dirs, show_hidden, depth) end)
+    dirs_with_children =
+      Enum.flat_map(dirs, fn dir -> expand_dir(dir, path, expanded_dirs, show_hidden, depth) end)
 
-    file_items = Enum.map(files, fn file -> %{path: Path.join([path, file]), type: :file, depth: depth} end)
+    file_items =
+      Enum.map(files, fn file -> %{path: Path.join([path, file]), type: :file, depth: depth} end)
 
     acc ++ dirs_with_children ++ file_items
   end

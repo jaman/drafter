@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule Charts do
   use Drafter.App
@@ -12,6 +12,7 @@ defmodule Charts do
     %{
       data: data,
       scope_data: generate_scope_data(200, 0),
+      renderer: :auto,
       candlestick_data: candlestick_data,
       timestamp: 0,
       current_candle: %{
@@ -27,6 +28,10 @@ defmodule Charts do
 
   keybinding :q, "quit" do
     {:stop, :normal}
+  end
+
+  keybinding :m, "render mode" do
+    {:ok, %{state | renderer: next_renderer(state.renderer)}}
   end
 
   keybinding :r, "regenerate" do
@@ -109,9 +114,12 @@ defmodule Charts do
       header("Chart Demo", show_clock: true),
       scrollable(
         [
+          mode_label(state.renderer),
+          label(""),
           label("Line Chart", style: %{fg: {100, 150, 255}, bold: true}),
           chart(state.data,
-            chart_type: :line, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :line,
             height: 6,
             color: {100, 200, 255},
             animated: true,
@@ -121,7 +129,8 @@ defmodule Charts do
           label(""),
           label("Smooth Line Chart (Catmull-Rom, thickness: 2)", style: %{fg: {100, 150, 255}, bold: true}),
           chart(state.data,
-            chart_type: :line, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :line,
             height: 6,
             color: {80, 255, 180},
             smooth: true,
@@ -133,7 +142,8 @@ defmodule Charts do
           label(""),
           label("Oscilloscope (multi-series, smooth, connected)", style: %{fg: {100, 150, 255}, bold: true}),
           chart(state.scope_data,
-            chart_type: :line, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :line,
             height: 10,
             smooth: true,
             line_thickness: 2,
@@ -145,11 +155,12 @@ defmodule Charts do
           ),
           label(""),
           label("Bar Chart", style: %{fg: {100, 150, 255}, bold: true}),
-          chart(Enum.take(state.data, 40), chart_type: :bar, renderer: :pixel, height: 1, color: {80, 250, 123}),
+          chart(Enum.take(state.data, 40), renderer: state.renderer, chart_type: :bar, height: 1, color: {80, 250, 123}),
           label(""),
           label("Area Chart", style: %{fg: {100, 150, 255}, bold: true}),
           chart(state.data,
-            chart_type: :area, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :area,
             height: 5,
             color: {255, 121, 198},
             animated: true,
@@ -162,35 +173,39 @@ defmodule Charts do
             style: %{fg: {120, 120, 120}}
           ),
           chart(state.candlestick_data ++ [live_candle],
-            chart_type: :candlestick, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :candlestick,
             height: 40,
             animated: true,
             _render_timestamp: state.timestamp
           ),
           label(""),
           label("Scatter Plot", style: %{fg: {100, 150, 255}, bold: true}),
-          chart(state.data, chart_type: :scatter, renderer: :pixel, height: 5, color: {255, 184, 108}),
+          chart(state.data, renderer: state.renderer, chart_type: :scatter, height: 5, color: {255, 184, 108}),
           label(""),
           label("Step Plot", style: %{fg: {100, 150, 255}, bold: true}),
           chart(state.data,
-            chart_type: :step, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :step,
             height: 6,
             color: {180, 255, 100},
             _render_timestamp: state.timestamp
           ),
           label(""),
           label("Histogram", style: %{fg: {100, 150, 255}, bold: true}),
-          chart(state.data, chart_type: :histogram, renderer: :pixel, height: 6, color: {100, 200, 180}),
+          chart(state.data, renderer: state.renderer, chart_type: :histogram, height: 6, color: {100, 200, 180}),
           label(""),
           label("Heatmap", style: %{fg: {100, 150, 255}, bold: true}),
           chart(generate_heatmap_data(),
-            chart_type: :heatmap, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :heatmap,
             height: 8
           ),
           label(""),
           label("Bubble Chart", style: %{fg: {100, 150, 255}, bold: true}),
           chart(generate_bubble_data(),
-            chart_type: :bubble, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :bubble,
             height: 6,
             color: {200, 150, 255}
           ),
@@ -207,6 +222,7 @@ defmodule Charts do
                   {"Sports", 7.9},
                   {"Other", 4.5}
                 ],
+                renderer: state.renderer,
                 show_legend: true,
                 show_percentages: true
               ),
@@ -217,6 +233,7 @@ defmodule Charts do
                   {"Go", 18, {0, 173, 216}},
                   {"Python", 12, {55, 118, 171}}
                 ],
+                renderer: state.renderer,
                 show_legend: true,
                 show_percentages: true
               )
@@ -232,6 +249,18 @@ defmodule Charts do
   end
 
   def handle_event(_event, state), do: {:noreply, state}
+
+  defp next_renderer(:auto), do: :braille
+  defp next_renderer(:braille), do: :text
+  defp next_renderer(_renderer), do: :auto
+
+  defp mode_label(renderer) do
+    resolved = Drafter.Widget.Chart.Pixel.mode(renderer, :line)
+
+    label("Render mode: #{renderer} (resolved: #{resolved}) — press m to cycle",
+      style: %{fg: {255, 200, 100}, bold: true}
+    )
+  end
 
   defp generate_wave_data(count) do
     for i <- 0..(count - 1) do

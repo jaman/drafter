@@ -20,7 +20,8 @@ defmodule Drafter.Syntax.ElixirHighlighter do
     _ -> []
   end
 
-  defp token_to_capture({:identifier, {line, col, raw}, value}) when value in @keyword_identifiers do
+  defp token_to_capture({:identifier, {line, col, raw}, value})
+       when value in @keyword_identifiers do
     sc = col - 1
     [{line, sc, line, sc + raw_length(raw, value), "keyword"}]
   end
@@ -73,11 +74,20 @@ defmodule Drafter.Syntax.ElixirHighlighter do
     [{line, sc, line, sc + raw_length(raw, value), "operator"}]
   end
 
-  defp token_to_capture({:do, {line, col, _}}),  do: [{line, col - 1, line, col + 1, "keyword.builtin"}]
-  defp token_to_capture({:end, {line, col, _}}),  do: [{line, col - 1, line, col + 2, "keyword.builtin"}]
-  defp token_to_capture({true,  {line, col, _}}), do: [{line, col - 1, line, col + 3, "keyword.builtin"}]
-  defp token_to_capture({false, {line, col, _}}), do: [{line, col - 1, line, col + 4, "keyword.builtin"}]
-  defp token_to_capture({nil,   {line, col, _}}), do: [{line, col - 1, line, col + 2, "keyword.builtin"}]
+  defp token_to_capture({:do, {line, col, _}}),
+    do: [{line, col - 1, line, col + 1, "keyword.builtin"}]
+
+  defp token_to_capture({:end, {line, col, _}}),
+    do: [{line, col - 1, line, col + 2, "keyword.builtin"}]
+
+  defp token_to_capture({true, {line, col, _}}),
+    do: [{line, col - 1, line, col + 3, "keyword.builtin"}]
+
+  defp token_to_capture({false, {line, col, _}}),
+    do: [{line, col - 1, line, col + 4, "keyword.builtin"}]
+
+  defp token_to_capture({nil, {line, col, _}}),
+    do: [{line, col - 1, line, col + 2, "keyword.builtin"}]
 
   defp token_to_capture({:sigil, {line, col, _}, _name, _parts, _mods, _delim}) do
     sc = col - 1
@@ -89,7 +99,10 @@ defmodule Drafter.Syntax.ElixirHighlighter do
   defp raw_length(raw, _value) when is_list(raw) and raw != [], do: length(raw)
   defp raw_length(_raw, value) when is_atom(value), do: value |> Atom.to_string() |> byte_size()
   defp raw_length(_raw, value) when is_binary(value), do: byte_size(value)
-  defp raw_length(_raw, value) when is_integer(value), do: value |> Integer.to_string() |> byte_size()
+
+  defp raw_length(_raw, value) when is_integer(value),
+    do: value |> Integer.to_string() |> byte_size()
+
   defp raw_length(_raw, value) when is_float(value), do: value |> Float.to_string() |> byte_size()
   defp raw_length(_raw, _value), do: 1
 
@@ -99,5 +112,6 @@ defmodule Drafter.Syntax.ElixirHighlighter do
       _other, acc -> acc + 4
     end)
   end
+
   defp estimate_string_length(_), do: 0
 end

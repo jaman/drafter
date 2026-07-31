@@ -101,22 +101,31 @@ defmodule Drafter.Widget.Container do
   end
 
   @impl Drafter.Widget
+  @doc """
+  Offers the event to every child in order.
+
+  Returns `{:ok, state}` if any child handled the event, otherwise
+  `{:bubble, state}`. Child states are updated either way.
+  """
   def handle_event(event, state) do
-    updated_children =
-      Enum.map(state.children, fn {module, props, child_state} ->
-        case module.handle_event(event, child_state) do
-          {:ok, new_child_state} ->
-            {module, props, new_child_state}
-
-          {:error, _reason} ->
-            {module, props, child_state}
-
-          {:noreply, new_child_state} ->
-            {module, props, new_child_state}
-        end
+    {children, handled?} =
+      Enum.map_reduce(state.children, false, fn {module, props, child_state}, taken ->
+        offer_to_child(module, props, child_state, event, taken)
       end)
 
-    {:ok, %{state | children: updated_children}}
+    updated = %{state | children: children}
+
+    if handled?, do: {:ok, updated}, else: {:bubble, updated}
+  end
+
+  defp offer_to_child(module, props, child_state, event, taken) do
+    case module.handle_event(event, child_state) do
+      {:ok, new_child_state} -> {{module, props, new_child_state}, true}
+      {:ok, new_child_state, _actions} -> {{module, props, new_child_state}, true}
+      {:bubble, new_child_state} -> {{module, props, new_child_state}, taken}
+      {:noreply, new_child_state} -> {{module, props, new_child_state}, taken}
+      _other -> {{module, props, child_state}, taken}
+    end
   end
 
   @impl Drafter.Widget
@@ -258,7 +267,7 @@ defmodule Drafter.Widget.Container do
         max(acc, length(strips))
       end)
 
-    Enum.map(0..(max_height - 1), fn line_index ->
+    Enum.map(0..(max_height - 1)//1, fn line_index ->
       line_segments = Enum.flat_map(child_strips, &horizontal_line_segments(&1, line_index))
       Strip.new(line_segments)
     end)
@@ -272,10 +281,10 @@ defmodule Drafter.Widget.Container do
   end
 
   defp horizontal_line_segments({child_rect, strips}, line_index) do
-    if line_index < length(strips) do
-      Enum.at(strips, line_index).segments
-    else
-      [Segment.new(String.duplicate(" ", child_rect.width))]
+    cond do
+      line_index >= 0 and line_index < length(strips) -> Enum.at(strips, line_index).segments
+      is_map(child_rect) -> [Segment.new(String.duplicate(" ", child_rect.width))]
+      true -> []
     end
   end
 

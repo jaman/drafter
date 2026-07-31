@@ -25,9 +25,9 @@ defmodule Drafter.Widget.Chart.Heatmap do
 
     indexed_matrix = index_matrix(matrix)
 
-    Enum.map(0..(height - 1), fn term_row ->
+    Enum.map(0..(height - 1)//1, fn term_row ->
       segments =
-        Enum.map(0..(width - 1), fn term_col ->
+        Enum.map(0..(width - 1)//1, fn term_col ->
           data_rows = Enum.at(row_mapping, term_row, [])
           data_cols = Enum.at(col_mapping, term_col, [])
           avg = aggregate_cells(indexed_matrix, data_rows, data_cols)
@@ -56,7 +56,7 @@ defmodule Drafter.Widget.Chart.Heatmap do
   end
 
   defp map_indices(data_count, terminal_count) do
-    Enum.map(0..(terminal_count - 1), fn term_idx ->
+    Enum.map(0..(terminal_count - 1)//1, fn term_idx ->
       start_f = term_idx * data_count / terminal_count
       end_f = (term_idx + 1) * data_count / terminal_count
       start_i = trunc(start_f)
@@ -101,7 +101,7 @@ defmodule Drafter.Widget.Chart.Heatmap do
 
   defp value_to_color(value, min_val, max_val, _default_bg) do
     range = max_val - min_val
-    t = (value - min_val) / range |> max(0.0) |> min(1.0)
+    t = ((value - min_val) / range) |> max(0.0) |> min(1.0)
     gradient_color(t)
   end
 

@@ -25,47 +25,29 @@ defmodule Drafter.Widget.Placeholder do
   alias Drafter.Draw.{Segment, Strip}
 
   @pastel_colors [
-    # Purple
     {77, 17, 68},
-    # Pink
     {94, 34, 51},
-    # Red
     {111, 60, 60},
-    # Brown
     {128, 85, 43},
-    # Yellow-green
     {128, 119, 9},
-    # Green
     {85, 119, 51},
-    # Teal
     {43, 119, 77},
-    # Cyan
     {26, 111, 102},
-    # Light blue
     {9, 102, 111},
-    # Blue
     {9, 85, 111},
-    # Dark blue
     {34, 60, 102},
-    # Purple-blue
     {60, 34, 85},
-    # Magenta
     {85, 34, 60},
-    # Dark red
     {102, 34, 34},
-    # Orange
     {102, 68, 34},
-    # Olive
     {85, 85, 34}
   ]
 
   def mount(props) do
-    # Get color based on placeholder number
     placeholder_text = Map.get(props, :text, "Placeholder")
     color_index = extract_number_from_text(placeholder_text) - 1
     bg_color = Enum.at(@pastel_colors, rem(color_index, length(@pastel_colors)))
 
-    # Calculate contrasting text color
     fg_color = contrasting_text_color(bg_color)
 
     %{
@@ -134,7 +116,17 @@ defmodule Drafter.Widget.Placeholder do
     text_y = div(content_height - 2, 2)
 
     Enum.map(0..(content_height + 1), fn row ->
-      text = border_row_text(row, content_height, text_y, text_lines, top_border, bottom_border, content_width)
+      text =
+        border_row_text(
+          row,
+          content_height,
+          text_y,
+          text_lines,
+          top_border,
+          bottom_border,
+          content_width
+        )
+
       padded_strip(Segment.new(text, state.style), padding)
     end)
   end
@@ -162,7 +154,7 @@ defmodule Drafter.Widget.Placeholder do
     text_lines = wrap_text(state.text, content_width)
     center_row = div(content_height, 2)
 
-    Enum.map(0..(content_height - 1), fn row ->
+    Enum.map(0..(content_height - 1)//1, fn row ->
       line_text = borderless_row_text(row, center_row, text_lines, content_width)
       segment = Segment.new(line_text, state.style)
       padded_strip_styled(segment, padding, state.style)
@@ -213,15 +205,11 @@ defmodule Drafter.Widget.Placeholder do
   end
 
   defp contrasting_text_color({r, g, b}) do
-    # Calculate luminance
     luminance = 0.299 * r + 0.587 * g + 0.114 * b
 
-    # Use light text on dark backgrounds, dark text on light backgrounds
     if luminance < 128 do
-      # Light text
       {230, 230, 230}
     else
-      # Dark text
       {30, 30, 30}
     end
   end

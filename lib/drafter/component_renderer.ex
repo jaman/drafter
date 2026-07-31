@@ -2,22 +2,49 @@ defmodule Drafter.ComponentRenderer do
   @moduledoc false
 
   alias Drafter.{CharacterSet, Layout, Theme, WidgetHierarchy}
-  alias Drafter.Widget.{Box, Card, Collapsible, Label, OptionList, ScrollableContainer, SplitPaneDivider, Switch}
+
+  alias Drafter.Widget.{
+    Box,
+    Card,
+    Collapsible,
+    Label,
+    OptionList,
+    ScrollableContainer,
+    SplitPaneDivider,
+    Switch
+  }
 
   def send_app_callback(callback_fn, data) when is_function(callback_fn), do: callback_fn.(data)
   def send_app_callback(callback_name, data), do: {:app_callback, callback_name, data}
 
-  defp ns_widget_id(opts, app_module, type, suffix) do
+  defp ns_widget_id(opts, app_module, type, suffix) when is_integer(suffix) do
     case Keyword.get(opts, :id) do
-      nil ->
-        mod = if app_module, do: app_module |> Module.split() |> List.last(), else: nil
-        if mod, do: String.to_atom("#{mod}_#{type}_#{suffix}"), else: String.to_atom("#{type}_#{suffix}")
-      id ->
-        id
+      nil -> keyed_or_positional_id(opts, app_module, type, suffix)
+      id -> id
     end
   end
 
-  defp make_ctx(theme, app_state, app_module), do: %{theme: theme, app_state: app_state, app_module: app_module}
+  defp keyed_or_positional_id(opts, app_module, type, suffix) do
+    prefix = namespace_prefix(app_module, type)
+
+    case Keyword.get(opts, :key) do
+      nil -> String.to_atom("#{prefix}_#{suffix}")
+      key -> "#{prefix}##{stringify_key(key)}"
+    end
+  end
+
+  defp namespace_prefix(nil, type), do: to_string(type)
+
+  defp namespace_prefix(app_module, type) do
+    "#{app_module |> Module.split() |> List.last()}_#{type}"
+  end
+
+  defp stringify_key(key) when is_binary(key), do: key
+  defp stringify_key(key) when is_atom(key) or is_integer(key), do: to_string(key)
+  defp stringify_key(key), do: :erlang.phash2(key) |> Integer.to_string()
+
+  defp make_ctx(theme, app_state, app_module),
+    do: %{theme: theme, app_state: app_state, app_module: app_module}
 
   @doc """
   Convert a component tree to a widget hierarchy with automatic layout.
@@ -109,10 +136,16 @@ defmodule Drafter.ComponentRenderer do
         _ -> true
       end
 
-    if visible do
-      render_component_internal(hierarchy, component, rect, ctx, parent_id, id_counter)
-    else
-      {hierarchy, id_counter}
+    cond do
+      not visible ->
+        {hierarchy, id_counter}
+
+      Layout.component_hidden?(component) ->
+        {hierarchy, id_counter + Layout.count_component_slots(component)}
+
+      true ->
+        inset = Layout.apply_margin(rect, Layout.get_margin(Layout.component_opts(component)))
+        render_component_internal(hierarchy, component, inset, ctx, parent_id, id_counter)
     end
   end
 
@@ -134,6 +167,10 @@ defmodule Drafter.ComponentRenderer do
 
   defp render_component_internal(h, {:box, children, opts}, rect, ctx, pid, idc) do
     render_box(h, children, opts, rect, ctx, pid, idc)
+  end
+
+  defp render_component_internal(h, {:grid, children, opts}, rect, ctx, pid, idc) do
+    render_grid(h, children, opts, rect, ctx, pid, idc)
   end
 
   defp render_component_internal(h, {:card, children, opts}, rect, ctx, pid, idc) do
@@ -163,11 +200,59 @@ defmodule Drafter.ComponentRenderer do
     dispatch_via_registry(h, tag, nil, opts, rect, ctx, pid, idc)
   end
 
+  defp render_component_internal(h, {module, props}, rect, ctx, pid, idc)
+       when is_atom(module) and is_map(props) do
+    if widget_module?(module) do
+      dispatch_via_module(h, module, props, rect, ctx, pid, idc)
+    else
+      {h, idc}
+    end
+  end
+
   defp render_component_internal(h, _component, _rect, _ctx, _pid, idc) do
     {h, idc}
   end
 
-  defp render_switch_group(hierarchy, group_name, switches, rect, app_state, parent_id, id_counter) do
+  defp widget_module?(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :mount, 1) and
+      function_exported?(module, :render, 2)
+  end
+
+  defp dispatch_via_module(hierarchy, module, props, rect, ctx, parent_id, id_counter) do
+    identity = props |> Map.take([:id, :key]) |> Map.to_list()
+    widget_id = ns_widget_id(identity, ctx.app_module, module_tag(module), id_counter)
+
+    mount_props =
+      props
+      |> Map.put_new(:app_module, ctx.app_module)
+      |> Map.put(:__rect__, rect)
+      |> Map.put(:__widget_id__, widget_id)
+
+    new_hierarchy =
+      hierarchy
+      |> upsert_widget(widget_id, module, mount_props, parent_id, rect, [])
+      |> WidgetHierarchy.set_widget_overflow(widget_id, :clip)
+
+    {new_hierarchy, id_counter + 1}
+  end
+
+  defp module_tag(module) do
+    if function_exported?(module, :component_tag, 0) do
+      module.component_tag()
+    else
+      module |> Module.split() |> List.last() |> Macro.underscore()
+    end
+  end
+
+  defp render_switch_group(
+         hierarchy,
+         group_name,
+         switches,
+         rect,
+         app_state,
+         parent_id,
+         id_counter
+       ) do
     group_state = Map.get(app_state, group_name)
 
     Enum.reduce(switches, {hierarchy, id_counter}, fn switch_opts, {h, idc} ->
@@ -202,7 +287,17 @@ defmodule Drafter.ComponentRenderer do
       size: Keyword.get(switch_opts, :size, :normal)
     }
 
-    new_h = upsert_named_widget(hierarchy, widget_id, Switch, mount_props, update_props, parent_id, rect)
+    new_h =
+      upsert_named_widget(
+        hierarchy,
+        widget_id,
+        Switch,
+        mount_props,
+        update_props,
+        parent_id,
+        rect
+      )
+
     {new_h, idc + 1}
   end
 
@@ -253,7 +348,14 @@ defmodule Drafter.ComponentRenderer do
     custom_style = Keyword.get(opts, :style, %{})
     border_offset = if border == :none, do: 0, else: 1
 
-    mount_props = %{title: title, border: border, padding: padding, style: custom_style, app_module: ctx.app_module}
+    mount_props = %{
+      title: title,
+      border: border,
+      padding: padding,
+      style: custom_style,
+      app_module: ctx.app_module
+    }
+
     update_props = %{title: title, border: border, padding: padding, style: custom_style}
 
     content_rect = %{
@@ -263,7 +365,8 @@ defmodule Drafter.ComponentRenderer do
       height: max(1, rect.height - border_offset * 2 - padding * 2)
     }
 
-    new_h = upsert_named_widget(hierarchy, widget_id, Box, mount_props, update_props, parent_id, rect)
+    new_h =
+      upsert_named_widget(hierarchy, widget_id, Box, mount_props, update_props, parent_id, rect)
 
     wrapped = List.wrap(children)
 
@@ -301,7 +404,9 @@ defmodule Drafter.ComponentRenderer do
 
     update_props = Map.delete(mount_props, :app_module)
 
-    new_h = upsert_named_widget(hierarchy, widget_id, Card, mount_props, update_props, parent_id, rect)
+    new_h =
+      upsert_named_widget(hierarchy, widget_id, Card, mount_props, update_props, parent_id, rect)
+
     {new_h, id_counter + 1}
   end
 
@@ -315,20 +420,40 @@ defmodule Drafter.ComponentRenderer do
     {new_h, id_counter + 1}
   end
 
+  @collapsible_id_space 4096
+
   defp render_collapsible(hierarchy, title, content, opts, rect, ctx, parent_id, id_counter) do
-    widget_id = ns_widget_id(opts, ctx.app_module, "collapsible", :erlang.phash2(title))
+    widget_id =
+      ns_widget_id(
+        opts,
+        ctx.app_module,
+        "collapsible",
+        :erlang.phash2(title, @collapsible_id_space)
+      )
+
     expanded = Keyword.get(opts, :expanded, false)
     on_toggle = Keyword.get(opts, :on_toggle)
     content_height = Keyword.get(opts, :content_height)
 
-    on_toggle_fn = if on_toggle, do: fn value -> send_app_callback(on_toggle, value) end, else: nil
+    on_toggle_fn =
+      if on_toggle, do: fn value -> send_app_callback(on_toggle, value) end, else: nil
 
     mount_props =
       %{title: title, content: content, expanded: expanded, on_toggle: on_toggle_fn}
-      |> then(fn p -> if content_height, do: Map.put(p, :content_height, content_height), else: p end)
+      |> then(fn p ->
+        if content_height, do: Map.put(p, :content_height, content_height), else: p
+      end)
 
     new_hierarchy =
-      upsert_collapsible_widget(hierarchy, widget_id, mount_props, content_height, on_toggle_fn, rect, parent_id)
+      upsert_collapsible_widget(
+        hierarchy,
+        widget_id,
+        mount_props,
+        content_height,
+        on_toggle_fn,
+        rect,
+        parent_id
+      )
 
     current_expanded =
       case WidgetHierarchy.get_widget_state(new_hierarchy, widget_id) do
@@ -346,13 +471,31 @@ defmodule Drafter.ComponentRenderer do
     next_counter = id_counter + 1 + child_slots
 
     if current_expanded and is_list(content) do
-      render_collapsible_content(new_hierarchy, content, content_height, rect, ctx, widget_id, id_counter, next_counter)
+      render_collapsible_content(
+        new_hierarchy,
+        content,
+        content_height,
+        rect,
+        ctx,
+        widget_id,
+        id_counter,
+        next_counter
+      )
     else
       {new_hierarchy, next_counter}
     end
   end
 
-  defp render_collapsible_content(hierarchy, content, content_height, rect, ctx, parent_id, id_counter, next_counter) do
+  defp render_collapsible_content(
+         hierarchy,
+         content,
+         content_height,
+         rect,
+         ctx,
+         parent_id,
+         id_counter,
+         next_counter
+       ) do
     effective_content_height = content_height || 10
 
     content_rect = %{
@@ -366,26 +509,50 @@ defmodule Drafter.ComponentRenderer do
       %{visible_top: visible_top, visible_bottom: visible_bottom} ->
         {culled_h, _} =
           render_children_culled(
-            hierarchy, content, content_rect, ctx, parent_id,
-            id_counter + 1, visible_top, visible_bottom
+            hierarchy,
+            content,
+            content_rect,
+            ctx,
+            parent_id,
+            id_counter + 1,
+            visible_top,
+            visible_bottom
           )
 
         {culled_h, next_counter}
 
       _ ->
         {children_hierarchy, _} =
-          render_layout(hierarchy, :vertical, content, content_rect, ctx, parent_id, id_counter + 1, [])
+          render_layout(
+            hierarchy,
+            :vertical,
+            content,
+            content_rect,
+            ctx,
+            parent_id,
+            id_counter + 1,
+            []
+          )
 
         {children_hierarchy, next_counter}
     end
   end
 
-  defp render_children_culled(hierarchy, children, content_rect, ctx, parent_id,
-                              start_counter, visible_top, visible_bottom) do
+  defp render_children_culled(
+         hierarchy,
+         children,
+         content_rect,
+         ctx,
+         parent_id,
+         start_counter,
+         visible_top,
+         visible_bottom
+       ) do
     child_sizes = Layout.calculate_vertical_layout(children, content_rect, [], hierarchy)
 
-    Enum.reduce(Enum.zip(children, child_sizes), {hierarchy, start_counter}, fn {child, child_size},
-                                                                                  {acc_h, acc_idc} ->
+    Enum.reduce(Enum.zip(children, child_sizes), {hierarchy, start_counter}, fn {child,
+                                                                                 child_size},
+                                                                                {acc_h, acc_idc} ->
       child_rect = %{
         x: content_rect.x,
         y: child_size.y,
@@ -404,7 +571,15 @@ defmodule Drafter.ComponentRenderer do
     end)
   end
 
-  defp upsert_collapsible_widget(hierarchy, widget_id, mount_props, content_height, on_toggle_fn, rect, parent_id) do
+  defp upsert_collapsible_widget(
+         hierarchy,
+         widget_id,
+         mount_props,
+         content_height,
+         on_toggle_fn,
+         rect,
+         parent_id
+       ) do
     if Map.has_key?(hierarchy.widgets, widget_id) do
       updated_props = collapsible_update_props(mount_props.content, content_height, on_toggle_fn)
 
@@ -427,9 +602,19 @@ defmodule Drafter.ComponentRenderer do
   end
 
   defp maybe_update_widget(hierarchy, _widget_id, props) when map_size(props) == 0, do: hierarchy
-  defp maybe_update_widget(hierarchy, widget_id, props), do: WidgetHierarchy.update_widget(hierarchy, widget_id, props)
 
-  defp upsert_named_widget(hierarchy, widget_id, module, mount_props, update_props, parent_id, rect) do
+  defp maybe_update_widget(hierarchy, widget_id, props),
+    do: WidgetHierarchy.update_widget(hierarchy, widget_id, props)
+
+  defp upsert_named_widget(
+         hierarchy,
+         widget_id,
+         module,
+         mount_props,
+         update_props,
+         parent_id,
+         rect
+       ) do
     if Map.has_key?(hierarchy.widgets, widget_id) do
       hierarchy
       |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
@@ -449,16 +634,31 @@ defmodule Drafter.ComponentRenderer do
 
       module ->
         widget_id = ns_widget_id(opts, ctx.app_module, tag, id_counter)
-        enriched_opts = Keyword.merge(opts, [
-          __rect__: rect,
-          __app_state__: ctx.app_state,
-          __theme__: ctx.theme,
-          __app_module__: ctx.app_module,
-          __widget_id__: widget_id
-        ])
+
+        enriched_opts =
+          Keyword.merge(opts,
+            __rect__: rect,
+            __app_state__: ctx.app_state,
+            __theme__: ctx.theme,
+            __app_module__: ctx.app_module,
+            __widget_id__: widget_id
+          )
+
         mount_props = module.from_component_opts(args, enriched_opts)
-        new_hierarchy = upsert_widget(hierarchy, widget_id, module, mount_props, parent_id, rect, enriched_opts)
+
+        new_hierarchy =
+          hierarchy
+          |> upsert_widget(widget_id, module, mount_props, parent_id, rect, enriched_opts)
+          |> WidgetHierarchy.set_widget_overflow(widget_id, overflow_option(opts))
+
         {new_hierarchy, id_counter + 1}
+    end
+  end
+
+  defp overflow_option(opts) do
+    case Keyword.get(opts, :text_overflow) do
+      :ellipsis -> :ellipsis
+      _ -> :clip
     end
   end
 
@@ -473,7 +673,16 @@ defmodule Drafter.ComponentRenderer do
       |> WidgetHierarchy.update_widget(widget_id, update_props)
     else
       server_opts = extract_data_channel_opts(opts)
-      WidgetHierarchy.add_widget(hierarchy, widget_id, module, mount_props, parent_id, rect, server_opts)
+
+      WidgetHierarchy.add_widget(
+        hierarchy,
+        widget_id,
+        module,
+        mount_props,
+        parent_id,
+        rect,
+        server_opts
+      )
     end
   end
 
@@ -584,14 +793,15 @@ defmodule Drafter.ComponentRenderer do
 
     viewport_height = scrollable_rect.height
 
-    scroll_ctx = Map.put(ctx, :scroll_viewport, %{
-      visible_top: scrollable_rect.y + scroll_offset_y,
-      visible_bottom: scrollable_rect.y + scroll_offset_y + viewport_height
-    })
+    scroll_ctx =
+      Map.put(ctx, :scroll_viewport, %{
+        visible_top: scrollable_rect.y + scroll_offset_y,
+        visible_bottom: scrollable_rect.y + scroll_offset_y + viewport_height
+      })
 
     {updated_hierarchy, final_counter, _} =
       Enum.reduce(scrollable_children, {hierarchy, start_counter, 0}, fn child,
-                                                                          {h, counter, virtual_y} ->
+                                                                         {h, counter, virtual_y} ->
         child_height = Layout.get_preferred_height(child, h)
 
         below_viewport = virtual_y >= scroll_offset_y + viewport_height
@@ -673,8 +883,10 @@ defmodule Drafter.ComponentRenderer do
     child_sizes = Layout.calculate_horizontal_layout(visible_children, content_rect, layout_opts)
 
     {hierarchy, id_counter} =
-      Enum.reduce(Enum.zip(visible_children, child_sizes), {hierarchy, id_counter}, fn {child, child_size},
-                                                                                       {acc_h, acc_idc} ->
+      Enum.reduce(Enum.zip(visible_children, child_sizes), {hierarchy, id_counter}, fn {child,
+                                                                                        child_size},
+                                                                                       {acc_h,
+                                                                                        acc_idc} ->
         child_rect = %{
           x: child_size.x,
           y: content_rect.y,
@@ -701,25 +913,16 @@ defmodule Drafter.ComponentRenderer do
         _ -> content_rect.width
       end
 
-    {regular_children, footer_children} =
-      Enum.split_with(visible_children, fn
-        {:footer, _} -> false
-        _ -> true
-      end)
-
-    footer_height =
-      case footer_children do
-        [] -> 0
-        [footer_child | _] -> Layout.get_preferred_height(footer_child, hierarchy)
-      end
-
-    layout_rect = %{content_rect | height: max(0, content_rect.height - footer_height)}
+    {docked, regular_children} = Layout.partition_docked(visible_children)
+    {layout_rect, docked_rects} = reserve_docked(content_rect, docked, hierarchy)
 
     child_sizes = Layout.calculate_vertical_layout(regular_children, layout_rect, opts, hierarchy)
 
     {hierarchy, id_counter} =
-      Enum.reduce(Enum.zip(regular_children, child_sizes), {hierarchy, id_counter}, fn {child, child_size},
-                                                                                       {acc_h, acc_idc} ->
+      Enum.reduce(Enum.zip(regular_children, child_sizes), {hierarchy, id_counter}, fn {child,
+                                                                                        child_size},
+                                                                                       {acc_h,
+                                                                                        acc_idc} ->
         child_rect = %{
           x: content_rect.x,
           y: child_size.y,
@@ -730,33 +933,63 @@ defmodule Drafter.ComponentRenderer do
         render_component(acc_h, child, child_rect, ctx, parent_id, acc_idc)
       end)
 
-    {hierarchy, id_counter} =
-      case footer_children do
-        [] ->
-          {hierarchy, id_counter}
+    Enum.reduce(docked_rects, {hierarchy, id_counter}, fn {child, docked_rect}, {h, idc} ->
+      render_component(h, child, docked_rect, ctx, parent_id, idc)
+    end)
+  end
 
-        [footer_child | _] ->
-          footer_rect = %{
-            x: content_rect.x,
-            y: rect.y + rect.height - footer_height,
-            width: child_width,
-            height: footer_height
-          }
+  defp reserve_docked(rect, docked, hierarchy) do
+    Enum.reduce(docked, {rect, []}, fn {child, edge}, {remaining, placed} ->
+      {taken, left} = carve(remaining, edge, dock_extent(child, edge, hierarchy, remaining))
+      {left, placed ++ [{child, taken}]}
+    end)
+  end
 
-          render_component(hierarchy, footer_child, footer_rect, ctx, parent_id, id_counter)
-      end
+  defp dock_extent(child, edge, hierarchy, rect) when edge in [:top, :bottom] do
+    min(Layout.get_preferred_height(child, hierarchy), rect.height)
+  end
 
-    {hierarchy, id_counter}
+  defp dock_extent(child, _edge, _hierarchy, rect) do
+    child |> Layout.component_opts() |> Keyword.get(:width, div(rect.width, 4)) |> min(rect.width)
+  end
+
+  defp carve(rect, :top, size) do
+    {%{rect | height: size}, %{rect | y: rect.y + size, height: max(0, rect.height - size)}}
+  end
+
+  defp carve(rect, :bottom, size) do
+    {%{rect | y: rect.y + rect.height - size, height: size},
+     %{rect | height: max(0, rect.height - size)}}
+  end
+
+  defp carve(rect, :left, size) do
+    {%{rect | width: size}, %{rect | x: rect.x + size, width: max(0, rect.width - size)}}
+  end
+
+  defp carve(rect, :right, size) do
+    {%{rect | x: rect.x + rect.width - size, width: size},
+     %{rect | width: max(0, rect.width - size)}}
+  end
+
+  defp render_grid(hierarchy, children, opts, rect, ctx, parent_id, id_counter) do
+    visible = Enum.filter(List.wrap(children), &Layout.component_visible?/1)
+    cells = Layout.calculate_grid_layout(visible, rect, opts)
+
+    Enum.reduce(Enum.zip(visible, cells), {hierarchy, id_counter}, fn {child, cell}, {h, idc} ->
+      render_component(h, child, cell, ctx, parent_id, idc)
+    end)
   end
 
   defp render_split_pane(hierarchy, children, opts, rect, ctx, parent_id, id_counter) do
     orientation = Keyword.get(opts, :orientation, :horizontal)
     default_ratio = Keyword.get(opts, :ratio, 0.5)
+
     divider_id =
       case Keyword.get(opts, :id) do
         nil -> ns_widget_id(opts, ctx.app_module, "split_divider", id_counter)
         id -> String.to_atom("#{id}_divider")
       end
+
     divider_size = 1
 
     total_size = if orientation == :horizontal, do: rect.width, else: rect.height
@@ -797,7 +1030,9 @@ defmodule Drafter.ComponentRenderer do
     {hierarchy, id_counter} =
       case children do
         [child1 | [child2 | _]] ->
-          {h, idc} = render_component(hierarchy, child1, pane1_rect, ctx, parent_id, id_counter + 1)
+          {h, idc} =
+            render_component(hierarchy, child1, pane1_rect, ctx, parent_id, id_counter + 1)
+
           render_component(h, child2, pane2_rect, ctx, parent_id, idc)
 
         [child1] ->
@@ -816,7 +1051,13 @@ defmodule Drafter.ComponentRenderer do
 
     pane1 = %{x: rect.x, y: rect.y, width: pane1_width, height: rect.height}
     divider = %{x: rect.x + pane1_width, y: rect.y, width: divider_size, height: rect.height}
-    pane2 = %{x: rect.x + pane1_width + divider_size, y: rect.y, width: pane2_width, height: rect.height}
+
+    pane2 = %{
+      x: rect.x + pane1_width + divider_size,
+      y: rect.y,
+      width: pane2_width,
+      height: rect.height
+    }
 
     {pane1, divider, pane2}
   end
@@ -827,7 +1068,13 @@ defmodule Drafter.ComponentRenderer do
 
     pane1 = %{x: rect.x, y: rect.y, width: rect.width, height: pane1_height}
     divider = %{x: rect.x, y: rect.y + pane1_height, width: rect.width, height: divider_size}
-    pane2 = %{x: rect.x, y: rect.y + pane1_height + divider_size, width: rect.width, height: pane2_height}
+
+    pane2 = %{
+      x: rect.x,
+      y: rect.y + pane1_height + divider_size,
+      width: rect.width,
+      height: pane2_height
+    }
 
     {pane1, divider, pane2}
   end

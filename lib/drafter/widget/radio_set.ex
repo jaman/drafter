@@ -40,7 +40,8 @@ defmodule Drafter.Widget.RadioSet do
     :focused,
     :on_change,
     :visible_height,
-    cols: 1
+    cols: 1,
+    width: 0
   ]
 
   def mount(props) do
@@ -58,9 +59,13 @@ defmodule Drafter.Widget.RadioSet do
       focused: Map.get(props, :focused, false),
       on_change: Map.get(props, :on_change),
       visible_height: Map.get(props, :visible_height, length(options)),
-      cols: Map.get(props, :cols, 1)
+      cols: Map.get(props, :cols, 1),
+      width: Map.get(props, :width, 0)
     }
   end
+
+  @doc false
+  def on_rect_change(rect, state), do: %{state | width: rect.width}
 
   def render(state, rect) do
     computed = Computed.for_widget(:radio_set, state)
@@ -89,13 +94,18 @@ defmodule Drafter.Widget.RadioSet do
   end
 
   defp render_columns(state, rect, computed) do
-    cols = state.cols
+    cols = max(state.cols, 1)
     col_width = div(rect.width, cols)
-    row_count = ceil(length(state.options) / cols)
+    row_count = rows_per_column(length(state.options), cols)
     bg_style = Computed.to_segment_style(computed)
 
-    Enum.map(0..(row_count - 1), fn row ->
-      segments = Enum.flat_map(0..(cols - 1), &render_column_cell(state, &1, row, row_count, col_width, bg_style))
+    Enum.map(0..(row_count - 1)//1, fn row ->
+      segments =
+        Enum.flat_map(
+          0..(cols - 1)//1,
+          &render_column_cell(state, &1, row, row_count, col_width, bg_style)
+        )
+
       Strip.new(segments)
     end)
   end
@@ -158,21 +168,54 @@ defmodule Drafter.Widget.RadioSet do
       {:ok, %{state | highlighted_index: state.highlighted_index + 1}}
     end
   end
+
   def handle_event({:key, key}, state) when key in [:enter, :" "], do: select_current(state)
 
-  def handle_event({:mouse, %{type: :mouse_up, y: y}}, state) do
-    if y >= 0 and y < length(state.options) do
-      new_state = %{state | selected_index: y, highlighted_index: y}
-      trigger_change(new_state)
-      {:ok, new_state}
-    else
-      {:noreply, state}
+  def handle_event({:mouse, %{type: :mouse_up} = event}, state) do
+    case option_index_at(state, Map.get(event, :x, 0), Map.get(event, :y, 0)) do
+      nil ->
+        {:noreply, state}
+
+      index ->
+        new_state = %{state | selected_index: index, highlighted_index: index}
+        trigger_change(new_state)
+        {:ok, new_state}
     end
   end
 
   def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
   def handle_event(_, state), do: {:noreply, state}
+
+  @doc """
+  The index of the option at the given coordinates, or `nil` where the layout
+  has no option.
+
+  Options fill column-major — the first column top to bottom, then the next — so
+  both `x` and `y` are used to resolve the index when `:cols` exceeds one.
+  """
+  @spec option_index_at(struct(), integer(), integer()) :: non_neg_integer() | nil
+  def option_index_at(state, x, y) do
+    cols = max(state.cols, 1)
+    rows = rows_per_column(length(state.options), cols)
+
+    if y < 0 or y >= rows or x < 0 do
+      nil
+    else
+      index = column_at(state, x, cols) * rows + y
+      if index < length(state.options), do: index, else: nil
+    end
+  end
+
+  defp column_at(_state, _x, 1), do: 0
+
+  defp column_at(state, x, cols) do
+    col_width = max(div(state.width, cols), 1)
+    min(div(x, col_width), cols - 1)
+  end
+
+  defp rows_per_column(0, _cols), do: 0
+  defp rows_per_column(count, cols), do: ceil(count / cols)
 
   def preferred_height(args, opts), do: Keyword.get(opts, :height, length(args || []))
 
@@ -194,6 +237,7 @@ defmodule Drafter.Widget.RadioSet do
       on_change: Drafter.Binding.create_bound_callback(opts, :selected),
       visible_height: Keyword.get(opts, :visible_height, rect.height),
       cols: Keyword.get(opts, :cols, 1),
+      width: rect.width,
       classes: classes
     }
   end

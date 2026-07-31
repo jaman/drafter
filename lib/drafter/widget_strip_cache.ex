@@ -48,11 +48,30 @@ defmodule Drafter.WidgetStripCache do
     ArgumentError -> true
   end
 
-  @spec mark_visible(term(), boolean()) :: true
-  def mark_visible(widget_id, visible?) do
-    :ets.insert(@visible_table, {session_key(widget_id), visible?})
+  @doc """
+  Record the region of a widget that is on screen.
+
+  `false` means none of it is showing. A rect means that much of it is, and for an
+  image-backed widget is the portion worth generating.
+  """
+  @spec mark_visible(term(), false | map()) :: true
+  def mark_visible(widget_id, visible) do
+    :ets.insert(@visible_table, {session_key(widget_id), visible})
   rescue
     ArgumentError -> true
+  end
+
+  @doc "The on-screen region of a widget, or `nil` if none of it is showing."
+  @spec visible_rect(term()) :: map() | nil
+  def visible_rect(widget_id) do
+    key = session_key(widget_id)
+
+    case :ets.lookup(@visible_table, key) do
+      [{^key, rect}] when is_map(rect) -> rect
+      _ -> nil
+    end
+  rescue
+    ArgumentError -> nil
   end
 
   @spec visible?(term()) :: boolean()
@@ -60,7 +79,8 @@ defmodule Drafter.WidgetStripCache do
     key = session_key(widget_id)
 
     case :ets.lookup(@visible_table, key) do
-      [{^key, visible?}] -> visible?
+      [{^key, false}] -> false
+      [{^key, _visible}] -> true
       [] -> false
     end
   rescue

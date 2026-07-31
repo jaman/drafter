@@ -80,13 +80,16 @@ defmodule Drafter.Examples.Calculator do
   defp do_handle({:digit, d}, state), do: {:ok, %{state | value: state.value * 10 + d}}
 
   defp do_handle(:point, %{decimal_places: dp} = state) when is_integer(dp), do: {:noreply, state}
-  defp do_handle(:point, state), do: {:ok, %{state | value: state.value * 1.0, entering: true, decimal_places: 0}}
+
+  defp do_handle(:point, state),
+    do: {:ok, %{state | value: state.value * 1.0, entering: true, decimal_places: 0}}
 
   defp do_handle({:op, operator}, state) do
     result =
       if state.op, do: apply(Kernel, state.op, [state.left, state.value]), else: state.value
 
-    {:ok, %{state | left: result, value: result, op: operator, entering: false, decimal_places: nil}}
+    {:ok,
+     %{state | left: result, value: result, op: operator, entering: false, decimal_places: nil}}
   end
 
   defp do_handle(:equals, state) do
@@ -99,9 +102,14 @@ defmodule Drafter.Examples.Calculator do
   defp do_handle(:clear, %{entering: false} = state),
     do: {:ok, %{state | value: 0, left: 0, op: nil, decimal_places: nil}}
 
-  defp do_handle(:clear, state), do: {:ok, %{state | value: 0, entering: false, decimal_places: nil}}
-  defp do_handle(:plus_minus, state), do: {:ok, %{state | value: state.value * -1, decimal_places: nil}}
-  defp do_handle(:percent, state), do: {:ok, %{state | value: state.value / 100, decimal_places: nil}}
+  defp do_handle(:clear, state),
+    do: {:ok, %{state | value: 0, entering: false, decimal_places: nil}}
+
+  defp do_handle(:plus_minus, state),
+    do: {:ok, %{state | value: state.value * -1, decimal_places: nil}}
+
+  defp do_handle(:percent, state),
+    do: {:ok, %{state | value: state.value / 100, decimal_places: nil}}
 
   defp do_handle({:key, k}, state) when k in ~w(0 1 2 3 4 5 6 7 8 9)a do
     Drafter.activate_widget(:"btn_#{k}")
@@ -135,7 +143,13 @@ defmodule Drafter.Examples.Calculator do
 
   defp format(n, nil) when is_integer(n), do: Integer.to_string(n)
   defp format(n, nil) when trunc(n) == n, do: n |> trunc() |> Integer.to_string()
-  defp format(n, nil), do: :erlang.float_to_binary(n, [:compact, decimals: 10]) |> String.trim_trailing("0") |> String.trim_trailing(".")
+
+  defp format(n, nil),
+    do:
+      :erlang.float_to_binary(n, [:compact, decimals: 10])
+      |> String.trim_trailing("0")
+      |> String.trim_trailing(".")
+
   defp format(n, 0), do: (n |> trunc() |> Integer.to_string()) <> "."
   defp format(n, dp), do: :erlang.float_to_binary(n * 1.0, [{:decimals, dp}])
 end

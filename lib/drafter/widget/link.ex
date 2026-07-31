@@ -75,7 +75,12 @@ defmodule Drafter.Widget.Link do
     classes = if state.hovered, do: classes ++ [:hover], else: classes
     classes = if state.focused, do: classes ++ [:focus], else: classes
     computed_opts = [classes: classes, style: state.style]
-    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
+
+    computed_opts =
+      if state.app_module,
+        do: Keyword.put(computed_opts, :app_module, state.app_module),
+        else: computed_opts
+
     Computed.for_widget(:link, state, computed_opts)
   end
 
@@ -128,6 +133,7 @@ defmodule Drafter.Widget.Link do
 
   def from_component_opts(text, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+
     %{
       text: text || Keyword.get(opts, :text),
       url: Keyword.get(opts, :url),
@@ -147,14 +153,15 @@ defmodule Drafter.Widget.Link do
   end
 
   defp open_link(%{url: url}) when is_binary(url) do
+    command =
+      case :os.type() do
+        {:unix, :darwin} -> ["open", url]
+        {:unix, _} -> ["xdg-open", url]
+        {:win32, _} -> ["cmd", "/c", "start", "", url]
+      end
 
-    command = case :os.type() do
-      {:unix, :darwin} -> ["open", url]
-      {:unix, _} -> ["xdg-open", url]
-      {:win32, _} -> ["cmd", "/c", "start", "", url]
-    end
-
-    {output, exit_code} = System.cmd(List.first(command), Enum.drop(command, 1), stderr_to_stdout: true)
+    {output, exit_code} =
+      System.cmd(List.first(command), Enum.drop(command, 1), stderr_to_stdout: true)
 
     _output = output
 

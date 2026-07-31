@@ -6,12 +6,31 @@ defmodule Drafter.Syntax.TreeSitter do
   @bin "tree-sitter"
 
   @language_extensions %{
-    bash: "sh", c: "c", cpp: "cpp", c_sharp: "cs", css: "css",
-    elixir: "ex", exs: "exs", go: "go", haskell: "hs", html: "html",
-    java: "java", javascript: "js", json: "json", lua: "lua",
-    ocaml: "ml", python: "py", ruby: "rb", rust: "rs", scala: "scala",
-    swift: "swift", toml: "toml", tsx: "tsx", typescript: "ts",
-    yaml: "yaml", zig: "zig"
+    bash: "sh",
+    c: "c",
+    cpp: "cpp",
+    c_sharp: "cs",
+    css: "css",
+    elixir: "ex",
+    exs: "exs",
+    go: "go",
+    haskell: "hs",
+    html: "html",
+    java: "java",
+    javascript: "js",
+    json: "json",
+    lua: "lua",
+    ocaml: "ml",
+    python: "py",
+    ruby: "rb",
+    rust: "rs",
+    scala: "scala",
+    swift: "swift",
+    toml: "toml",
+    tsx: "tsx",
+    typescript: "ts",
+    yaml: "yaml",
+    zig: "zig"
   }
 
   def start_link(opts \\ []) do
@@ -68,6 +87,7 @@ defmodule Drafter.Syntax.TreeSitter do
   def handle_call({:highlight, source, language}, _from, state) do
     ext = Map.get(@language_extensions, language, to_string(language))
     tmp = Path.join(System.tmp_dir!(), "ts_#{:erlang.unique_integer([:positive])}.#{ext}")
+
     captures =
       try do
         File.write!(tmp, source)
@@ -75,6 +95,7 @@ defmodule Drafter.Syntax.TreeSitter do
       after
         File.rm(tmp)
       end
+
     {:reply, captures, state}
   end
 
@@ -83,9 +104,7 @@ defmodule Drafter.Syntax.TreeSitter do
   end
 
   defp run_highlight_path(path) do
-    case System.cmd(@bin, ["highlight", "--html", "--css-classes", path],
-           stderr_to_stdout: true
-         ) do
+    case System.cmd(@bin, ["highlight", "--html", "--css-classes", path], stderr_to_stdout: true) do
       {html, 0} -> parse_html(html)
       _ -> []
     end
@@ -150,8 +169,10 @@ defmodule Drafter.Syntax.TreeSitter do
 
   defp split_at(binary, char), do: split_at(binary, char, [])
   defp split_at("", _char, acc), do: {IO.iodata_to_binary(Enum.reverse(acc)), ""}
+
   defp split_at(<<c, rest::binary>>, char, acc) when c == char,
     do: {IO.iodata_to_binary(Enum.reverse(acc)), rest}
+
   defp split_at(<<c, rest::binary>>, char, acc), do: split_at(rest, char, [c | acc])
 
   defp drop_to_gt(""), do: ""

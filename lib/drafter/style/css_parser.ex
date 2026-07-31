@@ -12,18 +12,27 @@ defmodule Drafter.Style.CSSParser do
     |> Enum.map(&parse_rule/1)
     |> Enum.flat_map(&expand_rule/1)
     |> Enum.reduce({:ok, Stylesheet.new()}, fn
-      {:ok, rule}, {:ok, stylesheet} -> {:ok, Stylesheet.add_rule(stylesheet, rule.selector_string, rule.properties)}
-      {:error, _} = error, _acc -> error
-      _, {:error, _} = error -> error
+      {:ok, rule}, {:ok, stylesheet} ->
+        {:ok, Stylesheet.add_rule(stylesheet, rule.selector_string, rule.properties)}
+
+      {:error, _} = error, _acc ->
+        error
+
+      _, {:error, _} = error ->
+        error
     end)
   end
 
   defp expand_rule({:ok, %{selector_strings: selector_strings, properties: properties}}) do
-    Enum.map(selector_strings, fn selector_string -> {:ok, %{selector_string: selector_string, properties: properties}} end)
+    Enum.map(selector_strings, fn selector_string ->
+      {:ok, %{selector_string: selector_string, properties: properties}}
+    end)
   end
 
   defp expand_rule({:ok, %{selector: selector, properties: properties}}) when is_list(selector) do
-    Enum.map(selector, fn selector_string -> {:ok, %{selector_string: selector_string, properties: properties}} end)
+    Enum.map(selector, fn selector_string ->
+      {:ok, %{selector_string: selector_string, properties: properties}}
+    end)
   end
 
   defp expand_rule({:ok, rule}), do: [{:ok, rule}]
@@ -75,7 +84,7 @@ defmodule Drafter.Style.CSSParser do
   defp find_matching_brace(<<>>, _depth, _acc), do: :error
 
   defp find_matching_brace(<<?\", rest::binary>>, depth, acc) do
-    case skip_string(rest, ?\" , <<?\">>) do
+    case skip_string(rest, ?\", <<?\">>) do
       {:ok, string_content, remaining} ->
         find_matching_brace(remaining, depth, acc <> string_content)
 
@@ -207,8 +216,12 @@ defmodule Drafter.Style.CSSParser do
     value_str = String.trim(value_str)
 
     cond do
-      value_str == "true" -> true
-      value_str == "false" -> false
+      value_str == "true" ->
+        true
+
+      value_str == "false" ->
+        false
+
       match?({:ok, _}, parse_hex_color(value_str)) ->
         {:ok, color} = parse_hex_color(value_str)
         color
@@ -246,15 +259,14 @@ defmodule Drafter.Style.CSSParser do
 
   defp parse_hex_digits(<<r, g, b>> = _hex) when byte_size(<<r, g, b>>) == 3 do
     {:ok,
-     {String.to_integer(<<r>>, 16) * 17,
-      String.to_integer(<<g>>, 16) * 17,
+     {String.to_integer(<<r>>, 16) * 17, String.to_integer(<<g>>, 16) * 17,
       String.to_integer(<<b>>, 16) * 17}}
   end
 
-  defp parse_hex_digits(<<r1, r2, g1, g2, b1, b2>> = _hex) when byte_size(<<r1, r2, g1, g2, b1, b2>>) == 6 do
+  defp parse_hex_digits(<<r1, r2, g1, g2, b1, b2>> = _hex)
+       when byte_size(<<r1, r2, g1, g2, b1, b2>>) == 6 do
     {:ok,
-     {String.to_integer(<<r1, r2>>, 16),
-      String.to_integer(<<g1, g2>>, 16),
+     {String.to_integer(<<r1, r2>>, 16), String.to_integer(<<g1, g2>>, 16),
       String.to_integer(<<b1, b2>>, 16)}}
   end
 

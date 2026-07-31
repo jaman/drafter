@@ -25,6 +25,7 @@ defmodule Drafter.Widget.Chart.Candlestick do
     y_offset = state._internal.y_offset || 0
     label_width = 11
     viewport_width = max(1, width - label_width)
+
     {start_index, display_candles} =
       Drafter.ScrollMath.end_anchored_slice(filtered_candles, scroll_offset, viewport_width)
 
@@ -48,7 +49,17 @@ defmodule Drafter.Widget.Chart.Candlestick do
     time_label_color = {120, 120, 130}
 
     chart_strips =
-      render_body(display_candles, height - 1, min_val, max_val, bull_color, bear_color, label_color, bg)
+      render_body(
+        display_candles,
+        height - 1,
+        min_val,
+        max_val,
+        bull_color,
+        bear_color,
+        label_color,
+        bg
+      )
+
     time_strip = render_time_axis(display_candles, start_index, label_color, time_label_color, bg)
     chart_strips ++ [time_strip]
   end
@@ -88,7 +99,7 @@ defmodule Drafter.Widget.Chart.Candlestick do
         {color, high_row, low_row, body_top_row, body_bottom_row, body_char}
       end)
 
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       row_mid_price = max_val - (row + 0.5) * price_per_row
       label_text = format_price_label(row_mid_price)
 
@@ -104,11 +115,21 @@ defmodule Drafter.Widget.Chart.Candlestick do
     end
   end
 
-  defp candle_segment_for_row(row, {color, high_row, low_row, body_top_row, body_bottom_row, body_char}, empty_seg, bg) do
+  defp candle_segment_for_row(
+         row,
+         {color, high_row, low_row, body_top_row, body_bottom_row, body_char},
+         empty_seg,
+         bg
+       ) do
     cond do
-      row >= body_top_row and row <= body_bottom_row -> Segment.new(body_char, %{fg: color, bg: bg})
-      row >= high_row and row <= low_row -> Segment.new("│", %{fg: color, bg: bg})
-      true -> empty_seg
+      row >= body_top_row and row <= body_bottom_row ->
+        Segment.new(body_char, %{fg: color, bg: bg})
+
+      row >= high_row and row <= low_row ->
+        Segment.new("│", %{fg: color, bg: bg})
+
+      true ->
+        empty_seg
     end
   end
 
@@ -120,7 +141,7 @@ defmodule Drafter.Widget.Chart.Candlestick do
     interval = max(1, div(num_candles, 10))
 
     time_markers =
-      for i <- 0..(num_candles - 1) do
+      for i <- 0..(num_candles - 1)//1 do
         candle_index = start_index + i
 
         if rem(i, interval) == 0 do

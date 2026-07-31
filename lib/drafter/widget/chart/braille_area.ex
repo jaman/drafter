@@ -36,18 +36,29 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     range_result = compute_stack_range(stacked, state.zero_center)
 
     base = %{
-      stacked: stacked, colors: colors, num_series: num_series,
-      pixel_h: pixel_h, pixel_w: pixel_w, char_w: width,
+      stacked: stacked,
+      colors: colors,
+      num_series: num_series,
+      pixel_h: pixel_h,
+      pixel_w: pixel_w,
+      char_w: width,
       fill_opacity: state.fill_opacity || 0.6,
       grid: :atomics.new(width * height, signed: false),
-      color_grid: Enum.map(0..(width * height - 1), fn _ -> :atomics.new(3, signed: true) end)
+      color_grid: Enum.map(0..(width * height - 1)//1, fn _ -> :atomics.new(3, signed: true) end)
     }
 
     build_braille_area(range_result, base, state, width, height, bg)
   end
 
   defp build_braille_area({neg_min, pos_max, :split}, base, state, width, height, bg) do
-    ctx = Map.merge(base, %{pos_max: pos_max, neg_min: neg_min, zero_py: div(base.pixel_h, 2), mode: :split})
+    ctx =
+      Map.merge(base, %{
+        pos_max: pos_max,
+        neg_min: neg_min,
+        zero_py: div(base.pixel_h, 2),
+        mode: :split
+      })
+
     fill_braille_area_grid(ctx)
     baseline_row = div(div(base.pixel_h, 2), 4)
     strips = render_braille_grid(width, height, base, baseline_row, bg)
@@ -63,9 +74,9 @@ defmodule Drafter.Widget.Chart.BrailleArea do
   end
 
   defp render_braille_grid(width, height, base, baseline_row, bg) do
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       segments =
-        for col <- 0..(width - 1) do
+        for col <- 0..(width - 1)//1 do
           braille_area_cell(row, col, width, base.grid, base.color_grid, baseline_row, bg)
         end
 
@@ -147,15 +158,17 @@ defmodule Drafter.Widget.Chart.BrailleArea do
   defp braille_empty_cell(_row, _baseline, bg), do: Segment.new(Pixels.braille_char(0), %{bg: bg})
 
   defp braille_colored_cell(bits, color_ref, bg) do
-    fg_color = {:atomics.get(color_ref, 1), :atomics.get(color_ref, 2), :atomics.get(color_ref, 3)}
+    fg_color =
+      {:atomics.get(color_ref, 1), :atomics.get(color_ref, 2), :atomics.get(color_ref, 3)}
+
     Segment.new(Pixels.braille_char(bits), %{fg: fg_color, bg: bg})
   end
 
   defp build_stacked_columns(sliced, num_series) do
     max_len = sliced |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
 
-    for col_idx <- 0..(max_len - 1) do
-      Enum.reduce(0..(num_series - 1), {0, 0, []}, fn si, acc ->
+    for col_idx <- 0..(max_len - 1)//1 do
+      Enum.reduce(0..(num_series - 1)//1, {0, 0, []}, fn si, acc ->
         {val, weight} = sliced |> Enum.at(si) |> Enum.at(col_idx, {0, 1.0})
         stack_value(val, weight, acc)
       end)
@@ -188,7 +201,7 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     char_col = div(col_idx, 2)
     local_x = rem(col_idx, 2)
 
-    Enum.each(0..(ctx.num_series - 1), fn si ->
+    Enum.each(0..(ctx.num_series - 1)//1, fn si ->
       {bottom, top, weight} = extract_layer(Enum.at(col_layers, si))
 
       if bottom != top do

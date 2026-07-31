@@ -217,7 +217,7 @@ defmodule Drafter.Widget.Footer do
     "Tab" => {:key, :tab},
     "Esc" => {:key, :escape},
     "Escape" => {:key, :escape},
-    "Space" => {:key, :space},
+    "Space" => {:key, :" "},
     "Backspace" => {:key, :backspace},
     "Delete" => {:key, :delete},
     "Up" => {:key, :up},

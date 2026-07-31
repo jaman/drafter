@@ -69,6 +69,8 @@ defmodule Drafter.Widget.Card do
     render_card(state, rect)
   end
 
+  defp render_card(_state, %{width: width}) when width < 2, do: []
+
   defp render_card(state, rect) do
     computed = Computed.for_widget(:card, state, classes: state.classes, style: state.style)
 
@@ -81,7 +83,7 @@ defmodule Drafter.Widget.Card do
     title_style = %{fg: border_fg, bg: bg, bold: true}
 
     chars = Map.get(@border_chars, state.border, @border_chars[:rounded])
-    inner_width = rect.width - 2
+    inner_width = max(rect.width - 2, 0)
 
     content_lines = state.content || []
     content_lines = if is_list(content_lines), do: content_lines, else: [content_lines]

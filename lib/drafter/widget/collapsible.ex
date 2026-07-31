@@ -81,7 +81,8 @@ defmodule Drafter.Widget.Collapsible do
     theme = ThemeManager.get_current_theme()
     bg_style = %{fg: theme.text_primary, bg: theme.background}
 
-    arrow = if state.expanded, do: CharacterSet.arrow(:expand), else: CharacterSet.arrow(:collapse)
+    arrow =
+      if state.expanded, do: CharacterSet.arrow(:expand), else: CharacterSet.arrow(:collapse)
 
     title_computed = Computed.for_widget(:collapsible, state)
     arrow_computed = Computed.for_part(:collapsible, state, :arrow)

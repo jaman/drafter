@@ -3,7 +3,14 @@ defmodule Drafter.WidgetHierarchy.Scroll do
 
   alias Drafter.WidgetHierarchy
 
-  @spec register_scroll_container(WidgetHierarchy.t(), WidgetHierarchy.widget_id(), WidgetHierarchy.rect(), integer(), integer(), boolean()) :: WidgetHierarchy.t()
+  @spec register_scroll_container(
+          WidgetHierarchy.t(),
+          WidgetHierarchy.widget_id(),
+          WidgetHierarchy.rect(),
+          integer(),
+          integer(),
+          boolean()
+        ) :: WidgetHierarchy.t()
   def register_scroll_container(
         hierarchy,
         scroll_id,
@@ -24,15 +31,37 @@ defmodule Drafter.WidgetHierarchy.Scroll do
 
     updated_containers =
       Enum.reduce(updated_containers, updated_containers, fn {existing_id, existing_info}, acc ->
-        update_scroll_exceptions(acc, scroll_id, viewport_rect, click_to_scroll, existing_id, existing_info)
+        update_scroll_exceptions(
+          acc,
+          scroll_id,
+          viewport_rect,
+          click_to_scroll,
+          existing_id,
+          existing_info
+        )
       end)
 
     %{hierarchy | scroll_containers: updated_containers}
   end
 
-  def update_scroll_exceptions(acc, scroll_id, _viewport_rect, _click_to_scroll, scroll_id, _existing_info), do: acc
+  def update_scroll_exceptions(
+        acc,
+        scroll_id,
+        _viewport_rect,
+        _click_to_scroll,
+        scroll_id,
+        _existing_info
+      ),
+      do: acc
 
-  def update_scroll_exceptions(acc, scroll_id, viewport_rect, _click_to_scroll, existing_id, %{click_to_scroll: true} = existing_info) do
+  def update_scroll_exceptions(
+        acc,
+        scroll_id,
+        viewport_rect,
+        _click_to_scroll,
+        existing_id,
+        %{click_to_scroll: true} = existing_info
+      ) do
     if viewport_rect_contains?(existing_info.viewport_rect, viewport_rect) do
       add_scroll_exception(acc, existing_id, scroll_id)
     else
@@ -48,7 +77,15 @@ defmodule Drafter.WidgetHierarchy.Scroll do
     end
   end
 
-  def update_scroll_exceptions(acc, _scroll_id, _viewport_rect, _click_to_scroll, _existing_id, _existing_info), do: acc
+  def update_scroll_exceptions(
+        acc,
+        _scroll_id,
+        _viewport_rect,
+        _click_to_scroll,
+        _existing_id,
+        _existing_info
+      ),
+      do: acc
 
   def add_scroll_exception(containers, container_id, exception_id) do
     Map.update!(containers, container_id, fn info ->
@@ -73,7 +110,8 @@ defmodule Drafter.WidgetHierarchy.Scroll do
     %{hierarchy | widget_scroll_parents: new_parents}
   end
 
-  @spec get_widget_scroll_parent(WidgetHierarchy.t(), WidgetHierarchy.widget_id()) :: WidgetHierarchy.widget_id() | nil
+  @spec get_widget_scroll_parent(WidgetHierarchy.t(), WidgetHierarchy.widget_id()) ::
+          WidgetHierarchy.widget_id() | nil
   def get_widget_scroll_parent(hierarchy, widget_id) do
     Map.get(hierarchy.widget_scroll_parents, widget_id)
   end
@@ -118,7 +156,11 @@ defmodule Drafter.WidgetHierarchy.Scroll do
   def resolve_scroll_candidate(_hierarchy, [{id, %{click_to_scroll: false}}]), do: id
 
   def resolve_scroll_candidate(hierarchy, candidates) do
-    sorted = Enum.sort_by(candidates, fn {_id, info} -> info.viewport_rect.width * info.viewport_rect.height end)
+    sorted =
+      Enum.sort_by(candidates, fn {_id, info} ->
+        info.viewport_rect.width * info.viewport_rect.height
+      end)
+
     Enum.find_value(sorted, &pick_scroll_candidate(hierarchy, candidates, &1))
   end
 
@@ -157,9 +199,12 @@ defmodule Drafter.WidgetHierarchy.Scroll do
         v = info.viewport_rect
         x >= v.x and x < v.x + v.width and y >= v.y and y < v.y + v.height
       end)
-      |> Enum.min_by(fn {_id, info} ->
-        info.viewport_rect.width * info.viewport_rect.height
-      end, fn -> nil end)
+      |> Enum.min_by(
+        fn {_id, info} ->
+          info.viewport_rect.width * info.viewport_rect.height
+        end,
+        fn -> nil end
+      )
 
     case innermost do
       nil -> hierarchy
@@ -169,7 +214,9 @@ defmodule Drafter.WidgetHierarchy.Scroll do
 
   def toggle_scroll_lock(hierarchy, scroll_id) do
     case WidgetHierarchy.get_widget_state(hierarchy, scroll_id) do
-      nil -> hierarchy
+      nil ->
+        hierarchy
+
       state ->
         updated = %{state | scroll_locked: not state.scroll_locked}
         WidgetHierarchy.update_widget_state_in_hierarchy(hierarchy, scroll_id, updated)
@@ -197,7 +244,9 @@ defmodule Drafter.WidgetHierarchy.Scroll do
       %{scroll_locked: true} = state ->
         updated = %{state | scroll_locked: false}
         WidgetHierarchy.update_widget_state_in_hierarchy(h, scroll_id, updated)
-      _ -> h
+
+      _ ->
+        h
     end
   end
 end

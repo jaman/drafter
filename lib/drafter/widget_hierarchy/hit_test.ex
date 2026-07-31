@@ -3,7 +3,8 @@ defmodule Drafter.WidgetHierarchy.HitTest do
 
   alias Drafter.WidgetHierarchy
 
-  @spec find_widget_at(WidgetHierarchy.t(), integer(), integer()) :: WidgetHierarchy.widget_id() | nil
+  @spec find_widget_at(WidgetHierarchy.t(), integer(), integer()) ::
+          WidgetHierarchy.widget_id() | nil
   def find_widget_at(hierarchy, x, y) do
     hidden = Map.get(hierarchy, :hidden_widgets, MapSet.new())
 
@@ -71,7 +72,13 @@ defmodule Drafter.WidgetHierarchy.HitTest do
     else
       visible_top = max(screen_y, viewport.y)
       visible_bottom = min(screen_bottom, viewport.y + viewport.height)
-      %{x: virtual_rect.x, y: visible_top, width: virtual_rect.width, height: visible_bottom - visible_top}
+
+      %{
+        x: virtual_rect.x,
+        y: visible_top,
+        width: virtual_rect.width,
+        height: visible_bottom - visible_top
+      }
     end
   end
 

@@ -1,6 +1,8 @@
 defmodule Drafter.Regression.WidgetServerImageStampTest do
   use ExUnit.Case, async: false
 
+  alias Drafter.Draw.Strip
+
   alias Drafter.WidgetServer
 
   defmodule RecordingCompositor do
@@ -12,7 +14,10 @@ defmodule Drafter.Regression.WidgetServerImageStampTest do
     def init(parent), do: {:ok, parent}
 
     @impl true
-    def handle_cast({:put_image, _id, _paint, _clear, _dx, _dy, _cols, _rows, stamp}, parent) do
+    def handle_cast(
+          {:put_image, _id, _paint, _clear, _dx, _dy, _cols, _rows, stamp, _place},
+          parent
+        ) do
       send(parent, {:put_image_stamp, stamp})
       {:noreply, parent}
     end
@@ -28,7 +33,7 @@ defmodule Drafter.Regression.WidgetServerImageStampTest do
     def mount(props), do: %__MODULE__{value: Map.get(props, :value, 0)}
 
     def render(_state, rect) do
-      blank = Drafter.Draw.Strip.from_text(String.duplicate(" ", max(1, rect.width)))
+      blank = Strip.from_text(String.duplicate(" ", max(1, rect.width)))
       List.duplicate(blank, max(1, rect.height))
     end
 

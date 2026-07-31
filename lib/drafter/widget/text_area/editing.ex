@@ -119,6 +119,7 @@ defmodule Drafter.Widget.TextArea.Editing do
         if state.selection != nil,
           do: state |> History.push_undo() |> Selection.delete_selection(),
           else: History.push_undo(state)
+
       current_line = Enum.at(state.lines, state.cursor_line, "")
       {before, after_text} = String.split_at(current_line, state.cursor_col)
 

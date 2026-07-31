@@ -6,6 +6,10 @@ defmodule Drafter.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      Drafter.TableOwner,
+      Drafter.ThemeManager,
+      Drafter.SkinManager,
+      {DynamicSupervisor, strategy: :one_for_one, name: Drafter.Widget.Supervisor},
       {Phoenix.PubSub, name: Drafter.PubSub},
       Drafter.Style.StylesheetLoader,
       Drafter.Animation,

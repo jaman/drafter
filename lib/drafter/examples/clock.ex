@@ -15,11 +15,12 @@ defmodule Drafter.Examples.Clock do
   end
 
   def render(state, rect) do
-    {Drafter.Widget.Digits, %{
-      text: state.time,
-      align: :center,
-      style: %{fg: {100, 200, 255}}
-    }}
+    {Drafter.Widget.Digits,
+     %{
+       text: state.time,
+       align: :center,
+       style: %{fg: {100, 200, 255}}
+     }}
     |> render_widget(rect)
   end
 
@@ -44,6 +45,7 @@ defmodule Drafter.Examples.Clock do
 
   defp render_widget({module, props}, rect) do
     state = module.mount(props)
+
     case module.render(state, rect) do
       strips when is_list(strips) -> strips
       {:error, _} -> []

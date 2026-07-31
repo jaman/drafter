@@ -490,6 +490,13 @@ mix run -e "Drafter.run(Drafter.Examples.ThemeSandbox)"
 mix run -e "Drafter.run(Drafter.Examples.ChartDemo)"
 ```
 
+## Guides
+
+- [Writing Widgets & Libraries](guides/writing_widgets.md) - build a custom widget and package it for reuse
+- [Remote TUI](guides/remote_tui.md) - serve an app over SSH or Telnet
+- [Large Text](guides/large_text.md) - the `digits` font catalogue, how the fonts are built, and how to choose between them
+- [Design Notes](guides/design_notes.md) - why the internals are built the way they are; background for anyone changing them
+
 ## Keyboard Shortcuts
 
 - `Ctrl+C` or `Ctrl+Q` - Quit application

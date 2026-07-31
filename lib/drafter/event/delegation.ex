@@ -32,7 +32,9 @@ defmodule Drafter.Event.Delegation do
 
   def delegate_to_parent(hierarchy, child_id, event) do
     case WidgetHierarchy.get_parent(hierarchy, child_id) do
-      nil -> {hierarchy, []}
+      nil ->
+        {hierarchy, []}
+
       parent_id ->
         hierarchy_with_focus = WidgetHierarchy.focus_widget(hierarchy, parent_id)
         WidgetHierarchy.handle_event(hierarchy_with_focus, event)
@@ -43,14 +45,16 @@ defmodule Drafter.Event.Delegation do
     case WidgetHierarchy.get_parent(hierarchy, widget_id) do
       nil ->
         {hierarchy, []}
+
       parent_id ->
         children = WidgetHierarchy.get_children(hierarchy, parent_id)
         siblings = Enum.reject(children, &(&1 == widget_id))
 
-        matching_siblings = case selector do
-          :all -> siblings
-          _ -> filter_by_selector(siblings, hierarchy, selector)
-        end
+        matching_siblings =
+          case selector do
+            :all -> siblings
+            _ -> filter_by_selector(siblings, hierarchy, selector)
+          end
 
         Enum.reduce(matching_siblings, {hierarchy, []}, fn sibling_id, {h, actions} ->
           hierarchy_with_focus = WidgetHierarchy.focus_widget(h, sibling_id)
@@ -86,7 +90,9 @@ defmodule Drafter.Event.Delegation do
 
   defp matches_selector?(hierarchy, widget_id, selector) when is_atom(selector) do
     case WidgetHierarchy.get_widget_info(hierarchy, widget_id) do
-      nil -> false
+      nil ->
+        false
+
       widget_info ->
         widget_type = get_widget_type(widget_info.module)
         widget_type == Atom.to_string(selector)
@@ -95,11 +101,15 @@ defmodule Drafter.Event.Delegation do
 
   defp matches_selector?(hierarchy, widget_id, {:class, class}) do
     case WidgetHierarchy.get_widget_state(hierarchy, widget_id) do
-      nil -> false
+      nil ->
+        false
+
       state when is_map(state) ->
         classes = Map.get(state, :classes, [])
         class in classes
-      _ -> false
+
+      _ ->
+        false
     end
   end
 

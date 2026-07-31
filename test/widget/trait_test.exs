@@ -102,7 +102,9 @@ defmodule Drafter.Widget.TraitTest do
     end
 
     test "builds correct bitmap for multiple traits" do
-      bitmap = Trait.build_bitmap([Drafter.Widget.Trait.Focusable, Drafter.Widget.Trait.Scrollable])
+      bitmap =
+        Trait.build_bitmap([Drafter.Widget.Trait.Focusable, Drafter.Widget.Trait.Scrollable])
+
       assert Trait.handles_event?(bitmap, :focus)
       assert Trait.handles_event?(bitmap, :scroll)
       assert Trait.handles_event?(bitmap, :keyboard)
@@ -116,10 +118,11 @@ defmodule Drafter.Widget.TraitTest do
     end
 
     test "collects from multiple traits" do
-      fields = Trait.collect_render_affecting_fields([
-        Drafter.Widget.Trait.Focusable,
-        Drafter.Widget.Trait.Scrollable
-      ])
+      fields =
+        Trait.collect_render_affecting_fields([
+          Drafter.Widget.Trait.Focusable,
+          Drafter.Widget.Trait.Scrollable
+        ])
 
       assert :focused in fields
       assert :_scroll_offset_y in fields
@@ -128,11 +131,17 @@ defmodule Drafter.Widget.TraitTest do
 
   describe "all_layout_static?/1" do
     test "returns true for all static traits" do
-      assert Trait.all_layout_static?([Drafter.Widget.Trait.Focusable, Drafter.Widget.Trait.Selectable])
+      assert Trait.all_layout_static?([
+               Drafter.Widget.Trait.Focusable,
+               Drafter.Widget.Trait.Selectable
+             ])
     end
 
     test "returns false when any trait is not static" do
-      refute Trait.all_layout_static?([Drafter.Widget.Trait.Focusable, Drafter.Widget.Trait.Collapsible])
+      refute Trait.all_layout_static?([
+               Drafter.Widget.Trait.Focusable,
+               Drafter.Widget.Trait.Collapsible
+             ])
     end
   end
 

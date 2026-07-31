@@ -62,20 +62,22 @@ defmodule Drafter.Widget.Grid do
     if children_count == 0 do
       []
     else
-      # Calculate dimensions
       col_width = div(rect.width, cols)
       rows_needed = div(children_count + cols - 1, cols)
       row_height = if rows_needed > 0, do: div(rect.height, rows_needed), else: rect.height
 
       grid_ctx = %{
-        children: state.children, children_count: children_count,
-        cols: cols, col_width: col_width, row_height: row_height
+        children: state.children,
+        children_count: children_count,
+        cols: cols,
+        col_width: col_width,
+        row_height: row_height
       }
 
-      Enum.map(0..(rect.height - 1), fn y ->
+      Enum.map(0..(rect.height - 1)//1, fn y ->
         row = div(y, row_height)
         cell_y = rem(y, row_height)
-        segments = Enum.flat_map(0..(cols - 1), &render_grid_cell(grid_ctx, row, &1, cell_y))
+        segments = Enum.flat_map(0..(cols - 1)//1, &render_grid_cell(grid_ctx, row, &1, cell_y))
         Strip.new(segments)
       end)
     end

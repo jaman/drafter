@@ -31,7 +31,8 @@ defmodule Drafter.Widget.Chart.Histogram do
     bar_width_per_bin = max(1, div(width, bin_count))
     total_used = bar_width_per_bin * bin_count
 
-    strips = build_strips(bins, max_count, bar_height, bar_width_per_bin, total_used, width, bg, fg)
+    strips =
+      build_strips(bins, max_count, bar_height, bar_width_per_bin, total_used, width, bg, fg)
 
     if label_row? do
       strips ++ [build_label_strip(bins, bar_width_per_bin, total_used, width, bg, fg)]
@@ -46,7 +47,7 @@ defmodule Drafter.Widget.Chart.Histogram do
   end
 
   defp bin_values(values, data_min, data_max, bin_count) when data_min == data_max do
-    for i <- 0..(bin_count - 1) do
+    for i <- 0..(bin_count - 1)//1 do
       count = if i == 0, do: length(values), else: 0
       {data_min, data_max, count}
     end
@@ -57,7 +58,7 @@ defmodule Drafter.Widget.Chart.Histogram do
     bin_width = range / bin_count
 
     empty_bins =
-      for i <- 0..(bin_count - 1) do
+      for i <- 0..(bin_count - 1)//1 do
         lo = data_min + i * bin_width
         hi = data_min + (i + 1) * bin_width
         {lo, hi, 0}
@@ -74,7 +75,7 @@ defmodule Drafter.Widget.Chart.Histogram do
   defp build_strips(bins, max_count, bar_height, bar_width_per_bin, total_used, width, bg, fg) do
     total_px = bar_height * 2
 
-    for row <- 0..(bar_height - 1) do
+    for row <- 0..(bar_height - 1)//1 do
       top_pb = total_px - 1 - 2 * row
       bot_pb = total_px - 2 - 2 * row
 
@@ -95,7 +96,8 @@ defmodule Drafter.Widget.Chart.Histogram do
     List.duplicate(Segment.new(char, style), bar_width_per_bin)
   end
 
-  defp bin_cell_char(filled_px, top_pb, bot_pb, fg, bg) when filled_px > top_pb and filled_px > bot_pb do
+  defp bin_cell_char(filled_px, top_pb, bot_pb, fg, bg)
+       when filled_px > top_pb and filled_px > bot_pb do
     {CharacterSet.fill(:full), %{fg: fg, bg: bg}}
   end
 

@@ -229,8 +229,6 @@ defmodule Drafter.Widget.OptionList do
     Map.merge(state, props)
   end
 
-  # Action implementations
-
   def preferred_height(args, opts), do: Keyword.get(opts, :height, length(args || []))
 
   def component_tag, do: :option_list
@@ -350,7 +348,6 @@ defmodule Drafter.Widget.OptionList do
     current = state.highlighted_index || 0
     target_index = max(0, current - state.visible_height)
 
-    # Find closest enabled option
     new_index =
       case find_previous_enabled(state.options, target_index) do
         nil -> find_next_enabled(state.options, target_index) || find_first_enabled(state.options)
@@ -368,7 +365,6 @@ defmodule Drafter.Widget.OptionList do
     current = state.highlighted_index || 0
     target_index = min(length(state.options) - 1, current + state.visible_height)
 
-    # Find closest enabled option
     new_index =
       case find_next_enabled(state.options, target_index) do
         nil ->
@@ -407,8 +403,6 @@ defmodule Drafter.Widget.OptionList do
     end
   end
 
-  # Rendering helpers
-
   defp render_option(state, option, index, rect) do
     is_highlighted = index == state.highlighted_index
     is_selected = index == state.selected_index
@@ -431,10 +425,10 @@ defmodule Drafter.Widget.OptionList do
     Strip.new([segment])
   end
 
-  # Scroll management
-
   defp ensure_visible(state, target_index) do
-    new_offset = Drafter.ScrollMath.ensure_visible(state.scroll_offset, target_index, state.visible_height)
+    new_offset =
+      Drafter.ScrollMath.ensure_visible(state.scroll_offset, target_index, state.visible_height)
+
     %{state | scroll_offset: new_offset}
   end
 

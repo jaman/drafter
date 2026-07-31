@@ -88,7 +88,8 @@ defmodule Drafter.Widget.TextArea do
     :redo_stack
   ]
 
-  @type selection :: {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  @type selection ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
 
   @type t :: %__MODULE__{
           text: String.t(),
@@ -208,7 +209,11 @@ defmodule Drafter.Widget.TextArea do
         end <> String.duplicate("─", content_width) <> "┘"
 
     scrollbar_thumb =
-      Scrollbar.thumb_rows(normalized_state.scroll_offset, length(normalized_state.lines), content_height)
+      Scrollbar.thumb_rows(
+        normalized_state.scroll_offset,
+        length(normalized_state.lines),
+        content_height
+      )
 
     inner_width = if scrollbar_thumb, do: max(1, content_width - 1), else: content_width
     scrollbar_styles = Scrollbar.styles(ThemeManager.get_current_theme())
@@ -302,13 +307,16 @@ defmodule Drafter.Widget.TextArea do
     do: {:ok, state |> Selection.clear_selection() |> Cursor.move_up() |> Cursor.adjust_scroll()}
 
   def handle_event({:key, :down}, %{focused: true} = state),
-    do: {:ok, state |> Selection.clear_selection() |> Cursor.move_down() |> Cursor.adjust_scroll()}
+    do:
+      {:ok, state |> Selection.clear_selection() |> Cursor.move_down() |> Cursor.adjust_scroll()}
 
   def handle_event({:key, :left}, %{focused: true} = state),
-    do: {:ok, state |> Selection.clear_selection() |> Cursor.move_left() |> Cursor.adjust_scroll()}
+    do:
+      {:ok, state |> Selection.clear_selection() |> Cursor.move_left() |> Cursor.adjust_scroll()}
 
   def handle_event({:key, :right}, %{focused: true} = state),
-    do: {:ok, state |> Selection.clear_selection() |> Cursor.move_right() |> Cursor.adjust_scroll()}
+    do:
+      {:ok, state |> Selection.clear_selection() |> Cursor.move_right() |> Cursor.adjust_scroll()}
 
   def handle_event({:key, :home}, %{focused: true} = state),
     do: {:ok, %{state | cursor_col: 0, selection: nil}}
@@ -322,46 +330,40 @@ defmodule Drafter.Widget.TextArea do
     viewport_height = max(1, state.height - 2)
     new_line = max(0, state.cursor_line - viewport_height)
     new_col = min(state.cursor_col, String.length(Enum.at(state.lines, new_line, "")))
-    {:ok, %{state | cursor_line: new_line, cursor_col: new_col, selection: nil} |> Cursor.adjust_scroll()}
+
+    {:ok,
+     %{state | cursor_line: new_line, cursor_col: new_col, selection: nil}
+     |> Cursor.adjust_scroll()}
   end
 
   def handle_event({:key, :page_down}, %{focused: true} = state) do
     viewport_height = max(1, state.height - 2)
     new_line = min(length(state.lines) - 1, state.cursor_line + viewport_height)
     new_col = min(state.cursor_col, String.length(Enum.at(state.lines, new_line, "")))
-    {:ok, %{state | cursor_line: new_line, cursor_col: new_col, selection: nil} |> Cursor.adjust_scroll()}
+
+    {:ok,
+     %{state | cursor_line: new_line, cursor_col: new_col, selection: nil}
+     |> Cursor.adjust_scroll()}
   end
 
-  def handle_event({:key, {:shift, :up}}, %{focused: true} = state),
-    do: {:ok, Selection.extend_selection(state, :up)}
+  def handle_event({:key, direction, [:shift]}, %{focused: true} = state)
+      when direction in [:up, :down, :left, :right],
+      do: {:ok, Selection.extend_selection(state, direction)}
 
-  def handle_event({:key, {:shift, :down}}, %{focused: true} = state),
-    do: {:ok, Selection.extend_selection(state, :down)}
+  def handle_event({:key, :left, [:ctrl]}, %{focused: true} = state) do
+    {new_row, new_col} = Cursor.word_left(state.lines, state.cursor_line, state.cursor_col)
 
-  def handle_event({:key, {:shift, :left}}, %{focused: true} = state),
-    do: {:ok, Selection.extend_selection(state, :left)}
-
-  def handle_event({:key, {:shift, :right}}, %{focused: true} = state),
-    do: {:ok, Selection.extend_selection(state, :right)}
-
-  def handle_event({:key, :a, [:ctrl]}, %{focused: true} = state),
-    do: {:ok, Selection.select_all(state)}
-
-  def handle_event({:key, :c, [:ctrl]}, %{focused: true} = state) do
-    Clipboard.copy_selection(state)
-    {:ok, state}
+    {:ok,
+     %{state | cursor_line: new_row, cursor_col: new_col, selection: nil}
+     |> Cursor.adjust_scroll()}
   end
 
-  def handle_event({:key, :x, [:ctrl]}, %{focused: true} = state) do
-    {tag, new_state} = Clipboard.handle_cut(state)
-    trigger_change(new_state)
-    {tag, new_state}
-  end
+  def handle_event({:key, :right, [:ctrl]}, %{focused: true} = state) do
+    {new_row, new_col} = Cursor.word_right(state.lines, state.cursor_line, state.cursor_col)
 
-  def handle_event({:key, :v, [:ctrl]}, %{focused: true} = state) when state.read_only != true do
-    {tag, new_state} = Clipboard.handle_paste(state)
-    trigger_change(new_state)
-    {tag, new_state}
+    {:ok,
+     %{state | cursor_line: new_row, cursor_col: new_col, selection: nil}
+     |> Cursor.adjust_scroll()}
   end
 
   def handle_event({:key, :z, [:ctrl]}, %{focused: true} = state) do
@@ -376,14 +378,8 @@ defmodule Drafter.Widget.TextArea do
     {tag, new_state}
   end
 
-  def handle_event({:key, {:ctrl, :left}}, %{focused: true} = state) do
-    {new_row, new_col} = Cursor.word_left(state.lines, state.cursor_line, state.cursor_col)
-    {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> Cursor.adjust_scroll()}
-  end
-
-  def handle_event({:key, {:ctrl, :right}}, %{focused: true} = state) do
-    {new_row, new_col} = Cursor.word_right(state.lines, state.cursor_line, state.cursor_col)
-    {:ok, %{state | cursor_line: new_row, cursor_col: new_col, selection: nil} |> Cursor.adjust_scroll()}
+  def handle_event({:key, key, mods}, %{focused: true} = state) when is_list(mods) do
+    clipboard_action(clipboard_binding(key, mods), state)
   end
 
   def handle_event({:key, :backspace}, %{focused: true} = state) do
@@ -430,6 +426,35 @@ defmodule Drafter.Widget.TextArea do
   end
 
   def handle_event(_event, state), do: {:noreply, state}
+
+  defp clipboard_binding(key, mods) do
+    Enum.find([:copy, :cut, :paste, :select_all], &Drafter.Clipboard.key?(&1, key, mods))
+  end
+
+  defp clipboard_action(:select_all, state), do: {:ok, Selection.select_all(state)}
+
+  defp clipboard_action(:copy, state) do
+    Clipboard.copy_selection(state)
+    {:ok, state}
+  end
+
+  defp clipboard_action(:cut, %{read_only: true} = state), do: {:noreply, state}
+
+  defp clipboard_action(:cut, state) do
+    {tag, new_state} = Clipboard.handle_cut(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
+
+  defp clipboard_action(:paste, %{read_only: true} = state), do: {:noreply, state}
+
+  defp clipboard_action(:paste, state) do
+    {tag, new_state} = Clipboard.handle_paste(state)
+    trigger_change(new_state)
+    {tag, new_state}
+  end
+
+  defp clipboard_action(nil, state), do: {:noreply, state}
 
   @impl Drafter.Widget
   def update(props, state) do
@@ -481,7 +506,12 @@ defmodule Drafter.Widget.TextArea do
     cursor_line = min(state.cursor_line, max(0, length(state.lines) - 1))
     line_len = String.length(Enum.at(state.lines, cursor_line, ""))
 
-    %{state | cursor_line: cursor_line, cursor_col: min(state.cursor_col, line_len), selection: nil}
+    %{
+      state
+      | cursor_line: cursor_line,
+        cursor_col: min(state.cursor_col, line_len),
+        selection: nil
+    }
     |> Cursor.adjust_scroll()
   end
 
@@ -493,6 +523,7 @@ defmodule Drafter.Widget.TextArea do
     app_state = Keyword.get(opts, :__app_state__, %{})
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 6})
     value = Drafter.Binding.get_bound_value(opts, app_state, "")
+
     %{
       text: value,
       placeholder: Keyword.get(opts, :placeholder, ""),
@@ -523,22 +554,30 @@ defmodule Drafter.Widget.TextArea do
       tab_size: mount_props.tab_size,
       highlight_cursor_line: mount_props.highlight_cursor_line
     }
-    base = if existing_state.width != mount_props.width do
-      Map.put(base, :width, mount_props.width)
-    else
-      base
-    end
-    base = if existing_state.height != mount_props.height do
-      Map.put(base, :height, mount_props.height)
-    else
-      base
-    end
-    base = if existing_state.placeholder != mount_props.placeholder do
-      Map.put(base, :placeholder, mount_props.placeholder)
-    else
-      base
-    end
-    if (Keyword.has_key?(opts, :bind) or Keyword.has_key?(opts, :value)) and existing_state.text != mount_props.text do
+
+    base =
+      if existing_state.width != mount_props.width do
+        Map.put(base, :width, mount_props.width)
+      else
+        base
+      end
+
+    base =
+      if existing_state.height != mount_props.height do
+        Map.put(base, :height, mount_props.height)
+      else
+        base
+      end
+
+    base =
+      if existing_state.placeholder != mount_props.placeholder do
+        Map.put(base, :placeholder, mount_props.placeholder)
+      else
+        base
+      end
+
+    if (Keyword.has_key?(opts, :bind) or Keyword.has_key?(opts, :value)) and
+         existing_state.text != mount_props.text do
       Map.put(base, :text, mount_props.text)
     else
       base

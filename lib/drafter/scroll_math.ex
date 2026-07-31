@@ -1,6 +1,18 @@
 defmodule Drafter.ScrollMath do
   @moduledoc """
   Scroll offset and viewport calculations for list-like widgets.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.clamp(50, 10, 4)
+      6
+
+      iex> Drafter.ScrollMath.ensure_visible(0, 7, 5)
+      3
+
+      iex> Drafter.ScrollMath.end_anchored_slice([1, 2, 3, 4, 5], 0, 3)
+      {2, [3, 4, 5]}
+
   """
 
   @doc """

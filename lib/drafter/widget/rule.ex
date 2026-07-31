@@ -113,7 +113,7 @@ defmodule Drafter.Widget.Rule do
     mid_row = div(rect.height, 2)
     empty_segment = Segment.new(String.duplicate(" ", rect.width), segment_style)
 
-    Enum.map(0..(rect.height - 1), fn row ->
+    Enum.map(0..(rect.height - 1)//1, fn row ->
       if row == mid_row do
         strip_segment = build_horizontal_line(state, rect.width, line_char, segment_style)
         Strip.new([strip_segment])
@@ -138,8 +138,12 @@ defmodule Drafter.Widget.Rule do
 
       {left_count, right_count} =
         case align do
-          :left -> {0, remaining}
-          :right -> {remaining, 0}
+          :left ->
+            {0, remaining}
+
+          :right ->
+            {remaining, 0}
+
           :center ->
             left = div(remaining, 2)
             {left, remaining - left}
@@ -154,11 +158,13 @@ defmodule Drafter.Widget.Rule do
     end
   end
 
+  defp render_vertical(_state, %{width: width}, _segment_style) when width <= 0, do: []
+
   defp render_vertical(state, rect, segment_style) do
     line_char = Map.fetch!(@vertical_chars, state.line_style)
     padding = String.duplicate(" ", rect.width - 1)
 
-    Enum.map(0..(rect.height - 1), fn _row ->
+    Enum.map(0..(rect.height - 1)//1, fn _row ->
       seg = Segment.new(line_char <> padding, segment_style)
       Strip.new([seg])
     end)

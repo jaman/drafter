@@ -3,7 +3,8 @@ defmodule Drafter.Syntax.TSFeatures do
   Parses Tree-sitter-style captures into structured highlight, fold, symbol, and textobject data.
   """
 
-  @type capture :: {pos_integer(), non_neg_integer(), pos_integer(), non_neg_integer(), String.t()}
+  @type capture ::
+          {pos_integer(), non_neg_integer(), pos_integer(), non_neg_integer(), String.t()}
 
   @type span :: {non_neg_integer(), non_neg_integer(), atom()}
 
@@ -14,12 +15,10 @@ defmodule Drafter.Syntax.TSFeatures do
           textobjects: list()
         }
 
-  defstruct [
-    highlights: %{},
-    folds: [],
-    symbols: [],
-    textobjects: []
-  ]
+  defstruct highlights: %{},
+            folds: [],
+            symbols: [],
+            textobjects: []
 
   @spec build([capture()]) :: t()
   def build(captures) do
@@ -101,6 +100,8 @@ defmodule Drafter.Syntax.TSFeatures do
   defp capture_name_to_atom(name) do
     name
     |> String.replace(".", "_")
-    |> String.to_atom()
+    |> String.to_existing_atom()
+  rescue
+    ArgumentError -> :unknown
   end
 end

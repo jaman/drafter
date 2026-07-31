@@ -41,7 +41,10 @@ defmodule Drafter.Widget.Trait.MigrationTest do
 
     test "mouse_up still triggers click" do
       state = Button.mount(%{text: "Test", on_click: fn -> {:app_callback, :clicked, nil} end})
-      {:ok, new_state, _actions} = Button.handle_event({:mouse, %{type: :mouse_up, x: 5, y: 1}}, state)
+
+      {:ok, new_state, _actions} =
+        Button.handle_event({:mouse, %{type: :mouse_up, x: 5, y: 1}}, state)
+
       assert new_state.active == true
     end
   end

@@ -30,7 +30,13 @@ defmodule Drafter.Widget.Chart.Area do
 
   defp render_multi_series(state, data, width, height, bg) do
     colors = if state.colors != [], do: state.colors, else: @area_default_colors
-    MultiSeries.render(data, width, height, bg: bg, colors: colors, min: state.min_value, max: state.max_value)
+
+    MultiSeries.render(data, width, height,
+      bg: bg,
+      colors: colors,
+      min: state.min_value,
+      max: state.max_value
+    )
   end
 
   defp render_single_series(state, data_src, width, height, bg, fg, animation_offset) do
@@ -38,7 +44,10 @@ defmodule Drafter.Widget.Chart.Area do
     pixel_height = height * 4
     scroll_offset = state._internal.scroll_offset || 0
     viewport_width = width * 2
-    {_start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, viewport_width)
+
+    {_start_index, viewport_data} =
+      Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, viewport_width)
+
     normalized = Shared.normalize_data(viewport_data, state.min_value, range, pixel_height)
     shifted = Line.apply_animation_shift(normalized, animation_offset)
 

@@ -35,7 +35,7 @@ defmodule Drafter.Widget.Trait.Collapsible do
 
   @impl true
   def handle_event({:key, key}, trait_state, _widget_state)
-      when key in [:enter, :space] do
+      when key in [:enter, :" "] do
     {:ok, %{trait_state | _expanded: !trait_state._expanded}}
   end
 

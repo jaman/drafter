@@ -43,6 +43,7 @@ defmodule Drafter.Widget.Registry do
     |> List.flatten()
     |> Enum.each(fn mod ->
       Code.ensure_loaded(mod)
+
       if function_exported?(mod, :component_tag, 0) do
         register_widget(mod)
       end

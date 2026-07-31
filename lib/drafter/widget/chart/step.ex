@@ -37,7 +37,8 @@ defmodule Drafter.Widget.Chart.Step do
 
     prepared_series =
       Enum.map(data, fn series ->
-        {_start, slice} = Drafter.ScrollMath.end_anchored_slice(series, scroll_offset, viewport_width)
+        {_start, slice} =
+          Drafter.ScrollMath.end_anchored_slice(series, scroll_offset, viewport_width)
 
         if raw_data do
           slice
@@ -62,7 +63,10 @@ defmodule Drafter.Widget.Chart.Step do
   defp render_single_series(state, data_src, width, height, bg, fg, animation_offset) do
     scroll_offset = state._internal.scroll_offset || 0
     viewport_width = width * 2
-    {_start_index, viewport_data} = Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, viewport_width)
+
+    {_start_index, viewport_data} =
+      Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, viewport_width)
+
     downsampled = LTTB.downsample_series(viewport_data, viewport_width)
     range = state.max_value - state.min_value
     pixel_height = height * 4

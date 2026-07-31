@@ -50,17 +50,35 @@ defmodule Drafter.Draw.Segment do
   defp normalize_color(style, key) do
     case Map.get(style, key) do
       nil -> style
-      color -> Map.put(style, key, Drafter.Color.normalize(color))
+      color -> put_color(style, key, Drafter.Color.normalize_with_alpha(color))
     end
   end
 
+  defp put_color(style, key, {rgb, alpha}) when alpha >= 1.0 do
+    style |> Map.put(key, rgb) |> Map.delete(alpha_key(key))
+  end
+
+  defp put_color(style, key, {rgb, alpha}) do
+    style |> Map.put(key, rgb) |> Map.put(alpha_key(key), alpha)
+  end
+
+  @doc """
+  The style key holding the alpha for `:fg` or `:bg`.
+
+  A colour written `rgba(...)` keeps its RGB under `:fg`/`:bg` so every consumer that
+  expects a triple still works, and its alpha under the key this returns. The
+  compositor blends the two against the cell beneath and drops the alpha key; a
+  terminal has no alpha channel, so nothing below the compositor ever sees one.
+  """
+  @spec alpha_key(:fg | :bg) :: :fg_alpha | :bg_alpha
+  def alpha_key(:fg), do: :fg_alpha
+  def alpha_key(:bg), do: :bg_alpha
+
   defp display_width(str) do
-    str
-    |> strip_ansi()
-    |> String.graphemes()
-    |> Enum.reduce(0, fn grapheme, acc ->
-      acc + char_width(grapheme)
-    end)
+    case :binary.match(str, "\e") do
+      :nomatch -> Drafter.CharacterWidth.string(str)
+      _ -> str |> strip_ansi() |> Drafter.CharacterWidth.string()
+    end
   end
 
   defp strip_ansi(text) do
@@ -93,26 +111,34 @@ defmodule Drafter.Draw.Segment do
         %{segment | text: "", width: 0}
 
       true ->
-        cropped_text = truncate_to_display_width(text, crop_width)
-        %{segment | text: cropped_text, width: display_width(cropped_text)}
+        {cropped_text, cropped_width} = truncate_to_display_width(text, crop_width)
+        %{segment | text: cropped_text, width: cropped_width}
     end
   end
 
   defp truncate_to_display_width(str, target_width) do
+    if plain_ascii?(str) do
+      {binary_part(str, 0, target_width), target_width}
+    else
+      truncate_mixed(str, target_width)
+    end
+  end
+
+  defp truncate_mixed(str, target_width) do
     ansi_pattern = ~r/\e\[[0-9;]*m/
     parts = Regex.split(ansi_pattern, str, include_captures: true)
 
-    {result, _width} =
-      Enum.reduce_while(parts, {"", 0}, fn part, {acc, width} ->
-        truncate_part(part, acc, width, target_width, ansi_pattern)
+    {result, width} =
+      Enum.reduce_while(parts, {[], 0}, fn part, {acc, w} ->
+        truncate_part(part, acc, w, target_width, ansi_pattern)
       end)
 
-    result
+    {IO.iodata_to_binary(result), width}
   end
 
   defp truncate_part(part, acc, width, target_width, ansi_pattern) do
     if Regex.match?(ansi_pattern, part) do
-      {:cont, {acc <> part, width}}
+      {:cont, {[acc, part], width}}
     else
       append_truncated_text(part, acc, width, target_width)
     end
@@ -122,24 +148,31 @@ defmodule Drafter.Draw.Segment do
     {chunk, new_width} = truncate_text_part(text, width, target_width)
 
     if new_width >= target_width and new_width > width do
-      {:halt, {acc <> chunk, new_width}}
+      {:halt, {[acc, chunk], new_width}}
     else
-      {:cont, {acc <> chunk, new_width}}
+      {:cont, {[acc, chunk], new_width}}
     end
   end
 
   defp truncate_text_part(text, current_width, target_width) do
-    text
-    |> String.graphemes()
-    |> Enum.reduce_while({"", current_width}, fn grapheme, {chunk_acc, w} ->
-      new_w = w + char_width(grapheme)
+    {chunk, width} =
+      text
+      |> String.graphemes()
+      |> Enum.reduce_while({[], current_width}, fn grapheme, {chunk_acc, w} ->
+        new_w = w + char_width(grapheme)
 
-      if new_w <= target_width do
-        {:cont, {chunk_acc <> grapheme, new_w}}
-      else
-        {:halt, {chunk_acc, w}}
-      end
-    end)
+        if new_w <= target_width do
+          {:cont, {[chunk_acc, grapheme], new_w}}
+        else
+          {:halt, {chunk_acc, w}}
+        end
+      end)
+
+    {IO.iodata_to_binary(chunk), width}
+  end
+
+  defp plain_ascii?(str) do
+    Drafter.CharacterWidth.printable_ascii?(str)
   end
 
   @doc "Pad segment to specified width with spaces"
@@ -170,9 +203,17 @@ defmodule Drafter.Draw.Segment do
   @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{text: text}), do: text == ""
 
-  defp build_style_codes(style) when style == %{}, do: ""
-
   @style_flags [bold: "1", dim: "2", italic: "3", underline: "4", reverse: "7"]
+
+  @doc "The SGR sequence that turns on `style`, or the empty string for an empty style."
+  @spec style_codes(map()) :: String.t()
+  def style_codes(style), do: build_style_codes(style)
+
+  @doc "The style keys that are attribute flags rather than colours."
+  @spec style_flags() :: [atom()]
+  def style_flags, do: Keyword.keys(@style_flags)
+
+  defp build_style_codes(style) when style == %{}, do: ""
 
   defp build_style_codes(style) do
     codes =

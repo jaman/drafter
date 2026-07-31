@@ -136,7 +136,14 @@ defmodule Drafter.Widget.MaskedInput do
 
     if state.cursor_pos > 0 do
       {new_masked, new_raw} = delete_char(state, state.cursor_pos - 1)
-      new_state = %{state | value: new_masked, raw_value: new_raw, cursor_pos: max(0, state.cursor_pos - 1)}
+
+      new_state = %{
+        state
+        | value: new_masked,
+          raw_value: new_raw,
+          cursor_pos: max(0, state.cursor_pos - 1)
+      }
+
       trigger_change(new_state)
       {:ok, new_state}
     else
@@ -378,7 +385,8 @@ defmodule Drafter.Widget.MaskedInput do
     build_mask_string(mask, accepted_chars)
   end
 
-  defp consume_input_char(mask_char, [input_hd | input_tl], accepted) when mask_char in ["#", "9", "a", "A"] do
+  defp consume_input_char(mask_char, [input_hd | input_tl], accepted)
+       when mask_char in ["#", "9", "a", "A"] do
     char_code = String.to_charlist(input_hd) |> List.first()
 
     if accepts_char?(mask_char, char_code) do
@@ -403,7 +411,8 @@ defmodule Drafter.Widget.MaskedInput do
     result
   end
 
-  defp place_mask_char(mask_char, acc, [input_hd | input_tl]) when mask_char in ["#", "9", "a", "A"] do
+  defp place_mask_char(mask_char, acc, [input_hd | input_tl])
+       when mask_char in ["#", "9", "a", "A"] do
     {acc <> input_hd, input_tl}
   end
 

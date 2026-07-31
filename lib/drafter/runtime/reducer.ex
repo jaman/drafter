@@ -11,11 +11,9 @@ defmodule Drafter.Runtime.Reducer do
     * fired timers arrive as `{:timer, timer_id}`
 
   `update/2` returns the new state, or `{:stop, reason}` to quit. Render is skipped when it
-  returns a state value-equal to the previous one — the reducer style's natural render-skip.
+  returns a state value-equal to the previous one.
 
-  An app that does not define `update/2` (e.g. a callback-style app run under the reducer
-  runtime) transparently falls back to the `Callback` backend, so any app runs unchanged
-  here and `update/2` can be adopted incrementally.
+  An app that does not define `update/2` falls back to the `Callback` backend.
   """
 
   @behaviour Drafter.Runtime
@@ -32,7 +30,9 @@ defmodule Drafter.Runtime.Reducer do
 
   @impl true
   def handle_input(app, event, state) do
-    if reducer?(app), do: reduce(app, event, state), else: Callback.handle_input(app, event, state)
+    if reducer?(app),
+      do: reduce(app, event, state),
+      else: Callback.handle_input(app, event, state)
   end
 
   @impl true
@@ -44,7 +44,9 @@ defmodule Drafter.Runtime.Reducer do
 
   @impl true
   def timer(app, timer_id, state) do
-    if reducer?(app), do: app.update({:timer, timer_id}, state), else: Callback.timer(app, timer_id, state)
+    if reducer?(app),
+      do: app.update({:timer, timer_id}, state),
+      else: Callback.timer(app, timer_id, state)
   end
 
   @impl true

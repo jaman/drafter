@@ -67,7 +67,12 @@ defmodule Drafter.Widget.Pretty do
 
     classes = state.classes
     computed_opts = [classes: classes, style: state.style]
-    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
+
+    computed_opts =
+      if state.app_module,
+        do: Keyword.put(computed_opts, :app_module, state.app_module),
+        else: computed_opts
+
     computed = Computed.for_widget(:pretty, state, computed_opts)
 
     default_bg = computed[:background] || {30, 30, 30}
@@ -89,6 +94,7 @@ defmodule Drafter.Widget.Pretty do
 
   def from_component_opts(data, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+
     %{
       data: data,
       expand: Keyword.get(opts, :expand, false),
@@ -108,12 +114,15 @@ defmodule Drafter.Widget.Pretty do
 
   defp parse_colorized_line(line, bg) do
     case line do
-      "" -> [Segment.new(" ", %{fg: @syntax_colors.default, bg: bg})]
+      "" ->
+        [Segment.new(" ", %{fg: @syntax_colors.default, bg: bg})]
+
       _ ->
         case Regex.run(~r/^(.+?)§(\{[^}]+\})(.*)$/, line, capture: :all_but_first) do
           [text, color_spec, rest] ->
             color = parse_color_spec(color_spec)
             [Segment.new(text, %{fg: color, bg: bg}) | parse_colorized_line(rest, bg)]
+
           nil ->
             [Segment.new(line, %{fg: @syntax_colors.default, bg: bg})]
         end
@@ -128,9 +137,10 @@ defmodule Drafter.Widget.Pretty do
   end
 
   defp pad_and_truncate(segments, width, bg) do
-    current_width = Enum.reduce(segments, 0, fn seg, acc ->
-      acc + String.length(seg.text)
-    end)
+    current_width =
+      Enum.reduce(segments, 0, fn seg, acc ->
+        acc + String.length(seg.text)
+      end)
 
     cond do
       current_width < width ->
@@ -194,21 +204,26 @@ defmodule Drafter.Widget.Pretty do
   def format_pretty(data, highlight, _expand) when is_nil(data) do
     if highlight, do: "nil§{nil}", else: "nil"
   end
+
   def format_pretty(data, highlight, _expand) when is_boolean(data) do
     if highlight, do: "#{data}§{boolean}", else: "#{data}"
   end
+
   def format_pretty(data, highlight, _expand) when is_atom(data) do
     if highlight, do: ":#{data}§{atom}", else: ":#{data}"
   end
+
   def format_pretty(data, highlight, _expand) when is_integer(data) do
     if highlight, do: "#{data}§{integer}", else: "#{data}"
   end
+
   def format_pretty(data, highlight, _expand) when is_float(data) do
     if highlight, do: "#{data}§{float}", else: "#{data}"
   end
 
   def format_pretty(data, highlight, _expand) when is_binary(data) do
     inspected = inspect(data, binaries: :as_strings)
+
     if highlight do
       "#{inspected}§{string}"
     else
@@ -245,55 +260,74 @@ defmodule Drafter.Widget.Pretty do
   end
 
   def format_keyword(data, highlight, false) do
-    pairs = Enum.map(data, fn {k, v} ->
-      key_str = if highlight, do: ":#{Atom.to_string(k)}§{keyword_key}", else: ":#{Atom.to_string(k)}"
-      "#{key_str}: #{format_simple(v, highlight)}"
-    end)
+    pairs =
+      Enum.map(data, fn {k, v} ->
+        key_str =
+          if highlight, do: ":#{Atom.to_string(k)}§{keyword_key}", else: ":#{Atom.to_string(k)}"
+
+        "#{key_str}: #{format_simple(v, highlight)}"
+      end)
+
     separator = if highlight, do: "§{separator}", else: ""
     "[#{separator}#{Enum.join(pairs, ", ")}]#{separator}"
   end
 
   def format_keyword(data, highlight, true) do
-    pairs = Enum.map(data, fn {k, v} ->
-      key_str = if highlight, do: ":#{Atom.to_string(k)}§{keyword_key}", else: ":#{Atom.to_string(k)}"
-      "#{key_str}: #{format_simple(v, highlight)}"
-    end)
+    pairs =
+      Enum.map(data, fn {k, v} ->
+        key_str =
+          if highlight, do: ":#{Atom.to_string(k)}§{keyword_key}", else: ":#{Atom.to_string(k)}"
+
+        "#{key_str}: #{format_simple(v, highlight)}"
+      end)
+
     separator = if highlight, do: "§{separator}", else: ""
     "[#{separator}\n  #{Enum.join(pairs, ",\n  ")}\n]#{separator}"
   end
 
   def format_map(data, highlight, false) do
-    pairs = Enum.map(data, fn {k, v} ->
-      format_pair(k, v, highlight)
-    end)
+    pairs =
+      Enum.map(data, fn {k, v} ->
+        format_pair(k, v, highlight)
+      end)
+
     separator = if highlight, do: "§{separator}", else: ""
     "%#{separator}{#{Enum.join(pairs, ", ")}}#{separator}"
   end
 
   def format_map(data, highlight, true) do
-    pairs = Enum.map(data, fn {k, v} ->
-      format_pair(k, v, highlight)
-    end)
+    pairs =
+      Enum.map(data, fn {k, v} ->
+        format_pair(k, v, highlight)
+      end)
+
     separator = if highlight, do: "§{separator}", else: ""
     "%#{separator}{\n  #{Enum.join(pairs, ",\n  ")}\n}#{separator}"
   end
 
   def format_pair(k, v, highlight) when is_atom(k) do
-    key_str = if highlight, do: ":#{Atom.to_string(k)}§{keyword_key}", else: ":#{Atom.to_string(k)}"
+    key_str =
+      if highlight, do: ":#{Atom.to_string(k)}§{keyword_key}", else: ":#{Atom.to_string(k)}"
+
     "#{key_str}: #{format_simple(v, highlight)}"
   end
 
   def format_pair(k, v, highlight) do
-    key_str = if highlight, do: "#{format_simple(k, highlight)}§{map_key}", else: format_simple(k, highlight)
+    key_str =
+      if highlight,
+        do: "#{format_simple(k, highlight)}§{map_key}",
+        else: format_simple(k, highlight)
+
     "#{key_str} => #{format_simple(v, highlight)}"
   end
 
   def format_struct(data, highlight, false) do
-    fields = data
-    |> Map.delete(:__struct__)
-    |> Enum.map(fn {k, v} ->
-      "#{format_simple(k, highlight)}: #{format_simple(v, highlight)}"
-    end)
+    fields =
+      data
+      |> Map.delete(:__struct__)
+      |> Enum.map(fn {k, v} ->
+        "#{format_simple(k, highlight)}: #{format_simple(v, highlight)}"
+      end)
 
     struct_name = data.__struct__ |> Module.split() |> List.last()
     name_str = if highlight, do: "%#{struct_name}§{struct_name}", else: "%#{struct_name}"
@@ -301,11 +335,12 @@ defmodule Drafter.Widget.Pretty do
   end
 
   def format_struct(data, highlight, true) do
-    fields = data
-    |> Map.delete(:__struct__)
-    |> Enum.map(fn {k, v} ->
-      "#{format_simple(k, highlight)}: #{format_simple(v, highlight)}"
-    end)
+    fields =
+      data
+      |> Map.delete(:__struct__)
+      |> Enum.map(fn {k, v} ->
+        "#{format_simple(k, highlight)}: #{format_simple(v, highlight)}"
+      end)
 
     struct_name = data.__struct__ |> Module.split() |> List.last()
     name_str = if highlight, do: "%#{struct_name}§{struct_name}", else: "%#{struct_name}"
@@ -315,21 +350,27 @@ defmodule Drafter.Widget.Pretty do
   def format_simple(item, highlight) when is_nil(item) do
     if highlight, do: "nil§{nil}", else: "nil"
   end
+
   def format_simple(item, highlight) when is_boolean(item) do
     if highlight, do: "#{item}§{boolean}", else: "#{item}"
   end
+
   def format_simple(item, highlight) when is_atom(item) do
     if highlight, do: ":#{item}§{atom}", else: ":#{item}"
   end
+
   def format_simple(item, highlight) when is_integer(item) do
     if highlight, do: "#{item}§{integer}", else: "#{item}"
   end
+
   def format_simple(item, highlight) when is_float(item) do
     if highlight, do: "#{item}§{float}", else: "#{item}"
   end
+
   def format_simple(item, highlight) when is_binary(item) do
     inspected = inspect(item, binaries: :as_strings)
     if highlight, do: "#{inspected}§{string}", else: inspected
   end
+
   def format_simple(_item, _highlight), do: "..."
 end

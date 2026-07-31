@@ -16,7 +16,8 @@ defmodule Drafter.LayerCompositorTest do
         assert length(strip.segments) == 1
         segment = hd(strip.segments)
         assert String.length(segment.text) == 10
-        assert segment.text == "          "  # 10 spaces
+        # 10 spaces
+        assert segment.text == "          "
       end)
     end
 
@@ -34,13 +35,17 @@ defmodule Drafter.LayerCompositorTest do
 
       # Row 1 should have "Hello" at position 2
       row1_segments = Enum.at(result, 1).segments
-      assert length(row1_segments) == 3  # before + content + after
+      # before + content + after
+      assert length(row1_segments) == 3
 
       # Check segments: before(2) + content(5) + after(3) = 10 total
       [before_seg, content_seg, after_seg] = row1_segments
-      assert before_seg.text == "  "      # 2 spaces before
-      assert content_seg.text == "Hello"  # content
-      assert after_seg.text == "   "      # 3 spaces after
+      # 2 spaces before
+      assert before_seg.text == "  "
+      # content
+      assert content_seg.text == "Hello"
+      # 3 spaces after
+      assert after_seg.text == "   "
 
       # Row 2 should be empty
       assert hd(Enum.at(result, 2).segments).text == "          "
@@ -51,11 +56,15 @@ defmodule Drafter.LayerCompositorTest do
 
       # Background layer (z=0)
       bg_strips = [Strip.new([Segment.new("AAAAAAAAAA", %{bg: {100, 100, 100}})])]
-      bg_layer = LayerCompositor.create_layer(:bg, bg_strips, %{x: 0, y: 0, width: 10, height: 1}, 0)
+
+      bg_layer =
+        LayerCompositor.create_layer(:bg, bg_strips, %{x: 0, y: 0, width: 10, height: 1}, 0)
 
       # Foreground layer (z=10) - should appear on top
       fg_strips = [Strip.new([Segment.new("FG", %{fg: {255, 0, 0}})])]
-      fg_layer = LayerCompositor.create_layer(:fg, fg_strips, %{x: 3, y: 0, width: 2, height: 1}, 10)
+
+      fg_layer =
+        LayerCompositor.create_layer(:fg, fg_strips, %{x: 3, y: 0, width: 2, height: 1}, 10)
 
       result = LayerCompositor.composite([bg_layer, fg_layer], viewport)
 
@@ -64,9 +73,12 @@ defmodule Drafter.LayerCompositorTest do
       assert length(row0_segments) == 3
 
       [before_seg, fg_seg, after_seg] = row0_segments
-      assert before_seg.text == "AAA"     # 3 chars from background preserved
-      assert fg_seg.text == "FG"          # foreground content
-      assert after_seg.text == "AAAAA"    # 5 chars from background preserved
+      # 3 chars from background preserved
+      assert before_seg.text == "AAA"
+      # foreground content
+      assert fg_seg.text == "FG"
+      # 5 chars from background preserved
+      assert after_seg.text == "AAAAA"
     end
   end
 

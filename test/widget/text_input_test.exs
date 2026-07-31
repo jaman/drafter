@@ -92,33 +92,39 @@ defmodule Drafter.Widget.TextInputTest do
   describe "scroll_offset regression" do
     test "scroll does not trigger until cursor reaches the content width boundary" do
       state = TextInput.mount(%{focused: true, width: 10})
+
       state =
         Enum.reduce(1..9, state, fn _, acc ->
           {:ok, next} = TextInput.handle_event({:char, ?x}, acc)
           next
         end)
+
       assert state.cursor_position == 9
       assert state.scroll_offset == 0
     end
 
     test "scroll triggers when cursor reaches position equal to width" do
       state = TextInput.mount(%{focused: true, width: 10})
+
       state =
         Enum.reduce(1..10, state, fn _, acc ->
           {:ok, next} = TextInput.handle_event({:char, ?x}, acc)
           next
         end)
+
       assert state.cursor_position == 10
       assert state.scroll_offset == 1
     end
 
     test "scroll_offset advances with each char beyond width" do
       state = TextInput.mount(%{focused: true, width: 10})
+
       state =
         Enum.reduce(1..12, state, fn _, acc ->
           {:ok, next} = TextInput.handle_event({:char, ?x}, acc)
           next
         end)
+
       assert state.cursor_position == 12
       assert state.scroll_offset == 3
     end

@@ -2,8 +2,8 @@ defmodule Drafter.Regression.SetWidgetValueTest do
   use ExUnit.Case, async: false
 
   alias Drafter.ThemeManager
-  alias Drafter.Widget.TextArea
   alias Drafter.Widget.Checkbox
+  alias Drafter.Widget.TextArea
   alias Drafter.WidgetServer
 
   setup do
@@ -17,7 +17,16 @@ defmodule Drafter.Regression.SetWidgetValueTest do
   defp start_widget(id, module, props) do
     rect = %{x: 0, y: 0, width: 40, height: 6}
     session_ctx = %{drafter_theme_manager: Process.get(:drafter_theme_manager)}
-    {:ok, pid} = WidgetServer.start_link(id: id, module: module, props: props, rect: rect, session_ctx: session_ctx)
+
+    {:ok, pid} =
+      WidgetServer.start_link(
+        id: id,
+        module: module,
+        props: props,
+        rect: rect,
+        session_ctx: session_ctx
+      )
+
     pid
   end
 
@@ -31,7 +40,9 @@ defmodule Drafter.Regression.SetWidgetValueTest do
   end
 
   test "set_widget_value reclamps the cursor when the new text is shorter" do
-    pid = start_widget(:editor, TextArea, %{text: "select from some_long_table", width: 40, height: 6})
+    pid =
+      start_widget(:editor, TextArea, %{text: "select from some_long_table", width: 40, height: 6})
+
     WidgetServer.set_state(pid, %{WidgetServer.get_state(pid) | cursor_col: 25})
 
     assert :ok = Drafter.set_widget_value(:editor, "abc")

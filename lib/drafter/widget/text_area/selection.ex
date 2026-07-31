@@ -3,7 +3,9 @@ defmodule Drafter.Widget.TextArea.Selection do
 
   alias Drafter.Widget.TextArea.Cursor
 
-  @spec normalize_selection({non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}) ::
+  @spec normalize_selection(
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+        ) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
   def normalize_selection({anchor_row, anchor_col, active_row, active_col}) do
     if {anchor_row, anchor_col} <= {active_row, active_col} do
@@ -21,7 +23,12 @@ defmodule Drafter.Widget.TextArea.Selection do
     last_line = length(state.lines) - 1
     last_col = String.length(Enum.at(state.lines, last_line, ""))
 
-    %{state | selection: {0, 0, last_line, last_col}, cursor_line: last_line, cursor_col: last_col}
+    %{
+      state
+      | selection: {0, 0, last_line, last_col},
+        cursor_line: last_line,
+        cursor_col: last_col
+    }
   end
 
   @spec extend_selection(map(), :up | :down | :left | :right) :: map()
@@ -35,8 +42,10 @@ defmodule Drafter.Widget.TextArea.Selection do
     moved_state = Cursor.apply_cursor_move(state, direction)
     {anchor_row, anchor_col} = anchor
 
-    %{moved_state
-      | selection: {anchor_row, anchor_col, moved_state.cursor_line, moved_state.cursor_col}}
+    %{
+      moved_state
+      | selection: {anchor_row, anchor_col, moved_state.cursor_line, moved_state.cursor_col}
+    }
   end
 
   @spec selected_text(map()) :: String.t()

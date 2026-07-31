@@ -4,6 +4,7 @@ defmodule Drafter.Widget.DataTable.Rendering do
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Widget.DataTable
   alias Drafter.Widget.DataTable.Columns
+  alias Drafter.Widget.Scrollbar
 
   def normalize_state(state) when is_struct(state, DataTable), do: state
   def normalize_state(state), do: DataTable.mount(state)
@@ -41,7 +42,8 @@ defmodule Drafter.Widget.DataTable.Rendering do
     end
   end
 
-  def header_sort_indicator(state, column, width) when state.sortable and column.sortable and width > 1 do
+  def header_sort_indicator(state, column, width)
+      when state.sortable and column.sortable and width > 1 do
     char = sort_indicator_char(state, column.key)
     {width - 1, char}
   end
@@ -58,7 +60,9 @@ defmodule Drafter.Widget.DataTable.Rendering do
 
   def header_segment(state, column, width, col_index, focused) do
     {label_width, indicator} = header_sort_indicator(state, column, width)
-    formatted_text = Columns.format_cell_content(column.label, label_width, column.align, 0) <> indicator
+
+    formatted_text =
+      Columns.format_cell_content(column.label, label_width, column.align, 0) <> indicator
 
     style =
       if header_cell_cursor?(state, col_index, focused) do
@@ -71,7 +75,8 @@ defmodule Drafter.Widget.DataTable.Rendering do
   end
 
   def render_header(state, column_widths, total_width, focused) do
-    {visible_cols, visible_widths, visible_indices} = visible_columns(state, column_widths, total_width)
+    {visible_cols, visible_widths, visible_indices} =
+      visible_columns(state, column_widths, total_width)
 
     segments =
       Enum.zip([visible_cols, visible_widths, visible_indices])
@@ -118,13 +123,27 @@ defmodule Drafter.Widget.DataTable.Rendering do
     is_highlighted and col_index == state.cursor_col and focused
   end
 
-  def cursor_highlights_cell?(%{cursor_type: :column} = state, col_index, _is_highlighted, focused) do
+  def cursor_highlights_cell?(
+        %{cursor_type: :column} = state,
+        col_index,
+        _is_highlighted,
+        focused
+      ) do
     col_index == state.cursor_col and focused
   end
 
   def cursor_highlights_cell?(_state, _col_index, _is_highlighted, _focused), do: false
 
-  def cell_style(state, base_style, raw_value, column, col_index, is_selected, is_highlighted, focused) do
+  def cell_style(
+        state,
+        base_style,
+        raw_value,
+        column,
+        col_index,
+        is_selected,
+        is_highlighted,
+        focused
+      ) do
     cond do
       is_selected -> base_style
       cursor_highlights_cell?(state, col_index, is_highlighted, focused) -> state.styles.cursor
@@ -139,14 +158,34 @@ defmodule Drafter.Widget.DataTable.Rendering do
     base_style = row_base_style(state, is_selected, is_zebra)
     focused = Map.get(state, :focused, false)
 
-    {visible_cols, visible_widths, visible_indices} = visible_columns(state, column_widths, total_width)
+    {visible_cols, visible_widths, visible_indices} =
+      visible_columns(state, column_widths, total_width)
 
     segments =
       Enum.zip([visible_cols, visible_widths, visible_indices])
       |> Enum.map(fn {column, width, col_index} ->
         raw_value = Map.get(row, column.key, "")
-        formatted_text = Columns.format_cell_content(to_string(raw_value), width, column.align, state.cell_padding)
-        style = cell_style(state, base_style, raw_value, column, col_index, is_selected, is_highlighted, focused)
+
+        formatted_text =
+          Columns.format_cell_content(
+            to_string(raw_value),
+            width,
+            column.align,
+            state.cell_padding
+          )
+
+        style =
+          cell_style(
+            state,
+            base_style,
+            raw_value,
+            column,
+            col_index,
+            is_selected,
+            is_highlighted,
+            focused
+          )
+
         Segment.new(formatted_text, style)
       end)
 
@@ -172,6 +211,7 @@ defmodule Drafter.Widget.DataTable.Rendering do
     {visible, _used} =
       Enum.reduce_while(scrolled, {[], 0}, fn {col, width, idx}, {acc, used} ->
         next_used = used + width
+
         if next_used > total_width do
           {:halt, {acc ++ [{col, min(width, total_width - used), idx}], next_used}}
         else
@@ -207,42 +247,41 @@ defmodule Drafter.Widget.DataTable.Rendering do
     }
   end
 
-  def scrollbar_thumb_position(state, data_start_y, data_height) do
-    max_scroll = length(state.data) - data_height
+  @doc """
+  The strip rows the scrollbar thumb covers, offset to the widget's coordinates.
 
-    cond do
-      max_scroll <= 0 ->
-        data_start_y
-
-      state.scroll.offset >= max_scroll ->
-        data_start_y + data_height - 1
-
-      true ->
-        scroll_ratio = state.scroll.offset / max_scroll
-        pos = round(scroll_ratio * (data_height - 1))
-        data_start_y + pos
+  Returns `nil` when the data fits and no scrollbar is drawn. Thumb geometry
+  comes from `Drafter.Widget.Scrollbar`.
+  """
+  def scrollbar_thumb_rows(state, data_start_y, data_height) do
+    case Scrollbar.thumb_rows(state.scroll.offset, length(state.data), data_height) do
+      nil -> nil
+      first..last//_ -> (data_start_y + first)..(data_start_y + last)
     end
   end
 
-  def scrollbar_char_at(index, scrollbar_pos, data_start_y) do
+  def scrollbar_char_at(index, thumb, data_start_y) do
     cond do
-      index == scrollbar_pos -> "█"
+      on_thumb?(index, thumb) -> "█"
       index >= data_start_y -> "│"
       true -> " "
     end
   end
 
-  def scrollbar_style_at(index, scrollbar_pos, hovering) do
+  defp on_thumb?(_index, nil), do: false
+  defp on_thumb?(index, thumb), do: index in thumb
+
+  def scrollbar_style_at(index, thumb, hovering) do
     cond do
-      index == scrollbar_pos and hovering -> %{fg: {255, 255, 255}, bg: {0, 150, 255}}
-      index == scrollbar_pos -> %{fg: {200, 200, 200}, bg: {100, 100, 100}}
+      on_thumb?(index, thumb) and hovering -> %{fg: {255, 255, 255}, bg: {0, 150, 255}}
+      on_thumb?(index, thumb) -> %{fg: {200, 200, 200}, bg: {100, 100, 100}}
       true -> %{fg: {100, 100, 100}, bg: {60, 60, 60}}
     end
   end
 
-  def append_scrollbar_segment(strip, index, scrollbar_pos, data_start_y, hovering) do
-    char = scrollbar_char_at(index, scrollbar_pos, data_start_y)
-    style = scrollbar_style_at(index, scrollbar_pos, hovering)
+  def append_scrollbar_segment(strip, index, thumb, data_start_y, hovering) do
+    char = scrollbar_char_at(index, thumb, data_start_y)
+    style = scrollbar_style_at(index, thumb, hovering)
     segment = Segment.new(char, style)
     existing = strip.segments || []
     Strip.new(existing ++ [segment])
@@ -253,12 +292,12 @@ defmodule Drafter.Widget.DataTable.Rendering do
 
     if total_rows > data_height do
       data_start_y = DataTable.get_data_start_y(state)
-      scrollbar_pos = scrollbar_thumb_position(state, data_start_y, data_height)
+      thumb = scrollbar_thumb_rows(state, data_start_y, data_height)
 
       strips
       |> Enum.with_index()
       |> Enum.map(fn {strip, index} ->
-        append_scrollbar_segment(strip, index, scrollbar_pos, data_start_y, state.drag.hovering_scrollbar)
+        append_scrollbar_segment(strip, index, thumb, data_start_y, state.drag.hovering_scrollbar)
       end)
     else
       strips

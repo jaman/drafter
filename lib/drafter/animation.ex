@@ -26,7 +26,8 @@ defmodule Drafter.Animation do
     :duration,
     :easing,
     :on_complete,
-    :interpolator
+    :interpolator,
+    :session
   ]
 
   @type animation :: %__MODULE__{
@@ -39,7 +40,8 @@ defmodule Drafter.Animation do
           duration: non_neg_integer(),
           easing: atom(),
           on_complete: function() | nil,
-          interpolator: function() | nil
+          interpolator: function() | nil,
+          session: term()
         }
 
   @default_frame_rate 60
@@ -67,7 +69,8 @@ defmodule Drafter.Animation do
 
     GenServer.cast(
       __MODULE__,
-      {:animate, animation_id, widget_id, property, end_value, duration, easing, on_complete}
+      {:animate, animation_id, widget_id, property, end_value, duration, easing, on_complete,
+       Drafter.AppRegistry.current_session()}
     )
 
     animation_id
@@ -123,12 +126,12 @@ defmodule Drafter.Animation do
 
   @impl true
   def handle_cast(
-        {:animate, id, widget_id, property, end_value, duration, easing, on_complete},
+        {:animate, id, widget_id, property, end_value, duration, easing, on_complete, session},
         state
       ) do
     current_time = System.monotonic_time(:millisecond)
 
-    start_value = get_current_property_value(state, widget_id, property)
+    start_value = get_current_property_value(session, widget_id, property)
 
     interpolator = get_interpolator(start_value, end_value)
 
@@ -142,7 +145,8 @@ defmodule Drafter.Animation do
       duration: duration,
       easing: easing,
       on_complete: on_complete,
-      interpolator: interpolator
+      interpolator: interpolator,
+      session: session
     }
 
     new_animations = Map.put(state.animations, id, animation)
@@ -202,8 +206,10 @@ defmodule Drafter.Animation do
         anim.on_complete.()
       end
 
-      apply_animated_value(anim.widget_id, anim.property, anim.end_value)
+      apply_animated_value(anim.session, anim.widget_id, anim.property, anim.end_value)
     end)
+
+    Enum.each(active, fn {_id, anim} -> apply_frame(anim, current_time) end)
 
     completed_ids = Enum.map(completed, fn {id, _} -> id end) |> MapSet.new()
 
@@ -267,15 +273,18 @@ defmodule Drafter.Animation do
     {:noreply, state}
   end
 
-  defp get_current_property_value(_state, widget_id, property) do
-    case get_value_from_widget(widget_id, property) do
+  defp get_current_property_value(session, widget_id, property) do
+    case get_value_from_widget(session, widget_id, property) do
       {:ok, value} -> value
       :none -> default_value_for_property(property)
     end
   end
 
-  defp get_value_from_widget(widget_id, property) do
-    Drafter.AppRegistry.send_to_loop({:get_animated_property, widget_id, property, self()})
+  defp get_value_from_widget(session, widget_id, property) do
+    Drafter.AppRegistry.send_to_loop(
+      session,
+      {:get_animated_property, widget_id, property, self()}
+    )
 
     receive do
       {:animated_property, ^widget_id, ^property, value} -> {:ok, value}
@@ -438,7 +447,16 @@ defmodule Drafter.Animation do
     if progress >= 1.0, do: end_val, else: nil
   end
 
-  defp apply_animated_value(widget_id, property, value) do
-    Drafter.AppRegistry.send_to_loop({:apply_animation, widget_id, property, value})
+  defp apply_frame(anim, current_time) do
+    progress = calculate_progress(anim, current_time)
+
+    case interpolate(anim, progress) do
+      nil -> :ok
+      value -> apply_animated_value(anim.session, anim.widget_id, anim.property, value)
+    end
+  end
+
+  defp apply_animated_value(session, widget_id, property, value) do
+    Drafter.AppRegistry.send_to_loop(session, {:apply_animation, widget_id, property, value})
   end
 end

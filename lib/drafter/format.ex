@@ -1,16 +1,41 @@
 defmodule Drafter.Format do
   @moduledoc """
-  Number formatting utilities that produce strings suitable for the `digits` widget.
+  Number formatting that produces strings suitable for the `digits` widget.
 
-  ## Usage
+  ## Examples
 
-      digits(Drafter.Format.compact(12_000))        # "12k"
-      digits(Drafter.Format.compact(1_500_000))     # "1.5M"
-      digits(Drafter.Format.bytes(1_048_576))       # "1MB"
-      digits(Drafter.Format.percent(0.42, as_ratio: true))  # "42%"
-      digits(Drafter.Format.percent(99.5, decimals: 1))     # "99.5%"
+      iex> Drafter.Format.compact(12_000)
+      "12k"
+
+      iex> Drafter.Format.bytes(1_048_576)
+      "1MB"
+
+      iex> Drafter.Format.percent(0.42, as_ratio: true)
+      "42%"
+
   """
 
+  @doc """
+  Abbreviates a number with a magnitude suffix: `k`, `M`, `B`, or `T`.
+
+  Values below 1000 carry no suffix. A fractional result keeps one decimal
+  place.
+
+  ## Examples
+
+      iex> Drafter.Format.compact(999)
+      "999"
+
+      iex> Drafter.Format.compact(12_000)
+      "12k"
+
+      iex> Drafter.Format.compact(1_500_000)
+      "1.5M"
+
+      iex> Drafter.Format.compact(-2_400)
+      "-2.4k"
+
+  """
   @spec compact(number()) :: String.t()
   def compact(value) when is_number(value) do
     abs_val = abs(value)
@@ -24,6 +49,23 @@ defmodule Drafter.Format do
     end
   end
 
+  @doc """
+  Formats a byte count with a binary unit: `B`, `KB`, `MB`, `GB`, or `TB`.
+
+  Units are powers of 1024.
+
+  ## Examples
+
+      iex> Drafter.Format.bytes(512)
+      "512B"
+
+      iex> Drafter.Format.bytes(1_536)
+      "1.5KB"
+
+      iex> Drafter.Format.bytes(1_048_576)
+      "1MB"
+
+  """
   @spec bytes(number()) :: String.t()
   def bytes(value) when is_number(value) do
     abs_val = abs(value)
@@ -37,6 +79,27 @@ defmodule Drafter.Format do
     end
   end
 
+  @doc """
+  Formats a number as a percentage.
+
+  ## Options
+
+    * `:decimals` - decimal places to keep (default `0`)
+    * `:as_ratio` - treat the value as a `0..1` ratio and multiply it by 100
+      (default `false`)
+
+  ## Examples
+
+      iex> Drafter.Format.percent(7)
+      "7%"
+
+      iex> Drafter.Format.percent(99.5, decimals: 1)
+      "99.5%"
+
+      iex> Drafter.Format.percent(0.42, as_ratio: true)
+      "42%"
+
+  """
   @spec percent(number()) :: String.t()
   @spec percent(number(), keyword()) :: String.t()
   def percent(value, opts \\ []) when is_number(value) do

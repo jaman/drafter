@@ -66,7 +66,12 @@ defmodule Drafter.Widget.Label do
     variant_classes = if state.variant != :default, do: [state.variant], else: []
     classes = variant_classes ++ (state.classes || [])
     computed_opts = [classes: classes, style: state.style]
-    computed_opts = if state.app_module, do: Keyword.put(computed_opts, :app_module, state.app_module), else: computed_opts
+
+    computed_opts =
+      if state.app_module,
+        do: Keyword.put(computed_opts, :app_module, state.app_module),
+        else: computed_opts
+
     computed = Computed.for_widget(:label, state, computed_opts)
     segment_style = Computed.to_segment_style(computed)
 
@@ -102,6 +107,7 @@ defmodule Drafter.Widget.Label do
 
   def from_component_opts(text, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+
     %{
       text: text,
       style: Keyword.get(opts, :style, %{}),

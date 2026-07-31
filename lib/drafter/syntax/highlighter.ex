@@ -1,7 +1,8 @@
 defmodule Drafter.Syntax.Highlighter do
   @moduledoc false
 
-  @type capture :: {pos_integer(), non_neg_integer(), pos_integer(), non_neg_integer(), String.t()}
+  @type capture ::
+          {pos_integer(), non_neg_integer(), pos_integer(), non_neg_integer(), String.t()}
 
   @callback highlight(source :: String.t(), language :: atom()) :: [capture()]
 
@@ -19,13 +20,19 @@ defmodule Drafter.Syntax.Highlighter do
     most_specific_first =
       count
       |> Range.new(1, -1)
-      |> Enum.map(fn n ->
+      |> Enum.flat_map(fn n ->
         parts
         |> Enum.take(n)
         |> Enum.join("_")
-        |> String.to_atom()
+        |> existing_atom()
       end)
 
     most_specific_first ++ [:default]
+  end
+
+  defp existing_atom(name) do
+    [String.to_existing_atom(name)]
+  rescue
+    ArgumentError -> []
   end
 end

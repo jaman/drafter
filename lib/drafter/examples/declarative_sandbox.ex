@@ -23,23 +23,17 @@ defmodule Drafter.Examples.DeclarativeSandbox do
   end
 
   def on_ready(state) do
-    # App is ready - initial focus should be set by widget hierarchy
     state
   end
 
   def render(state) do
     horizontal([
-      # Left panel - Theme selector
       vertical([
         label("🐟 Theme Selector"),
         theme_selector()
       ]),
-
-      # Right panel - Widget showcase
       vertical([
         label("TUI Declarative Sandbox"),
-
-        # Button showcase section
         label("Buttons:"),
         horizontal([
           button("Primary (#{state.button_clicks.primary})",
@@ -55,8 +49,6 @@ defmodule Drafter.Examples.DeclarativeSandbox do
             on_click: :warning_clicked
           )
         ]),
-
-        # Form controls section
         label("Form Controls:"),
         horizontal([
           checkbox("Enable Feature",
@@ -68,8 +60,6 @@ defmodule Drafter.Examples.DeclarativeSandbox do
             on_change: :checkbox2_changed
           )
         ]),
-
-        # Text input section
         label("Text Input:"),
         text_input(
           value: state.text_input_value,
@@ -77,8 +67,6 @@ defmodule Drafter.Examples.DeclarativeSandbox do
           on_change: :text_changed,
           on_submit: :text_submitted
         ),
-
-        # DataTable showcase section
         label("DataTable Demo:"),
         data_table(
           columns: [
@@ -108,8 +96,6 @@ defmodule Drafter.Examples.DeclarativeSandbox do
           on_select: :user_selected,
           on_sort: :data_sorted
         ),
-
-        # Status display
         label("Status: #{if state.feature_enabled, do: "Enabled", else: "Disabled"}"),
         label(
           if state.selected_user do
@@ -179,7 +165,6 @@ defmodule Drafter.Examples.DeclarativeSandbox do
   end
 
   defp generate_sample_data do
-    # Use deterministic seed to prevent random data changes on re-render
     :rand.seed(:exsss, {1, 2, 3})
 
     departments = ["Engineering", "Sales", "Marketing", "HR", "Finance", "Operations"]
@@ -250,7 +235,6 @@ defmodule Drafter.Examples.DeclarativeSandbox do
       end)
       |> Enum.sort_by(& &1.name)
 
-    # Reset random seed to system time to not affect other random operations
     :rand.seed(:exsss)
 
     data

@@ -9,7 +9,8 @@ defmodule Drafter.WidgetHierarchy.Focus do
     focus_widget(hierarchy, widget_id, :down)
   end
 
-  @spec focus_widget(WidgetHierarchy.t(), WidgetHierarchy.widget_id(), :up | :down) :: WidgetHierarchy.t()
+  @spec focus_widget(WidgetHierarchy.t(), WidgetHierarchy.widget_id(), :up | :down) ::
+          WidgetHierarchy.t()
   def focus_widget(hierarchy, widget_id, direction) do
     if Map.has_key?(hierarchy.widgets, widget_id) and hierarchy.focused_widget != widget_id do
       updated_hierarchy =
@@ -20,7 +21,8 @@ defmodule Drafter.WidgetHierarchy.Focus do
           hierarchy
         end
 
-      {final_hierarchy, _} = EventRouter.handle_widget_event(updated_hierarchy, widget_id, {:focus})
+      {final_hierarchy, _} =
+        EventRouter.handle_widget_event(updated_hierarchy, widget_id, {:focus})
 
       final_hierarchy = scroll_widget_into_view(final_hierarchy, widget_id, direction)
 
@@ -47,7 +49,10 @@ defmodule Drafter.WidgetHierarchy.Focus do
          true <- not is_nil(scroll_state) do
       viewport = scroll_info.viewport_rect
       scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
-      new_scroll_y = calculate_visible_scroll_y(widget_rect, viewport, scroll_y, scroll_info.content_height)
+
+      new_scroll_y =
+        calculate_visible_scroll_y(widget_rect, viewport, scroll_y, scroll_info.content_height)
+
       apply_scroll_y(hierarchy, scroll_parent_id, scroll_y, new_scroll_y)
     else
       _ -> hierarchy
@@ -160,11 +165,18 @@ defmodule Drafter.WidgetHierarchy.Focus do
   end
 
   defp classify_arrow_result(result, hierarchy, widget_info) do
-    if widget_traps_arrows?(widget_info), do: {:handled, result}, else: classify_untrapped(result, hierarchy)
+    if widget_traps_arrows?(widget_info),
+      do: {:handled, result},
+      else: classify_untrapped(result, hierarchy)
   end
 
-  defp classify_untrapped({new_hierarchy, []}, hierarchy) when new_hierarchy.widgets == hierarchy.widgets,
-    do: :not_handled
+  defp classify_untrapped({new_hierarchy, []} = result, hierarchy) do
+    if new_hierarchy.event_consumed or new_hierarchy.widgets != hierarchy.widgets do
+      {:handled, result}
+    else
+      :not_handled
+    end
+  end
 
   defp classify_untrapped(result, _hierarchy), do: {:handled, result}
 
@@ -189,12 +201,27 @@ defmodule Drafter.WidgetHierarchy.Focus do
 
   def navigate_by_arrow(hierarchy, focused_id, focusable_widgets, direction) do
     case Map.get(hierarchy.widget_rects, focused_id) do
-      nil -> {hierarchy, []}
-      focused_rect -> navigate_by_arrow_from_rect(hierarchy, focused_id, focusable_widgets, direction, focused_rect)
+      nil ->
+        {hierarchy, []}
+
+      focused_rect ->
+        navigate_by_arrow_from_rect(
+          hierarchy,
+          focused_id,
+          focusable_widgets,
+          direction,
+          focused_rect
+        )
     end
   end
 
-  def navigate_by_arrow_from_rect(hierarchy, focused_id, focusable_widgets, direction, focused_rect) do
+  def navigate_by_arrow_from_rect(
+        hierarchy,
+        focused_id,
+        focusable_widgets,
+        direction,
+        focused_rect
+      ) do
     focused_point = %{x: focused_rect.x, y: focused_rect.y}
 
     candidates =
@@ -213,29 +240,43 @@ defmodule Drafter.WidgetHierarchy.Focus do
   def find_arrow_target(candidates, focused_point, :up) do
     candidates
     |> Enum.filter(fn {_, _, pt} -> pt.y < focused_point.y end)
-    |> Enum.min_by(fn {_, _, pt} -> {focused_point.y - pt.y, abs(pt.x - focused_point.x)} end, fn -> nil end)
+    |> Enum.min_by(
+      fn {_, _, pt} -> {focused_point.y - pt.y, abs(pt.x - focused_point.x)} end,
+      fn -> nil end
+    )
   end
 
   def find_arrow_target(candidates, focused_point, :down) do
     candidates
     |> Enum.filter(fn {_, _, pt} -> pt.y > focused_point.y end)
-    |> Enum.min_by(fn {_, _, pt} -> {pt.y - focused_point.y, abs(pt.x - focused_point.x)} end, fn -> nil end)
+    |> Enum.min_by(
+      fn {_, _, pt} -> {pt.y - focused_point.y, abs(pt.x - focused_point.x)} end,
+      fn -> nil end
+    )
   end
 
   def find_arrow_target(candidates, focused_point, :left) do
     candidates
     |> Enum.filter(fn {_, _, pt} -> pt.x < focused_point.x end)
-    |> Enum.min_by(fn {_, _, pt} -> {focused_point.x - pt.x, abs(pt.y - focused_point.y)} end, fn -> nil end)
+    |> Enum.min_by(
+      fn {_, _, pt} -> {focused_point.x - pt.x, abs(pt.y - focused_point.y)} end,
+      fn -> nil end
+    )
   end
 
   def find_arrow_target(candidates, focused_point, :right) do
     candidates
     |> Enum.filter(fn {_, _, pt} -> pt.x > focused_point.x end)
-    |> Enum.min_by(fn {_, _, pt} -> {pt.x - focused_point.x, abs(pt.y - focused_point.y)} end, fn -> nil end)
+    |> Enum.min_by(
+      fn {_, _, pt} -> {pt.x - focused_point.x, abs(pt.y - focused_point.y)} end,
+      fn -> nil end
+    )
   end
 
   def focus_arrow_target(hierarchy, nil), do: {hierarchy, []}
-  def focus_arrow_target(hierarchy, {widget_id, _rect, _pt}), do: {focus_widget(hierarchy, widget_id, :down), []}
+
+  def focus_arrow_target(hierarchy, {widget_id, _rect, _pt}),
+    do: {focus_widget(hierarchy, widget_id, :down), []}
 
   def get_focusable_widgets(hierarchy) do
     hidden = Map.get(hierarchy, :hidden_widgets, MapSet.new())

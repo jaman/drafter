@@ -134,7 +134,8 @@ defmodule Drafter.Widget.CheckboxTest do
       tree_true = {:layout, :vertical, [{:checkbox, "Option", [id: :cb4, bind: :flag]}], []}
       hierarchy = ComponentRenderer.render_tree(tree_true, rect, theme, %{flag: true})
 
-      hierarchy2 = ComponentRenderer.render_tree(tree_true, rect, theme, %{flag: false}, hierarchy)
+      hierarchy2 =
+        ComponentRenderer.render_tree(tree_true, rect, theme, %{flag: false}, hierarchy)
 
       widget_state = Drafter.WidgetHierarchy.get_widget_state(hierarchy2, :cb4)
       assert widget_state.checked == false

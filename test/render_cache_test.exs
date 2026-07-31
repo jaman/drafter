@@ -10,7 +10,8 @@ defmodule Drafter.RenderCacheTest do
     end
 
     test "returns {false, nil} for unrelated actions" do
-      assert {false, nil} = RenderCache.extract_layout_impact([:some_action, {:app_callback, :foo, :bar}])
+      assert {false, nil} =
+               RenderCache.extract_layout_impact([:some_action, {:app_callback, :foo, :bar}])
     end
 
     test "matches bare :widget_layout_needed atom with :all direction" do
@@ -71,7 +72,9 @@ defmodule Drafter.RenderCacheTest do
     test "different strips produce different fingerprint" do
       strip_a = Strip.from_text("hello")
       strip_b = Strip.from_text("world")
-      refute RenderCache.strips_fingerprint([strip_a]) == RenderCache.strips_fingerprint([strip_b])
+
+      refute RenderCache.strips_fingerprint([strip_a]) ==
+               RenderCache.strips_fingerprint([strip_b])
     end
   end
 end

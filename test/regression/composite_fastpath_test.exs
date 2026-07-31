@@ -9,7 +9,14 @@ defmodule Drafter.Regression.CompositeFastpathTest do
 
   test "a full-width opaque layer fully replaces the canvas and renders intact" do
     viewport = %{width: 10, height: 1}
-    bg = layer(:bg, [Strip.new([Segment.new("XXXXXXXXXX", %{fg: {1, 1, 1}})])], %{x: 0, y: 0, width: 10, height: 1}, 0)
+
+    bg =
+      layer(
+        :bg,
+        [Strip.new([Segment.new("XXXXXXXXXX", %{fg: {1, 1, 1}})])],
+        %{x: 0, y: 0, width: 10, height: 1},
+        0
+      )
 
     fg_strip =
       Strip.new([
@@ -35,8 +42,22 @@ defmodule Drafter.Regression.CompositeFastpathTest do
 
   test "partial-width overlay still composites the underlying canvas through" do
     viewport = %{width: 10, height: 1}
-    bg = layer(:bg, [Strip.new([Segment.new("..........", %{fg: {5, 5, 5}})])], %{x: 0, y: 0, width: 10, height: 1}, 0)
-    fg = layer(:fg, [Strip.new([Segment.new("MID", %{fg: {255, 0, 0}})])], %{x: 3, y: 0, width: 3, height: 1}, 5)
+
+    bg =
+      layer(
+        :bg,
+        [Strip.new([Segment.new("..........", %{fg: {5, 5, 5}})])],
+        %{x: 0, y: 0, width: 10, height: 1},
+        0
+      )
+
+    fg =
+      layer(
+        :fg,
+        [Strip.new([Segment.new("MID", %{fg: {255, 0, 0}})])],
+        %{x: 3, y: 0, width: 3, height: 1},
+        5
+      )
 
     [row] = LayerCompositor.composite([bg, fg], viewport)
     assert Strip.to_plain_text(row) == "...MID...."

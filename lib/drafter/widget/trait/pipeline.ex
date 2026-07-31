@@ -45,7 +45,12 @@ defmodule Drafter.Widget.Trait.Pipeline do
   defp dispatch_trait_event(trait_mod, event, acc_state) do
     if function_exported?(trait_mod, :handle_event, 3) do
       trait_state = extract_trait_state(acc_state, trait_mod)
-      apply_trait_result(trait_mod, trait_mod.handle_event(event, trait_state, acc_state), acc_state)
+
+      apply_trait_result(
+        trait_mod,
+        trait_mod.handle_event(event, trait_state, acc_state),
+        acc_state
+      )
     else
       {:cont, {acc_state, false}}
     end

@@ -78,7 +78,7 @@ defmodule Drafter.Widget.Log do
     if file_path && File.exists?(file_path) do
       build_file_index(initial_state, file_path)
     else
-      lines = Map.get(props, :lines, []) |> Enum.take(max_lines)
+      lines = Map.get(props, :lines, []) |> Enum.take(-max_lines)
       %{initial_state | lines: lines, total_lines: length(lines)}
     end
   end
@@ -140,9 +140,8 @@ defmodule Drafter.Widget.Log do
   end
 
   @impl Drafter.Widget
-  def apply_data_buffer(state, buffer, rect) do
-    lines = Drafter.RingBuffer.last_n(buffer, rect.height)
-    %{state | lines: lines}
+  def apply_data_buffer(state, buffer, _rect) do
+    %{state | lines: Drafter.RingBuffer.last_n(buffer, state.max_lines)}
   end
 
   defp ensure_mounted(state) do
@@ -172,12 +171,16 @@ defmodule Drafter.Widget.Log do
       Enum.flat_map(visible_lines, fn line ->
         line
         |> wrap_line(rect.width, state.wrap)
-        |> Enum.map(fn wrapped_line -> line_to_strip(wrapped_line, rect.width, state.highlight, line_style) end)
+        |> Enum.map(fn wrapped_line ->
+          line_to_strip(wrapped_line, rect.width, state.highlight, line_style)
+        end)
       end)
 
     padding_needed = max(0, rect.height - length(strips))
     empty_line = String.duplicate(" ", rect.width)
-    padding_strips = List.duplicate(Strip.new([Segment.new(empty_line, line_style)]), padding_needed)
+
+    padding_strips =
+      List.duplicate(Strip.new([Segment.new(empty_line, line_style)]), padding_needed)
 
     Enum.take(strips ++ padding_strips, rect.height)
   end
@@ -210,7 +213,11 @@ defmodule Drafter.Widget.Log do
         |> wrap_line(inner_width, state.wrap)
         |> Enum.map(fn wrapped_line ->
           segments = line_to_strip(wrapped_line, inner_width, state.highlight, line_style)
-          Strip.new([Segment.new("│", border_style)] ++ segments.segments ++ [Segment.new("│", border_style)])
+
+          Strip.new(
+            [Segment.new("│", border_style)] ++
+              segments.segments ++ [Segment.new("│", border_style)]
+          )
         end)
       end)
 
@@ -351,7 +358,7 @@ defmodule Drafter.Widget.Log do
       if new_lines && new_lines != state.lines do
         %{
           new_state
-          | lines: new_lines |> Enum.take(new_state.max_lines),
+          | lines: new_lines |> Enum.take(-new_state.max_lines),
             total_lines: length(new_lines)
         }
       else

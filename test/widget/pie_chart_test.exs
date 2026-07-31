@@ -28,12 +28,13 @@ defmodule Drafter.Widget.PieChartTest do
     end
 
     test "mounts with custom options" do
-      state = PieChart.mount(%{
-        data: [{"X", 10}],
-        show_legend: false,
-        show_percentages: false,
-        colors: [{255, 0, 0}]
-      })
+      state =
+        PieChart.mount(%{
+          data: [{"X", 10}],
+          show_legend: false,
+          show_percentages: false,
+          colors: [{255, 0, 0}]
+        })
 
       assert state.show_legend == false
       assert state.show_percentages == false
@@ -78,10 +79,12 @@ defmodule Drafter.Widget.PieChartTest do
     end
 
     test "renders without percentages" do
-      state = PieChart.mount(%{
-        data: [{"A", 30}, {"B", 70}],
-        show_percentages: false
-      })
+      state =
+        PieChart.mount(%{
+          data: [{"A", 30}, {"B", 70}],
+          show_percentages: false
+        })
+
       rect = %{width: 40, height: 10}
       strips = PieChart.render(state, rect)
       assert length(strips) == 10
@@ -175,7 +178,9 @@ defmodule Drafter.Widget.PieChartTest do
     end
 
     test "applies custom options" do
-      props = PieChart.from_component_opts([{"A", 1}], show_legend: false, show_percentages: false)
+      props =
+        PieChart.from_component_opts([{"A", 1}], show_legend: false, show_percentages: false)
+
       assert props.show_legend == false
       assert props.show_percentages == false
     end

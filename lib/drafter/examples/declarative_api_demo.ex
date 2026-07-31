@@ -4,33 +4,40 @@ defmodule Drafter.Examples.DeclarativeApiDemo do
   import Drafter.App
 
   def mount(_props) do
-    line_data = for i <- 0..199 do
-      x = i * 0.1
-      :math.sin(x) * 30 + 50 + :math.cos(x * 2) * 20 + :rand.uniform() * 5
-    end
+    line_data =
+      for i <- 0..199 do
+        x = i * 0.1
+        :math.sin(x) * 30 + 50 + :math.cos(x * 2) * 20 + :rand.uniform() * 5
+      end
 
-    area_data = for i <- 0..199 do
-      x = i * 0.05
-      :math.cos(x) * 40 + 60 + :rand.uniform() * 8
-    end
+    area_data =
+      for i <- 0..199 do
+        x = i * 0.05
+        :math.cos(x) * 40 + 60 + :rand.uniform() * 8
+      end
 
-    bar_data = for _i <- 0..99 do
-      30 + :rand.uniform(70)
-    end
+    bar_data =
+      for _i <- 0..99 do
+        30 + :rand.uniform(70)
+      end
 
-    scatter_data = for _ <- 0..149 do
-      {:rand.uniform(100), :rand.uniform(100)}
-    end
+    scatter_data =
+      for _ <- 0..149 do
+        {:rand.uniform(100), :rand.uniform(100)}
+      end
 
-    candlestick_data = Enum.reduce(1..100, {[], 50.0}, fn _i, {candles, last_close} ->
-      open = last_close
-      close = max(10, min(90, last_close + (:rand.uniform() - 0.5) * 10))
-      high = max(open, close) + :rand.uniform() * 5
-      low = min(open, close) - :rand.uniform() * 5
+    candlestick_data =
+      Enum.reduce(1..100, {[], 50.0}, fn _i, {candles, last_close} ->
+        open = last_close
+        close = max(10, min(90, last_close + (:rand.uniform() - 0.5) * 10))
+        high = max(open, close) + :rand.uniform() * 5
+        low = min(open, close) - :rand.uniform() * 5
 
-      candle = %{open: open, high: high, low: low, close: close}
-      {[candle | candles], close}
-    end) |> elem(0) |> Enum.reverse()
+        candle = %{open: open, high: high, low: low, close: close}
+        {[candle | candles], close}
+      end)
+      |> elem(0)
+      |> Enum.reverse()
 
     %{
       line_data: line_data,
@@ -46,7 +53,9 @@ defmodule Drafter.Examples.DeclarativeApiDemo do
       header("Declarative Widget API Demo", show_clock: true),
       scrollable(
         [
-          label("Declarative Widget Event Handling API", style: %{fg: {100, 150, 255}, bold: true}),
+          label("Declarative Widget Event Handling API",
+            style: %{fg: {100, 150, 255}, bold: true}
+          ),
           label(""),
           label("Chart widget declared with:", style: %{fg: {200, 200, 200}}),
           label("  use Drafter.Widget, handles: [:scroll, :keyboard], focusable: true",

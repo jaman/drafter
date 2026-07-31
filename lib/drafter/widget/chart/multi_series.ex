@@ -6,7 +6,12 @@ defmodule Drafter.Widget.Chart.MultiSeries do
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Widget.Chart.{Line, Pixels, Step}
 
-  @multi_series_default_colors [{255, 100, 100}, {100, 255, 100}, {100, 100, 255}, {255, 255, 100}]
+  @multi_series_default_colors [
+    {255, 100, 100},
+    {100, 255, 100},
+    {100, 100, 255},
+    {255, 255, 100}
+  ]
 
   def render(data_series, width, height, opts \\ []) do
     bg = Keyword.get(opts, :bg, {20, 20, 30})
@@ -31,7 +36,15 @@ defmodule Drafter.Widget.Chart.MultiSeries do
 
         cond do
           raw_data ->
-            series_to_raw_pixels(series, color, min_val, range, pixel_width, pixel_height, thickness)
+            series_to_raw_pixels(
+              series,
+              color,
+              min_val,
+              range,
+              pixel_width,
+              pixel_height,
+              thickness
+            )
 
           step ->
             series_to_step_pixels(series, color, min_val, range, pixel_height, thickness)
@@ -46,9 +59,9 @@ defmodule Drafter.Widget.Chart.MultiSeries do
 
     pixels_by_char = Enum.group_by(all_pixels, fn {{cx, cy}, _, _} -> {cx, cy} end)
 
-    for row <- 0..(height - 1) do
+    for row <- 0..(height - 1)//1 do
       segments =
-        for col <- 0..(width - 1) do
+        for col <- 0..(width - 1)//1 do
           multi_series_segment(Map.get(pixels_by_char, {col, row}, []), hd(colors), bg)
         end
 
@@ -121,7 +134,9 @@ defmodule Drafter.Widget.Chart.MultiSeries do
         {x, y}
       end)
 
-    line_pixels = if smooth, do: Line.catmull_rom_lines(points), else: Line.bresenham_lines(points)
+    line_pixels =
+      if smooth, do: Line.catmull_rom_lines(points), else: Line.bresenham_lines(points)
+
     thickened = apply_thickness(line_pixels, thickness)
 
     Enum.map(thickened, fn {x, y} ->

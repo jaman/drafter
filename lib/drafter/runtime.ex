@@ -12,8 +12,7 @@ defmodule Drafter.Runtime do
   (`init`/`update`/`subscriptions`) — implement this same behaviour, so an app opts in
   with `use Drafter.App, runtime: MyBackend` without the loop needing to know the style.
 
-  `render/1` is intentionally not part of this behaviour: every backend renders an app
-  state to a widget tree the same way, so the renderer calls the app's `render/1`
+  `render/1` is not part of this behaviour; the renderer calls the app's `render/1`
   directly.
   """
 
@@ -67,6 +66,18 @@ defmodule Drafter.Runtime do
       Drafter.Runtime.Callback
     end
   end
+
+  @doc """
+  The mount props carried by `opts`, as a map.
+
+  Every entry point that starts an app — `Drafter.run/2`, a pushed nested session, and
+  `Drafter.run_session/3` behind the ssh and telnet transports — takes them under the
+  single `:props` key, so an app's `mount/1` is handed the same map however it was
+  started. Absent props are an empty map, never the surrounding options.
+  """
+  @spec mount_props(keyword() | map()) :: map()
+  def mount_props(opts) when is_list(opts), do: opts |> Keyword.get(:props, %{}) |> Map.new()
+  def mount_props(%{} = props), do: props
 
   @doc "Normalize a backend shorthand (`:callback`/`:reducer`) or module to a backend module."
   @spec normalize(atom()) :: module()

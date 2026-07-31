@@ -290,7 +290,8 @@ defmodule Drafter.Widget.Chart.Pixel do
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
-  defp build_bar(values, spec, w, h) do
+  defp build_bar(all_values, spec, w, h) do
+    values = visible_tail(all_values, w, 1)
     {lo, hi} = range(values, spec)
     band = max(1, div(w, length(values)))
     base_y = round(y_px(clamp(0.0, lo, hi), lo, hi, h))
@@ -317,11 +318,22 @@ defmodule Drafter.Widget.Chart.Pixel do
     end)
   end
 
-  defp build_candlestick(candles, w, h) do
+  @min_candle_band 3
+
+  defp visible_tail(items, w, min_band) do
+    capacity = max(1, div(w, min_band))
+
+    if length(items) <= capacity, do: items, else: Enum.take(items, -capacity)
+  end
+
+  defp visible_candles(candles, w), do: visible_tail(candles, w, @min_candle_band)
+
+  defp build_candlestick(all_candles, w, h) do
+    candles = visible_candles(all_candles, w)
     highs = Enum.map(candles, fn {_o, high, _l, _c} -> high end)
     lows = Enum.map(candles, fn {_o, _h, low, _c} -> low end)
     {lo, hi} = bounds(highs ++ lows)
-    band = max(3, div(w, length(candles)))
+    band = max(@min_candle_band, div(w, length(candles)))
 
     candles
     |> Enum.with_index()
@@ -346,7 +358,7 @@ defmodule Drafter.Widget.Chart.Pixel do
     cy = h / 2
     radius = min(w, h) / 2 - 1
 
-    for y <- 0..(h - 1), x <- 0..(w - 1), reduce: Raster.new(w, h) do
+    for y <- 0..(h - 1)//1, x <- 0..(w - 1)//1, reduce: Raster.new(w, h) do
       raster ->
         dx = x - cx
         dy = y - cy
@@ -387,8 +399,9 @@ defmodule Drafter.Widget.Chart.Pixel do
     inner = outer * 0.74
     threshold = :math.pi() * (1 - clamp(value * 1.0, 0.0, 1.0))
 
-    for y <- 0..(h - 1), x <- 0..(w - 1), reduce: Raster.new(w, h) do
-      raster -> paint_gauge_pixel(raster, {x, y}, {cx, cy}, {inner, outer}, threshold, fill, track)
+    for y <- 0..(h - 1)//1, x <- 0..(w - 1)//1, reduce: Raster.new(w, h) do
+      raster ->
+        paint_gauge_pixel(raster, {x, y}, {cx, cy}, {inner, outer}, threshold, fill, track)
     end
   end
 
@@ -412,7 +425,9 @@ defmodule Drafter.Widget.Chart.Pixel do
     series
     |> Enum.with_index()
     |> Enum.reduce(Raster.new(w, h), fn {values, si}, raster ->
-      points = values |> float_points(w, h, lo, hi) |> Enum.map(fn {x, y} -> {round(x), round(y)} end)
+      points =
+        values |> float_points(w, h, lo, hi) |> Enum.map(fn {x, y} -> {round(x), round(y)} end)
+
       Draw.polyline(raster, points, color_at(colors, si))
     end)
   end
@@ -437,14 +452,20 @@ defmodule Drafter.Widget.Chart.Pixel do
   defp build_stacked_area(series, spec, w, h) do
     colors = palette_colors(spec)
     groups = series |> Enum.map(&length/1) |> Enum.max()
-    totals = for g <- 0..(groups - 1), do: Enum.reduce(series, 0, &(&2 + (Enum.at(&1, g) || 0)))
+
+    totals =
+      for g <- 0..(groups - 1)//1, do: Enum.reduce(series, 0, &(&2 + (Enum.at(&1, g) || 0)))
+
     hi = Enum.max([1 | totals])
 
     {raster, _cum} =
       series
       |> Enum.with_index()
-      |> Enum.reduce({Raster.new(w, h), List.duplicate(0.0, groups)}, fn {values, si}, {acc, cum} ->
-        new_cum = Enum.map(0..(groups - 1), fn g -> Enum.at(cum, g) + (Enum.at(values, g) || 0) end)
+      |> Enum.reduce({Raster.new(w, h), List.duplicate(0.0, groups)}, fn {values, si},
+                                                                         {acc, cum} ->
+        new_cum =
+          Enum.map(0..(groups - 1)//1, fn g -> Enum.at(cum, g) + (Enum.at(values, g) || 0) end)
+
         top = stack_points(new_cum, groups, w, h, hi)
         bottom = stack_points(cum, groups, w, h, hi)
         {fill_band(acc, top, bottom, color_at(colors, si)), new_cum}
@@ -469,7 +490,12 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   defp fill_band_segment(raster, {xa, ta, ba}, {xb, tb, bb}, color) do
     Enum.reduce(xa..xb, raster, fn col, acc ->
-      Draw.line(acc, {col, round(interp_y(xa, ta, xb, tb, col))}, {col, round(interp_y(xa, ba, xb, bb, col))}, color)
+      Draw.line(
+        acc,
+        {col, round(interp_y(xa, ta, xb, tb, col))},
+        {col, round(interp_y(xa, ba, xb, bb, col))},
+        color
+      )
     end)
   end
 
@@ -494,7 +520,9 @@ defmodule Drafter.Widget.Chart.Pixel do
     group_w = max(nseries, div(w, max(1, groups)))
     bar_w = max(1, div(group_w, nseries))
 
-    for group <- 0..(groups - 1), {values, si} <- Enum.with_index(series), reduce: Raster.new(w, h) do
+    for group <- 0..(groups - 1)//1,
+        {values, si} <- Enum.with_index(series),
+        reduce: Raster.new(w, h) do
       raster ->
         case Enum.at(values, group) do
           nil ->
@@ -512,11 +540,14 @@ defmodule Drafter.Widget.Chart.Pixel do
   defp build_grouped_bar(series, spec, w, h, :stacked) do
     colors = palette_colors(spec)
     groups = series |> Enum.map(&length/1) |> Enum.max()
-    totals = for g <- 0..(groups - 1), do: Enum.reduce(series, 0, &(&2 + (Enum.at(&1, g) || 0)))
+
+    totals =
+      for g <- 0..(groups - 1)//1, do: Enum.reduce(series, 0, &(&2 + (Enum.at(&1, g) || 0)))
+
     hi = Enum.max([1 | totals])
     band = max(1, div(w, max(1, groups)))
 
-    Enum.reduce(0..(groups - 1), Raster.new(w, h), fn group, base_raster ->
+    Enum.reduce(0..(groups - 1)//1, Raster.new(w, h), fn group, base_raster ->
       x0 = group * band
       x1 = min(w - 1, x0 + max(1, band - 1) - 1)
 
@@ -534,7 +565,8 @@ defmodule Drafter.Widget.Chart.Pixel do
     end)
   end
 
-  defp build_range_bar(pairs, spec, w, h) do
+  defp build_range_bar(all_pairs, spec, w, h) do
+    pairs = visible_tail(all_pairs, w, 1)
     {lo, hi} = bounds(Enum.flat_map(pairs, fn {l, r} -> [l, r] end))
     band = max(1, div(w, length(pairs)))
 
@@ -543,7 +575,13 @@ defmodule Drafter.Widget.Chart.Pixel do
     |> Enum.reduce(Raster.new(w, h), fn {{low, high}, index}, raster ->
       x0 = index * band
       x1 = min(w - 1, x0 + max(1, band - 1) - 1)
-      Draw.fill_rect(raster, {x0, round(y_px(high, lo, hi, h))}, {x1, round(y_px(low, lo, hi, h))}, spec.color)
+
+      Draw.fill_rect(
+        raster,
+        {x0, round(y_px(high, lo, hi, h))},
+        {x1, round(y_px(low, lo, hi, h))},
+        spec.color
+      )
     end)
   end
 
@@ -625,10 +663,17 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   defp classify(data) do
     cond do
-      not is_list(data) or data == [] -> :empty
-      value?(hd(data)) -> {:single, Enum.map(data, &to_value/1)}
-      value_list?(hd(data)) -> {:multi, data |> Enum.filter(&value_list?/1) |> Enum.map(&to_values/1)}
-      true -> :empty
+      not is_list(data) or data == [] ->
+        :empty
+
+      value?(hd(data)) ->
+        {:single, Enum.map(data, &to_value/1)}
+
+      value_list?(hd(data)) ->
+        {:multi, data |> Enum.filter(&value_list?/1) |> Enum.map(&to_values/1)}
+
+      true ->
+        :empty
     end
   end
 
@@ -648,16 +693,36 @@ defmodule Drafter.Widget.Chart.Pixel do
   defp number_list?([n | _]) when is_number(n), do: true
   defp number_list?(_other), do: false
 
-  defp scatter_series(data) do
+  defp scatter_series(data) when not is_list(data), do: :empty
+  defp scatter_series([]), do: :empty
+
+  defp scatter_series([first | _] = data) do
     cond do
-      not is_list(data) or data == [] -> :empty
-      point?(hd(data)) -> {:single, scatter_points(data)}
-      is_list(hd(data)) and Enum.any?(hd(data), &point?/1) -> {:multi, Enum.map(data, &scatter_points/1)}
+      point?(first) -> {:single, scatter_points(data)}
+      is_number(first) -> {:single, indexed_points(data)}
+      is_list(first) -> nested_series(first, data)
       true -> :empty
     end
   end
 
-  defp ranges(data) when is_list(data), do: data |> Enum.map(&range_pair/1) |> Enum.reject(&is_nil/1)
+  defp nested_series(first, data) do
+    cond do
+      Enum.any?(first, &point?/1) -> {:multi, Enum.map(data, &scatter_points/1)}
+      Enum.all?(first, &is_number/1) -> {:multi, Enum.map(data, &indexed_points/1)}
+      true -> :empty
+    end
+  end
+
+  defp indexed_points(values) do
+    values
+    |> Enum.filter(&is_number/1)
+    |> Enum.with_index()
+    |> Enum.map(fn {value, index} -> {index, value} end)
+  end
+
+  defp ranges(data) when is_list(data),
+    do: data |> Enum.map(&range_pair/1) |> Enum.reject(&is_nil/1)
+
   defp ranges(_data), do: []
 
   defp range_pair([lo, hi]) when is_number(lo) and is_number(hi), do: {lo, hi}
@@ -725,7 +790,8 @@ defmodule Drafter.Widget.Chart.Pixel do
     end)
   end
 
-  defp fade({r, g, b, a}, opacity), do: {round(r * opacity), round(g * opacity), round(b * opacity), a}
+  defp fade({r, g, b, a}, opacity),
+    do: {round(r * opacity), round(g * opacity), round(b * opacity), a}
 
   defp minmax2(a, b), do: {min(a, b), max(a, b)}
 
@@ -751,6 +817,7 @@ defmodule Drafter.Widget.Chart.Pixel do
     {round(40 + t * 200), round(70 + t * 60 - t * t * 50), round(150 - t * 110), 255}
   end
 
+  defp point_weight(%{weight: weight}), do: weight
   defp point_weight([_x, _y, weight | _]), do: weight
   defp point_weight({_x, _y, weight}), do: weight
   defp point_weight(_other), do: 1
@@ -780,13 +847,16 @@ defmodule Drafter.Widget.Chart.Pixel do
   defp scatter_points(_data), do: []
 
   defp point?([x, y | _]) when is_number(x) and is_number(y), do: true
+  defp point?(%{x: x, y: y}) when is_number(x) and is_number(y), do: true
   defp point?({x, y}) when is_number(x) and is_number(y), do: true
   defp point?({x, y, _w}) when is_number(x) and is_number(y), do: true
   defp point?(_other), do: false
 
+  defp point_x(%{x: x}), do: x
   defp point_x([x, _y | _]), do: x
   defp point_x({x, _y}), do: x
   defp point_x({x, _y, _w}), do: x
+  defp point_y(%{y: y}), do: y
   defp point_y([_x, y | _]), do: y
   defp point_y({_x, y}), do: y
   defp point_y({_x, y, _w}), do: y

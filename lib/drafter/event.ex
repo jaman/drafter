@@ -26,21 +26,22 @@ defmodule Drafter.Event do
   @type resize_info :: {width :: pos_integer(), height :: pos_integer()}
 
   @type t ::
-    {:key, key()} |
-    {:key, key(), modifiers()} |
-    {:mouse, %{action: mouse_action(), x: non_neg_integer(), y: non_neg_integer(), button: atom()}} |
-    {:resize, resize_info()} |
-    {:focus, widget_id :: term()} |
-    {:blur, widget_id :: term()} |
-    {:focus_in, widget_id :: term()} |
-    {:focus_out, widget_id :: term()} |
-    {:mount, widget_id :: term()} |
-    {:unmount, widget_id :: term()} |
-    {:show, widget_id :: term()} |
-    {:hide, widget_id :: term()} |
-    {:load, widget_id :: term()} |
-    {:timer, timer_id :: term()} |
-    {:custom, term()}
+          {:key, key()}
+          | {:key, key(), modifiers()}
+          | {:mouse,
+             %{action: mouse_action(), x: non_neg_integer(), y: non_neg_integer(), button: atom()}}
+          | {:resize, resize_info()}
+          | {:focus, widget_id :: term()}
+          | {:blur, widget_id :: term()}
+          | {:focus_in, widget_id :: term()}
+          | {:focus_out, widget_id :: term()}
+          | {:mount, widget_id :: term()}
+          | {:unmount, widget_id :: term()}
+          | {:show, widget_id :: term()}
+          | {:hide, widget_id :: term()}
+          | {:load, widget_id :: term()}
+          | {:timer, timer_id :: term()}
+          | {:custom, term()}
 
   @doc "Create a key event"
   @spec key(key(), modifiers()) :: t()

@@ -33,8 +33,11 @@ defmodule Drafter do
   """
 
   alias Drafter.{Compositor, Event, SkinManager, Terminal, ThemeManager}
+  alias Drafter.Runtime
   alias Drafter.Runtime.{AppLoop, Renderer}
+  alias Drafter.Session.Context
   alias Drafter.Session.SharedState
+  alias Drafter.Widget.Chart.Pixel
   alias Drafter.WidgetHierarchy
 
   alias Drafter.Widget.{
@@ -48,8 +51,6 @@ defmodule Drafter do
     Placeholder,
     Rule
   }
-
-  @scroll_debounce_ms 150
 
   @doc """
   Flat client entry point. `use Drafter` is equivalent to `use Drafter.App` plus the
@@ -76,6 +77,13 @@ defmodule Drafter do
   Start a TUI application.
 
   Options:
+    * `:props` - the map handed to the app's `mount/1`, `%{}` by default. The same key
+      works for a nested session and for `run_session/3` behind the ssh and telnet
+      transports, so an app receives the same map however it was started.
+    * `:clipboard` - `true` (default) lets `Drafter.Clipboard.copy/1` write to the
+      user's clipboard via OSC 52 and the local clipboard tool. `false` makes it a
+      no-op returning `{:error, :disabled}`, for apps that should never touch it.
+      Pasting is unaffected: that text comes from the user's own paste key.
     * `:scroll_optimization` - `true` (default) uses a fast render path during
       scroll gestures (`render_hierarchy` from ETS) and defers a full `render_app`
       until 150 ms after the last scroll event. Set to `false` to disable and
@@ -98,10 +106,12 @@ defmodule Drafter do
   @spec run(module(), keyword()) :: :ok | {:error, term()}
   def run(app_module, opts \\ []) when is_atom(app_module) do
     apply_render_mode(opts)
+    apply_clipboard_setting(opts)
 
     case Drafter.AppRegistry.whereis() do
       nil ->
         _ = Drafter.Logging.setup(opts)
+        Drafter.Trace.stamp_on_exit()
 
         mouse_hover = app_mouse_hover(app_module)
 
@@ -280,14 +290,20 @@ defmodule Drafter do
   end
 
   defp get_widget_value_via_loop(widget_id) do
-    Drafter.AppRegistry.send_to_loop({:get_widget_value, widget_id, self()})
+    case loop_local_hierarchy() do
+      :not_in_loop ->
+        ask_loop({:get_widget_value, widget_id, self()}, {:widget_value, widget_id}, nil)
 
-    receive do
-      {:widget_value, ^widget_id, value} -> value
-    after
-      100 -> nil
+      nil ->
+        nil
+
+      hierarchy ->
+        hierarchy |> WidgetHierarchy.get_widget_state(widget_id) |> extract_or_nil()
     end
   end
+
+  defp extract_or_nil(nil), do: nil
+  defp extract_or_nil(state), do: extract_widget_value(state)
 
   defp extract_widget_value(%{text: text}), do: text
   defp extract_widget_value(%{checked: checked}), do: checked
@@ -319,10 +335,8 @@ defmodule Drafter do
   @doc """
   Imperatively set a widget's value by its ID.
 
-  This is the discrete, on-demand counterpart to `get_widget_value/1`: the
-  client sets a widget's value at a specific moment (a click, a menu choice)
-  rather than mirroring state on every keystroke. The widget remains the owner
-  of its own state between these calls.
+  The counterpart to `get_widget_value/1`. The widget remains the owner of its own
+  state between these calls.
 
   Supported widgets:
 
@@ -380,12 +394,15 @@ defmodule Drafter do
   end
 
   defp get_widget_state_via_loop(widget_id) do
-    Drafter.AppRegistry.send_to_loop({:get_widget_state, widget_id, self()})
+    case loop_local_hierarchy() do
+      :not_in_loop ->
+        ask_loop({:get_widget_state, widget_id, self()}, {:widget_state, widget_id}, nil)
 
-    receive do
-      {:widget_state, ^widget_id, state} -> state
-    after
-      100 -> nil
+      nil ->
+        nil
+
+      hierarchy ->
+        WidgetHierarchy.get_widget_state(hierarchy, widget_id)
     end
   end
 
@@ -488,12 +505,28 @@ defmodule Drafter do
   """
   @spec query_one(String.t()) :: atom() | nil
   def query_one(selector) do
-    Drafter.AppRegistry.send_to_loop({:query_one, selector, self()})
+    case loop_local_hierarchy() do
+      :not_in_loop -> ask_loop({:query_one, selector, self()}, {:query_result, :one}, nil)
+      nil -> nil
+      hierarchy -> WidgetHierarchy.query_one(hierarchy, selector)
+    end
+  end
+
+  defp loop_local_hierarchy do
+    if self() == Drafter.AppRegistry.whereis() do
+      Process.get(:drafter_current_hierarchy)
+    else
+      :not_in_loop
+    end
+  end
+
+  defp ask_loop(request, {tag, subtag}, default) do
+    Drafter.AppRegistry.send_to_loop(request)
 
     receive do
-      {:query_result, :one, result} -> result
+      {^tag, ^subtag, result} -> result
     after
-      100 -> nil
+      100 -> default
     end
   end
 
@@ -504,12 +537,10 @@ defmodule Drafter do
   """
   @spec query_all(String.t()) :: [atom()]
   def query_all(selector) do
-    Drafter.AppRegistry.send_to_loop({:query_all, selector, self()})
-
-    receive do
-      {:query_result, :all, result} -> result
-    after
-      100 -> []
+    case loop_local_hierarchy() do
+      :not_in_loop -> ask_loop({:query_all, selector, self()}, {:query_result, :all}, [])
+      nil -> []
+      hierarchy -> WidgetHierarchy.query_all(hierarchy, selector)
     end
   end
 
@@ -519,12 +550,25 @@ defmodule Drafter do
   """
   @spec validate_widget(atom()) :: :ok | {:error, String.t()}
   def validate_widget(widget_id) do
-    Drafter.AppRegistry.send_to_loop({:validate_widget, widget_id, self()})
+    case loop_local_hierarchy() do
+      :not_in_loop ->
+        ask_loop({:validate_widget, widget_id, self()}, {:validation_result, widget_id}, :ok)
 
-    receive do
-      {:validation_result, ^widget_id, result} -> result
-    after
-      100 -> :ok
+      nil ->
+        :ok
+
+      hierarchy ->
+        {new_hierarchy, _} = WidgetHierarchy.send_event_to_widget(hierarchy, widget_id, :validate)
+        validation_result(WidgetHierarchy.get_widget_state(new_hierarchy, widget_id))
+    end
+  end
+
+  defp validation_result(nil), do: :ok
+
+  defp validation_result(state) do
+    case Map.get(state, :error) do
+      nil -> :ok
+      error -> {:error, error}
     end
   end
 
@@ -628,7 +672,7 @@ defmodule Drafter do
     {refresh_rate, opts} = Keyword.pop(opts, :refresh_rate)
     Process.put(:scroll_optimization, scroll_opt)
 
-    mount_props = Map.new(opts)
+    mount_props = Runtime.mount_props(opts)
     loop_opts = if refresh_rate, do: [refresh_rate: refresh_rate], else: []
 
     case mode do
@@ -640,441 +684,31 @@ defmodule Drafter do
   defp run_isolated_session(app_module, mount_props, opts) do
     _ = Drafter.Logging.setup()
 
-    app_state = app_module.mount(mount_props)
-
     {width, height} = Compositor.get_screen_size()
-    screen_rect = make_screen_rect(width, height)
 
-    {_, hierarchy} = Renderer.render_app(app_module, app_state, screen_rect)
-
-    ready_app_state = app_module.on_ready(app_state)
-    {_, hierarchy} = Renderer.render_app(app_module, ready_app_state, screen_rect, hierarchy)
-
-    AppLoop.enter_loop(app_module, ready_app_state, screen_rect, %{}, hierarchy, opts)
+    AppLoop.start(
+      app_module,
+      make_screen_rect(width, height),
+      Keyword.put(opts, :props, mount_props)
+    )
   end
 
   defp run_shared_session(app_module, mount_props, shared_state_pid) do
     _ = Drafter.Logging.setup()
 
     SharedState.subscribe(shared_state_pid)
+    AppLoop.share_state_with(shared_state_pid, mount_props)
 
-    app_state = SharedState.get_state(shared_state_pid)
-    app_state = Map.merge(app_state, mount_props)
+    app_state = shared_state_pid |> SharedState.get_state() |> Map.merge(mount_props)
 
     {width, height} = Compositor.get_screen_size()
     screen_rect = make_screen_rect(width, height)
 
     {_, hierarchy} = Renderer.render_app(app_module, app_state, screen_rect)
+    ready_app_state = Runtime.for_app(app_module).ready(app_module, app_state)
+    {_, hierarchy} = Renderer.render_app(app_module, ready_app_state, screen_rect, hierarchy)
 
-    ready_app_state =
-      if function_exported?(app_module, :on_ready, 1) do
-        app_module.on_ready(app_state)
-      else
-        app_state
-      end
-
-    shared_session_loop(
-      app_module,
-      ready_app_state,
-      screen_rect,
-      %{},
-      hierarchy,
-      shared_state_pid,
-      mount_props,
-      %{}
-    )
-  end
-
-  defp shared_session_loop(
-         app_module,
-         app_state,
-         screen_rect,
-         timers,
-         widget_hierarchy,
-         shared_state_pid,
-         mount_props,
-         local_bindings
-       ) do
-    receive do
-      {:tui_event, {:resize, {width, height}}} ->
-        new_screen_rect = make_screen_rect(width, height)
-        {_, new_hierarchy} = Renderer.render_app(app_module, app_state, new_screen_rect, widget_hierarchy)
-
-        shared_session_loop(
-          app_module,
-          app_state,
-          new_screen_rect,
-          timers,
-          new_hierarchy,
-          shared_state_pid,
-          mount_props,
-          local_bindings
-        )
-
-      {:tui_event, event} ->
-        case check_global_quit(event) do
-          :quit ->
-            cleanup_timers(timers)
-            WidgetHierarchy.stop_all_servers(widget_hierarchy)
-            :ok
-
-          :continue ->
-            ctx = %{
-              app_module: app_module,
-              screen_rect: screen_rect,
-              timers: timers,
-              shared_state_pid: shared_state_pid,
-              mount_props: mount_props
-            }
-
-            handle_shared_tui_event(ctx, event, app_state, widget_hierarchy, local_bindings)
-        end
-
-      {:bound_state_update, key, value} ->
-        new_bindings = Map.put(local_bindings, key, value)
-        new_app_state = Map.put(app_state, key, value)
-        {_, new_hierarchy} = Renderer.render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
-
-        shared_session_loop(
-          app_module,
-          new_app_state,
-          screen_rect,
-          timers,
-          new_hierarchy,
-          shared_state_pid,
-          mount_props,
-          new_bindings
-        )
-
-      {:app_event, callback, data} ->
-        {new_state, new_hier} =
-          dispatch_shared_callback(
-            app_module,
-            callback,
-            data,
-            app_state,
-            shared_state_pid,
-            widget_hierarchy,
-            screen_rect
-          )
-
-        {_, final_hier} = Renderer.render_app(app_module, new_state, screen_rect, new_hier)
-
-        shared_session_loop(
-          app_module,
-          new_state,
-          screen_rect,
-          timers,
-          final_hier,
-          shared_state_pid,
-          mount_props,
-          local_bindings
-        )
-
-      {:shared_state_updated, new_state} ->
-        merged_state = Map.merge(new_state, mount_props)
-        {_, new_hierarchy} = Renderer.render_app(app_module, merged_state, screen_rect, widget_hierarchy)
-
-        shared_session_loop(
-          app_module,
-          merged_state,
-          screen_rect,
-          timers,
-          new_hierarchy,
-          shared_state_pid,
-          mount_props,
-          %{}
-        )
-
-      {:focus_widget, widget_id} ->
-        new_hierarchy =
-          if widget_hierarchy do
-            WidgetHierarchy.focus_widget(widget_hierarchy, widget_id)
-          else
-            widget_hierarchy
-          end
-
-        {_, updated_hierarchy} = Renderer.render_app(app_module, app_state, screen_rect, new_hierarchy)
-
-        shared_session_loop(
-          app_module,
-          app_state,
-          screen_rect,
-          timers,
-          updated_hierarchy,
-          shared_state_pid,
-          mount_props,
-          local_bindings
-        )
-
-      {:set_interval, interval_ms, timer_id} ->
-        timer_ref = :timer.send_interval(interval_ms, {:timer, timer_id})
-        new_timers = Map.put(timers, timer_id, timer_ref)
-
-        shared_session_loop(
-          app_module,
-          app_state,
-          screen_rect,
-          new_timers,
-          widget_hierarchy,
-          shared_state_pid,
-          mount_props,
-          local_bindings
-        )
-
-      {:set_timeout, timeout_ms, timer_id} ->
-        Process.send_after(self(), {:timer, timer_id}, timeout_ms)
-
-        shared_session_loop(
-          app_module,
-          app_state,
-          screen_rect,
-          timers,
-          widget_hierarchy,
-          shared_state_pid,
-          mount_props,
-          local_bindings
-        )
-
-      {:timer, timer_id} ->
-        new_app_state =
-          if function_exported?(app_module, :on_timer, 2) do
-            app_module.on_timer(timer_id, app_state)
-          else
-            app_state
-          end
-
-        if new_app_state === app_state do
-          shared_session_loop(
-            app_module,
-            app_state,
-            screen_rect,
-            timers,
-            widget_hierarchy,
-            shared_state_pid,
-            mount_props,
-            local_bindings
-          )
-        else
-          {_, new_hierarchy} =
-            Renderer.render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
-
-          shared_session_loop(
-            app_module,
-            new_app_state,
-            screen_rect,
-            timers,
-            new_hierarchy,
-            shared_state_pid,
-            mount_props,
-            local_bindings
-          )
-        end
-
-      :scroll_debounce_render ->
-        drain_scroll_debounce_renders()
-        Process.delete(:scroll_debounce_ref)
-        idle_app_state = maybe_scroll_idle(app_module, app_state)
-
-        if widget_hierarchy do
-          {_, updated_hierarchy} =
-            Renderer.render_app(app_module, idle_app_state, screen_rect, widget_hierarchy)
-
-          shared_session_loop(
-            app_module,
-            idle_app_state,
-            screen_rect,
-            timers,
-            updated_hierarchy,
-            shared_state_pid,
-            mount_props,
-            local_bindings
-          )
-        else
-          shared_session_loop(
-            app_module,
-            idle_app_state,
-            screen_rect,
-            timers,
-            widget_hierarchy,
-            shared_state_pid,
-            mount_props,
-            local_bindings
-          )
-        end
-
-      other ->
-        new_app_state = maybe_on_message(app_module, other, app_state)
-
-        shared_session_loop(
-          app_module,
-          new_app_state,
-          screen_rect,
-          timers,
-          widget_hierarchy,
-          shared_state_pid,
-          mount_props,
-          local_bindings
-        )
-    end
-  end
-
-  defp handle_shared_tui_event(ctx, event, app_state, widget_hierarchy, local_bindings) do
-    {new_hierarchy, actions, widget_consumed} = dispatch_widget_event(widget_hierarchy, event)
-
-    updated_hierarchy = maybe_update_sizes(new_hierarchy, actions)
-    {flushed_state, flushed_bindings} = drain_bound_updates(app_state, local_bindings)
-
-    {new_app_state, new_bindings, final_hierarchy} =
-      process_shared_actions(
-        ctx,
-        actions,
-        flushed_state,
-        flushed_bindings,
-        updated_hierarchy
-      )
-
-    if widget_consumed do
-      handle_widget_consumed(
-        ctx,
-        event,
-        actions,
-        new_app_state,
-        final_hierarchy,
-        new_bindings
-      )
-    else
-      handle_widget_not_consumed(ctx, event, new_app_state, updated_hierarchy, new_bindings)
-    end
-  end
-
-  defp dispatch_widget_event(widget_hierarchy, event) do
-    if widget_hierarchy && widget_hierarchy.focused_widget do
-      WidgetHierarchy.handle_event_consumed(widget_hierarchy, event)
-    else
-      {widget_hierarchy, [], false}
-    end
-  end
-
-  defp maybe_update_sizes(hierarchy, actions) do
-    {needs_layout, _direction} = Drafter.RenderCache.extract_layout_impact(actions)
-
-    if needs_layout do
-      Renderer.update_hierarchy_preferred_sizes(hierarchy)
-    else
-      hierarchy
-    end
-  end
-
-  defp process_shared_actions(ctx, actions, app_state, bindings, hierarchy) do
-    Enum.reduce(actions, {app_state, bindings, hierarchy}, fn
-      {:app_callback, callback, data}, {acc_state, acc_bindings, acc_hier} ->
-        {result_state, result_hier} =
-          dispatch_shared_callback(
-            ctx.app_module,
-            callback,
-            data,
-            acc_state,
-            ctx.shared_state_pid,
-            acc_hier,
-            ctx.screen_rect
-          )
-
-        {result_state, acc_bindings, result_hier}
-
-      _, acc ->
-        acc
-    end)
-  end
-
-  defp handle_widget_consumed(ctx, _event, actions, app_state, hierarchy, bindings) do
-    %{app_module: app_module, screen_rect: screen_rect, timers: timers} = ctx
-    %{shared_state_pid: shared_state_pid, mount_props: mount_props} = ctx
-
-    if :scroll_fast_render in actions and scroll_optimization_enabled?() do
-      scrolled_state = maybe_scroll_active(app_module, app_state)
-      Renderer.render_hierarchy(hierarchy, screen_rect)
-      reschedule_scroll_debounce()
-
-      shared_session_loop(
-        app_module, scrolled_state, screen_rect, timers,
-        hierarchy, shared_state_pid, mount_props, bindings
-      )
-    else
-      {_, final_hierarchy} = Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
-
-      shared_session_loop(
-        app_module, app_state, screen_rect, timers,
-        final_hierarchy, shared_state_pid, mount_props, bindings
-      )
-    end
-  end
-
-  defp handle_widget_not_consumed(ctx, event, app_state, updated_hierarchy, bindings) do
-    %{app_module: app_module, screen_rect: screen_rect, timers: timers} = ctx
-    %{shared_state_pid: shared_state_pid, mount_props: mount_props} = ctx
-
-    {result_state, should_stop} = handle_shared_event(app_module, event, app_state, shared_state_pid)
-
-    if should_stop do
-      cleanup_timers(timers)
-      :ok
-    else
-      {nav_hierarchy, _nav_actions} = WidgetHierarchy.handle_event(updated_hierarchy, event)
-      {_, final_hierarchy} = Renderer.render_app(app_module, result_state, screen_rect, nav_hierarchy)
-
-      shared_session_loop(
-        app_module, result_state, screen_rect, timers,
-        final_hierarchy, shared_state_pid, mount_props, bindings
-      )
-    end
-  end
-
-  defp handle_shared_event(app_module, event, app_state, shared_state_pid) do
-    result =
-      if function_exported?(app_module, :handle_event, 2) do
-        app_module.handle_event(event, app_state)
-      else
-        {:noreply, app_state}
-      end
-
-    case result do
-      {:ok, new_state} ->
-        SharedState.update_state(shared_state_pid, new_state)
-        {new_state, false}
-
-      {:stop, _reason} ->
-        {app_state, true}
-
-      _ ->
-        {app_state, false}
-    end
-  end
-
-  defp dispatch_shared_callback(
-         app_module,
-         callback,
-         data,
-         app_state,
-         shared_state_pid,
-         hierarchy,
-         _screen_rect
-       ) do
-    result =
-      if function_exported?(app_module, :handle_event, 3) do
-        app_module.handle_event(callback, data, app_state)
-      else
-        {:noreply, app_state}
-      end
-
-    case result do
-      {:ok, new_state} ->
-        SharedState.update_state(shared_state_pid, new_state)
-        {new_state, hierarchy}
-
-      _ ->
-        {app_state, hierarchy}
-    end
+    AppLoop.enter_loop(app_module, ready_app_state, screen_rect, %{}, hierarchy, [])
   end
 
   defp register_widget_libraries(opts) do
@@ -1136,12 +770,7 @@ defmodule Drafter do
   defp ensure_started({:error, {:already_started, pid}}), do: {:ok, pid}
   defp ensure_started(error), do: error
 
-  defp propagate_session_pdict(session_pdict) do
-    Enum.each(session_pdict, fn
-      {key, val} when val != nil -> Process.put(key, val)
-      _ -> :ok
-    end)
-  end
+  defp propagate_session_pdict(session_pdict), do: Context.adopt(session_pdict)
 
   defp run_app(app_module, opts) do
     scroll_opt = Keyword.get(opts, :scroll_optimization, true)
@@ -1170,6 +799,7 @@ defmodule Drafter do
       {:DOWN, ^ref, :process, ^app_pid, reason} ->
         Drafter.Trace.log_sync(["Q down ", Drafter.Trace.ts(), "\n"])
         Event.Manager.drain_queue()
+        Drafter.Trace.log_sync(["Q drained ", Drafter.Trace.ts(), "\n"])
         Terminal.Driver.cleanup()
         Drafter.Trace.log_sync(["Q cleanup_done ", Drafter.Trace.ts(), "\n"])
         Event.Manager.drain_queue()
@@ -1185,8 +815,17 @@ defmodule Drafter do
   """
   @spec render_mode(atom()) :: :ok
   def render_mode(mode) do
-    if mode in Drafter.Widget.Chart.Pixel.modes() do
+    if mode in Pixel.modes() do
       Application.put_env(:drafter, :render_mode, mode)
+    end
+
+    :ok
+  end
+
+  defp apply_clipboard_setting(opts) do
+    case Keyword.fetch(opts, :clipboard) do
+      {:ok, value} -> Application.put_env(:drafter, :clipboard, value)
+      :error -> :ok
     end
 
     :ok
@@ -1202,6 +841,7 @@ defmodule Drafter do
   defp maybe_halt(result, opts) do
     if Keyword.get(opts, :halt_on_exit, true) do
       Drafter.Trace.log_sync(["Q before_halt ", Drafter.Trace.ts(), "\n"])
+      Drafter.Trace.stamp("halt")
       System.halt(exit_code(result))
     end
 
@@ -1212,79 +852,4 @@ defmodule Drafter do
   defp exit_code(_), do: 1
 
   defp make_screen_rect(width, height), do: %{x: 0, y: 0, width: width, height: height}
-
-  defp check_global_quit(event) do
-    case event do
-      %{type: :key, key: :q, modifiers: [:ctrl]} -> :quit
-      {:key, :q, [:ctrl]} -> :quit
-      %{type: :key, key: :c, modifiers: [:ctrl]} -> :quit
-      {:key, :c, [:ctrl]} -> :quit
-      _ -> :continue
-    end
-  end
-
-  defp cleanup_timers(timers) do
-    Enum.each(timers, fn {_id, timer_ref} -> :timer.cancel(timer_ref) end)
-  end
-
-  defp drain_bound_updates(app_state, bindings) do
-    receive do
-      {:bound_state_update, key, value} ->
-        drain_bound_updates(Map.put(app_state, key, value), Map.put(bindings, key, value))
-    after
-      0 -> {app_state, bindings}
-    end
-  end
-
-  defp maybe_scroll_active(app_module, app_state) do
-    if Process.get(:scroll_gesture_active) do
-      app_state
-    else
-      Process.put(:scroll_gesture_active, true)
-
-      if function_exported?(app_module, :on_scroll_active, 1) do
-        app_module.on_scroll_active(app_state)
-      else
-        app_state
-      end
-    end
-  end
-
-  defp maybe_scroll_idle(app_module, app_state) do
-    Process.delete(:scroll_gesture_active)
-
-    if function_exported?(app_module, :on_scroll_idle, 1) do
-      app_module.on_scroll_idle(app_state)
-    else
-      app_state
-    end
-  end
-
-  defp reschedule_scroll_debounce do
-    case Process.get(:scroll_debounce_ref) do
-      nil -> :ok
-      ref -> Process.cancel_timer(ref)
-    end
-
-    new_ref = Process.send_after(self(), :scroll_debounce_render, @scroll_debounce_ms)
-    Process.put(:scroll_debounce_ref, new_ref)
-  end
-
-  defp drain_scroll_debounce_renders do
-    receive do
-      :scroll_debounce_render -> drain_scroll_debounce_renders()
-    after
-      0 -> :ok
-    end
-  end
-
-  defp scroll_optimization_enabled?, do: Process.get(:scroll_optimization, true) != false
-
-  defp maybe_on_message(app_module, msg, app_state) do
-    if function_exported?(app_module, :on_message, 2) do
-      app_module.on_message(msg, app_state)
-    else
-      app_state
-    end
-  end
 end

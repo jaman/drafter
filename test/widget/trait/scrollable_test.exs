@@ -60,7 +60,13 @@ defmodule Drafter.Widget.Trait.ScrollableTest do
     end
 
     test "scroll down does not exceed max offset" do
-      state = %{Scrollable.default_state() | _scroll_offset_y: 80, _content_height: 100, _viewport_height: 20}
+      state = %{
+        Scrollable.default_state()
+        | _scroll_offset_y: 80,
+          _content_height: 100,
+          _viewport_height: 20
+      }
+
       event = {:mouse, %{type: :scroll, direction: :down}}
       {:ok, new_state} = Scrollable.handle_event(event, state, %{})
       assert new_state._scroll_offset_y == 80
@@ -87,7 +93,13 @@ defmodule Drafter.Widget.Trait.ScrollableTest do
     end
 
     test "page_down jumps by viewport height minus one" do
-      state = %{Scrollable.default_state() | _scroll_offset_y: 0, _content_height: 100, _viewport_height: 20}
+      state = %{
+        Scrollable.default_state()
+        | _scroll_offset_y: 0,
+          _content_height: 100,
+          _viewport_height: 20
+      }
+
       {:ok, new_state} = Scrollable.handle_event({:key, :page_down}, state, %{})
       assert new_state._scroll_offset_y == 19
     end

@@ -57,13 +57,13 @@ defmodule Drafter.Widget.Trait.Scrollable do
   end
 
   def handle_event({:key, key}, trait_state, _widget_state)
-      when key in [:up, :"ArrowUp"] do
+      when key in [:up, :ArrowUp] do
     new_offset = max(0, trait_state._scroll_offset_y - 1)
     {:ok, %{trait_state | _scroll_offset_y: new_offset}}
   end
 
   def handle_event({:key, key}, trait_state, _widget_state)
-      when key in [:down, :"ArrowDown"] do
+      when key in [:down, :ArrowDown] do
     max_offset = max(0, trait_state._content_height - trait_state._viewport_height)
     new_offset = min(max_offset, trait_state._scroll_offset_y + 1)
     {:ok, %{trait_state | _scroll_offset_y: new_offset}}

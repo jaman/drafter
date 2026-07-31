@@ -25,6 +25,7 @@ defmodule Drafter.Binding do
 
   defp build_bound_callback(_session_pid, nil, opts) do
     on_change = Keyword.get(opts, :on_change)
+
     if on_change do
       session_pid = self()
       fn value -> send_app_callback(session_pid, on_change, value) end
@@ -47,6 +48,7 @@ defmodule Drafter.Binding do
 
   defp build_text_input_callback(_session_pid, nil, opts) do
     on_change = Keyword.get(opts, :on_change)
+
     if on_change do
       session_pid = self()
       fn {text, vr} -> send_app_callback(session_pid, on_change, {text, vr}) end

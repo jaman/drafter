@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule MultiSeriesCharts do
   use Drafter.App
@@ -14,11 +14,15 @@ defmodule MultiSeriesCharts do
   ]
 
   def mount(_props) do
-    %{timestamp: 0, phase: 0.0}
+    %{timestamp: 0, phase: 0.0, renderer: :auto}
   end
 
   keybinding :q, "quit" do
     {:stop, :normal}
+  end
+
+  keybinding :m, "render mode" do
+    {:ok, %{state | renderer: next_renderer(state.renderer)}}
   end
 
   def on_ready(state) do
@@ -100,10 +104,13 @@ defmodule MultiSeriesCharts do
       header("Multi-Series & Extended Bar Charts  (scroll, ← → to pan)", show_clock: true),
       scrollable(
         [
+          mode_label(state.renderer),
+          gap(),
           section("Multi-Series Line: Sine + Cosine + Triangle + Sawtooth"),
           chart([sine, cosine, triangle, sawtooth],
             id: :line1,
-            chart_type: :line, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :line,
             height: 8,
             colors: Enum.take(@palette, 4),
             _render_timestamp: state.timestamp
@@ -115,7 +122,8 @@ defmodule MultiSeriesCharts do
           ),
           chart([inbound, outbound],
             id: :net,
-            chart_type: :line, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :line,
             height: 8,
             min_value: -150,
             max_value: 150,
@@ -129,14 +137,16 @@ defmodule MultiSeriesCharts do
             [
               chart([monthly_a, monthly_b, monthly_c],
                 id: :cbar,
-                chart_type: :clustered_bar, renderer: :pixel,
+                renderer: state.renderer,
+                chart_type: :clustered_bar,
                 height: 8,
                 colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)],
                 flex: 1
               ),
               chart([monthly_a, monthly_b, monthly_c],
                 id: :cbar_gap,
-                chart_type: :clustered_bar, renderer: :pixel,
+                renderer: state.renderer,
+                chart_type: :clustered_bar,
                 height: 8,
                 bar_gap: 1,
                 colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)],
@@ -151,14 +161,16 @@ defmodule MultiSeriesCharts do
             [
               chart([stacked_a, stacked_b, stacked_c],
                 id: :sbar,
-                chart_type: :stacked_bar, renderer: :pixel,
+                renderer: state.renderer,
+                chart_type: :stacked_bar,
                 height: 8,
                 colors: [Enum.at(@palette, 2), Enum.at(@palette, 4), Enum.at(@palette, 5)],
                 flex: 1
               ),
               chart([stacked_a, stacked_b, stacked_c],
                 id: :sbar_gap,
-                chart_type: :stacked_bar, renderer: :pixel,
+                renderer: state.renderer,
+                chart_type: :stacked_bar,
                 height: 8,
                 bar_gap: 1,
                 colors: [Enum.at(@palette, 2), Enum.at(@palette, 4), Enum.at(@palette, 5)],
@@ -171,7 +183,8 @@ defmodule MultiSeriesCharts do
           section("Range Bar: Monthly temperature range °C (low → high)"),
           chart(temp_ranges,
             id: :rbar,
-            chart_type: :range_bar, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :range_bar,
             height: 8,
             min_value: -10,
             max_value: 40,
@@ -182,7 +195,8 @@ defmodule MultiSeriesCharts do
           section("Multi-Series Scatter: Three animated point clouds"),
           chart([scatter_a, scatter_b, scatter_c],
             id: :scatter1,
-            chart_type: :scatter, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :scatter,
             height: 8,
             colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)],
             _render_timestamp: state.timestamp
@@ -191,7 +205,8 @@ defmodule MultiSeriesCharts do
           section("Weighted Scatter: Dot density shows data weight"),
           chart(weighted_scatter,
             id: :wscat,
-            chart_type: :scatter, renderer: :pixel,
+            renderer: state.renderer,
+            chart_type: :scatter,
             height: 8,
             color: {100, 220, 255},
             _render_timestamp: state.timestamp
@@ -202,7 +217,8 @@ defmodule MultiSeriesCharts do
             [
               chart([plain_area, plain_area_b],
                 id: :warea_flat,
-                chart_type: :braille_area, renderer: :pixel,
+                renderer: state.renderer,
+                chart_type: :braille_area,
                 height: 8,
                 fill_opacity: 1.0,
                 colors: [{80, 200, 100}, {100, 140, 255}],
@@ -211,7 +227,8 @@ defmodule MultiSeriesCharts do
               ),
               chart([plain_area, plain_area_b],
                 id: :warea_mid,
-                chart_type: :braille_area, renderer: :pixel,
+                renderer: state.renderer,
+                chart_type: :braille_area,
                 height: 8,
                 fill_opacity: 0.6,
                 colors: [{80, 200, 100}, {100, 140, 255}],
@@ -220,7 +237,8 @@ defmodule MultiSeriesCharts do
               ),
               chart([weighted_area, weighted_area_b],
                 id: :warea_top,
-                chart_type: :braille_area, renderer: :pixel,
+                renderer: state.renderer,
+                chart_type: :braille_area,
                 height: 8,
                 fill_opacity: 0.6,
                 colors: [{80, 200, 100}, {100, 140, 255}],
@@ -239,6 +257,18 @@ defmodule MultiSeriesCharts do
   end
 
   def handle_event(_event, state), do: {:noreply, state}
+
+  defp next_renderer(:auto), do: :braille
+  defp next_renderer(:braille), do: :text
+  defp next_renderer(_renderer), do: :auto
+
+  defp mode_label(renderer) do
+    resolved = Drafter.Widget.Chart.Pixel.mode(renderer, :line)
+
+    label("Render mode: #{renderer} (resolved: #{resolved}) — press m to cycle",
+      style: %{fg: {255, 200, 100}, bold: true}
+    )
+  end
 
   defp section(title) do
     label(title, style: %{fg: {100, 150, 255}, bold: true})

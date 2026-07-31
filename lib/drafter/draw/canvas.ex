@@ -16,15 +16,15 @@ defmodule Drafter.Draw.Canvas do
   @type style :: Segment.style()
 
   @type cell :: %{
-    char: String.t(),
-    style: style()
-  }
+          char: String.t(),
+          style: style()
+        }
 
   @type t :: %__MODULE__{
-    width: pos_integer(),
-    height: pos_integer(),
-    cells: %{coordinate() => cell()}
-  }
+          width: pos_integer(),
+          height: pos_integer(),
+          cells: %{coordinate() => cell()}
+        }
 
   defstruct [:width, :height, cells: %{}]
 
@@ -60,23 +60,45 @@ defmodule Drafter.Draw.Canvas do
   end
 
   @doc "Draw horizontal line"
-  @spec draw_hline(t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), BoxDrawing.line_type(), style()) :: t()
+  @spec draw_hline(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          BoxDrawing.line_type(),
+          style()
+        ) :: t()
   def draw_hline(canvas, x, y, length, line_style \\ :light, style \\ %{}) do
     char = BoxDrawing.get_char(line_style, :horizontal)
     draw_line_chars(canvas, x, y, length, 1, char, style)
   end
 
   @doc "Draw vertical line"
-  @spec draw_vline(t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), BoxDrawing.line_type(), style()) :: t()
+  @spec draw_vline(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          BoxDrawing.line_type(),
+          style()
+        ) :: t()
   def draw_vline(canvas, x, y, length, line_style \\ :light, style \\ %{}) do
     char = BoxDrawing.get_char(line_style, :vertical)
     draw_line_chars(canvas, x, y, 1, length, char, style)
   end
 
   @doc "Draw a line from point A to point B"
-  @spec draw_line(t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), style()) :: t()
+  @spec draw_line(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          style()
+        ) :: t()
   def draw_line(canvas, x1, y1, x2, y2, style \\ %{}) do
     points = line_points(x1, y1, x2, y2)
+
     Enum.reduce(points, canvas, fn {x, y}, acc ->
       set_char(acc, x, y, "█", style)
     end)
@@ -84,8 +106,13 @@ defmodule Drafter.Draw.Canvas do
 
   @doc "Draw a rectangle outline"
   @spec draw_rect(
-          t(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
-          non_neg_integer(), BoxDrawing.line_type(), style()
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          BoxDrawing.line_type(),
+          style()
         ) :: t()
   def draw_rect(canvas, x, y, width, height, line_style \\ :light, style \\ %{}) do
     if width < 2 or height < 2 do
@@ -107,12 +134,17 @@ defmodule Drafter.Draw.Canvas do
 
   @doc "Fill a rectangle with character"
   @spec fill_rect(
-          t(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
-          non_neg_integer(), String.t(), style()
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          style()
         ) :: t()
   def fill_rect(canvas, x, y, width, height, char \\ " ", style \\ %{}) do
-    Enum.reduce(0..(height - 1), canvas, fn dy, acc_canvas ->
-      Enum.reduce(0..(width - 1), acc_canvas, fn dx, acc ->
+    Enum.reduce(0..(height - 1)//1, canvas, fn dy, acc_canvas ->
+      Enum.reduce(0..(width - 1)//1, acc_canvas, fn dx, acc ->
         set_char(acc, x + dx, y + dy, char, style)
       end)
     end)
@@ -136,13 +168,20 @@ defmodule Drafter.Draw.Canvas do
   end
 
   @doc "Clear rectangular area"
-  @spec clear_rect(t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: t()
+  @spec clear_rect(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
   def clear_rect(canvas, x, y, width, height) do
-    cells = Enum.reduce(0..(height - 1), canvas.cells, fn dy, acc_cells ->
-      Enum.reduce(0..(width - 1), acc_cells, fn dx, acc ->
-        Map.delete(acc, {x + dx, y + dy})
+    cells =
+      Enum.reduce(0..(height - 1)//1, canvas.cells, fn dy, acc_cells ->
+        Enum.reduce(0..(width - 1)//1, acc_cells, fn dx, acc ->
+          Map.delete(acc, {x + dx, y + dy})
+        end)
       end)
-    end)
 
     %{canvas | cells: cells}
   end
@@ -150,7 +189,7 @@ defmodule Drafter.Draw.Canvas do
   @doc "Convert canvas to strips for rendering"
   @spec to_strips(t()) :: [Strip.t()]
   def to_strips(%__MODULE__{width: width, height: height, cells: cells}) do
-    Enum.map(0..(height - 1), fn y ->
+    Enum.map(0..(height - 1)//1, fn y ->
       segments = build_line_segments(cells, y, width)
       Strip.new(segments)
     end)
@@ -173,8 +212,8 @@ defmodule Drafter.Draw.Canvas do
   end
 
   defp draw_line_chars(canvas, x, y, width, height, char, style) do
-    Enum.reduce(0..(height - 1), canvas, fn dy, acc_canvas ->
-      Enum.reduce(0..(width - 1), acc_canvas, fn dx, acc ->
+    Enum.reduce(0..(height - 1)//1, canvas, fn dy, acc_canvas ->
+      Enum.reduce(0..(width - 1)//1, acc_canvas, fn dx, acc ->
         set_char(acc, x + dx, y + dy, char, style)
       end)
     end)
@@ -208,7 +247,7 @@ defmodule Drafter.Draw.Canvas do
   end
 
   defp build_line_segments(cells, y, width) do
-    0..(width - 1)
+    0..(width - 1)//1
     |> Enum.map(fn x ->
       case Map.get(cells, {x, y}) do
         %{char: char, style: style} -> Segment.new(char, style)
@@ -226,10 +265,7 @@ defmodule Drafter.Draw.Canvas do
 
   defp combine_adjacent_segments([segment | rest], [last | acc_rest] = acc) do
     if segment.style == last.style do
-      combined = %{last |
-        text: last.text <> segment.text,
-        width: last.width + segment.width
-      }
+      combined = %{last | text: last.text <> segment.text, width: last.width + segment.width}
       combine_adjacent_segments(rest, [combined | acc_rest])
     else
       combine_adjacent_segments(rest, [segment | acc])

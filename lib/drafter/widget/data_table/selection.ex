@@ -3,6 +3,7 @@ defmodule Drafter.Widget.DataTable.Selection do
 
   alias Drafter.Widget.DataTable
   alias Drafter.Widget.DataTable.{Columns, Sorting}
+  alias Drafter.Widget.Scrollbar
 
   def action_scroll_up(state) do
     if state.scroll.offset > 0 do
@@ -256,6 +257,24 @@ defmodule Drafter.Widget.DataTable.Selection do
     handle_click_by_region(state, x, y, click_region)
   end
 
+  @doc """
+  Begins a scrollbar drag on mouse-down.
+
+  Returns `{:ok, state}` with the drag started when the press lands on the
+  scrollbar, otherwise `{:bubble, state}`.
+  """
+  def handle_press(state, x, y) do
+    case determine_click_region(state, x, y) do
+      :scrollbar ->
+        data_start_y = DataTable.get_data_start_y(state)
+        data_height = DataTable.get_data_height(state)
+        handle_scrollbar_click(state, y - data_start_y, data_height)
+
+      _other ->
+        {:bubble, state}
+    end
+  end
+
   def determine_click_region(state, x, y) do
     data_start_y = DataTable.get_data_start_y(state)
     data_height = DataTable.get_data_height(state)
@@ -322,14 +341,26 @@ defmodule Drafter.Widget.DataTable.Selection do
     total_rows = length(state.data)
 
     if total_rows > data_height do
-      scroll_range = max(1, data_height - 1)
-      click_ratio = relative_y / scroll_range
-      target_scroll = Drafter.ScrollMath.from_ratio(click_ratio, total_rows, data_height)
+      grab =
+        Scrollbar.grab_offset(
+          relative_y,
+          state.scroll.offset,
+          total_rows,
+          data_height
+        )
+
+      target_scroll =
+        Scrollbar.offset_from_drag(relative_y, grab, total_rows, data_height)
 
       new_state = %{
         state
         | scroll: %{state.scroll | offset: target_scroll},
-          drag: %{state.drag | dragging_scrollbar: true, hovering_scrollbar: true}
+          drag: %{
+            state.drag
+            | dragging_scrollbar: true,
+              hovering_scrollbar: true,
+              scrollbar_grab: grab
+          }
       }
 
       {:ok, new_state, [:render_update]}
@@ -341,20 +372,26 @@ defmodule Drafter.Widget.DataTable.Selection do
   def drag_scrollbar_to(state, _x, y) do
     data_start_y = DataTable.get_data_start_y(state)
     data_height = DataTable.get_data_height(state)
-    relative_y = y - data_start_y |> max(0) |> min(data_height - 1)
+    relative_y = (y - data_start_y) |> max(0) |> min(data_height - 1)
     total_rows = length(state.data)
 
     if total_rows > data_height do
-      scroll_range = max(1, data_height - 1)
-      drag_ratio = relative_y / scroll_range
-      target_scroll = Drafter.ScrollMath.from_ratio(drag_ratio, total_rows, data_height)
-      {:ok, put_in(state.scroll.offset, target_scroll), [:render_update]}
+      target_scroll =
+        Scrollbar.offset_from_drag(
+          relative_y,
+          state.drag.scrollbar_grab,
+          total_rows,
+          data_height
+        )
+
+      {:ok, put_in(state.scroll.offset, target_scroll), [:scroll_fast_render]}
     else
       {:ok, state}
     end
   end
 
-  def handle_mouse_drag(state, _x, _y) when state.drag.dragging_scrollbar == false, do: {:noreply, state}
+  def handle_mouse_drag(state, _x, _y) when state.drag.dragging_scrollbar == false,
+    do: {:noreply, state}
 
   def handle_mouse_drag(state, _x, y), do: drag_scrollbar_to(state, 0, y)
 

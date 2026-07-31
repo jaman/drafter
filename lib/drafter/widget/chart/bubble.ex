@@ -29,7 +29,17 @@ defmodule Drafter.Widget.Chart.Bubble do
       is_list(hd(data)) and hd(data) != [] and is_list(hd(hd(data))) ->
         colors = if state.colors != [], do: state.colors, else: @default_series_colors
         scroll = state._internal.scroll_offset || 0
-        render_multi_series(data, width, height, bg, colors, state.min_value, state.max_value, scroll)
+
+        render_multi_series(
+          data,
+          width,
+          height,
+          bg,
+          colors,
+          state.min_value,
+          state.max_value,
+          scroll
+        )
 
       true ->
         render_single_series(state, data, width, height, bg, fg)

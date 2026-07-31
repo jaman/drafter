@@ -7,7 +7,7 @@ defmodule Drafter.TextAreaRenderTest do
 
   defp seg(text), do: Segment.new(text, %{fg: {200, 200, 200}, bg: {40, 40, 40}})
 
-  defp text_of(segments), do: segments |> Enum.map(& &1.text) |> Enum.join()
+  defp text_of(segments), do: Enum.map_join(segments, & &1.text)
 
   describe "slice_segments" do
     test "windows a segment list by display column" do

@@ -47,7 +47,10 @@ defmodule Drafter.WidgetHierarchy.Mouse do
 
       {:drag, widget_id} ->
         relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
-        {new_hierarchy, actions} = EventRouter.handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+
+        {new_hierarchy, actions} =
+          EventRouter.handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+
         widget_state = WidgetHierarchy.get_widget_state(new_hierarchy, widget_id)
         {maybe_start_drag_capture(new_hierarchy, widget_id, widget_state), actions}
 
@@ -65,8 +68,11 @@ defmodule Drafter.WidgetHierarchy.Mouse do
 
   def dispatch_to_scroll_container(hierarchy, mouse_event) do
     case Scroll.find_scroll_container_at(hierarchy, mouse_event.x, mouse_event.y) do
-      nil -> {hierarchy, []}
-      scroll_id -> EventRouter.handle_event_with_phases(hierarchy, scroll_id, {:mouse, mouse_event})
+      nil ->
+        {hierarchy, []}
+
+      scroll_id ->
+        EventRouter.handle_event_with_phases(hierarchy, scroll_id, {:mouse, mouse_event})
     end
   end
 
@@ -88,23 +94,46 @@ defmodule Drafter.WidgetHierarchy.Mouse do
       hierarchy = Scroll.clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
       hierarchy = Focus.focus_widget(hierarchy, widget_id)
       relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
-      {new_hierarchy, actions} = EventRouter.handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+
+      {new_hierarchy, actions} =
+        EventRouter.handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+
       widget_state = WidgetHierarchy.get_widget_state(new_hierarchy, widget_id)
       {maybe_start_drag_capture(new_hierarchy, widget_id, widget_state), actions}
     end
   end
 
+  @doc """
+  Route later drag events to the widget that started the gesture, if it started one.
+
+  Capture is set when `widget_state` reports a gesture in progress, and cleared
+  otherwise. The gesture flags are read both as flat fields and from a `:drag`
+  map, whichever shape the widget uses.
+  """
   def maybe_start_drag_capture(hierarchy, widget_id, widget_state) do
-    if widget_state &&
-         (Map.get(widget_state, :dragging_scrollbar, false) ||
-            Map.get(widget_state, :dragging, false) ||
-            Map.get(widget_state, :_resize_col) != nil ||
-            Map.get(widget_state, :_reorder_col) != nil) do
+    if gesture_in_progress?(widget_state) do
       %{hierarchy | drag_capture_widget: widget_id}
     else
       %{hierarchy | drag_capture_widget: nil}
     end
   end
+
+  defp gesture_in_progress?(widget_state) when is_map(widget_state) do
+    dragging_fields?(widget_state) or dragging_fields?(Map.get(widget_state, :drag))
+  end
+
+  defp gesture_in_progress?(_widget_state), do: false
+
+  defp dragging_fields?(fields) when is_map(fields) do
+    Map.get(fields, :dragging_scrollbar, false) ||
+      Map.get(fields, :dragging, false) ||
+      Map.get(fields, :_resize_col) != nil ||
+      Map.get(fields, :resize_col) != nil ||
+      Map.get(fields, :_reorder_col) != nil ||
+      Map.get(fields, :reorder_col) != nil
+  end
+
+  defp dragging_fields?(_fields), do: false
 
   def make_relative_mouse_event(hierarchy, widget_id, mouse_event) do
     case Map.get(hierarchy.widget_rects, widget_id) do

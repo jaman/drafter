@@ -4,13 +4,13 @@ defmodule Drafter.Terminal.Driver do
   use GenServer
 
   alias Drafter.Event
-  alias Drafter.Terminal.{ANSI, TermiosNif}
+  alias Drafter.Terminal.{ANSI, InputBuffer, TermiosNif}
 
   defstruct [
     :shell_pid,
     :stdin_reader_pid,
     :terminal_mode,
-    buffer: "",
+    buffer: %InputBuffer{},
     mouse_enabled: false,
     alt_screen: false,
     raw_mode: false,
@@ -21,7 +21,7 @@ defmodule Drafter.Terminal.Driver do
           shell_pid: pid() | nil,
           stdin_reader_pid: pid() | nil,
           terminal_mode: terminal_mode(),
-          buffer: binary(),
+          buffer: InputBuffer.t(),
           mouse_enabled: boolean(),
           alt_screen: boolean(),
           raw_mode: boolean(),
@@ -96,7 +96,7 @@ defmodule Drafter.Terminal.Driver do
     state = %__MODULE__{
       shell_pid: nil,
       terminal_mode: nil,
-      buffer: "",
+      buffer: InputBuffer.new(),
       mouse_enabled: false,
       alt_screen: false,
       raw_mode: false,
@@ -136,7 +136,7 @@ defmodule Drafter.Terminal.Driver do
   def handle_call(:drain_pending_input, _from, state) do
     drain_stdin_messages()
     flush_os_stdin_buffer()
-    {:reply, :ok, %{state | buffer: ""}}
+    {:reply, :ok, %{state | buffer: InputBuffer.reset(state.buffer)}}
   end
 
   def handle_call(:start_input, _from, state) do
@@ -177,17 +177,18 @@ defmodule Drafter.Terminal.Driver do
 
   @impl GenServer
   def handle_info({:stdin, data}, state) do
-    Drafter.Trace.log(["S ", Drafter.Trace.ts(), " ", Base.encode16(data), "\n"])
-    new_buffer = state.buffer <> data
-    {events, remaining_buffer} = ANSI.parse_sequence(new_buffer)
+    if Drafter.Trace.enabled?(),
+      do: Drafter.Trace.log(["S ", Drafter.Trace.ts(), " ", Base.encode16(data), "\n"])
 
-    event_manager = Process.get(:event_manager)
+    {events, buffer} = InputBuffer.feed(state.buffer, data)
+    emit_events(events)
+    {:noreply, %{state | buffer: buffer}}
+  end
 
-    Enum.each(events, fn event ->
-      GenServer.cast(event_manager, {:event, event})
-    end)
-
-    {:noreply, %{state | buffer: remaining_buffer}}
+  def handle_info(:input_flush, state) do
+    {events, buffer} = InputBuffer.flush(state.buffer)
+    emit_events(events)
+    {:noreply, %{state | buffer: buffer}}
   end
 
   def handle_info({:signal, :winch}, state) do
@@ -274,6 +275,23 @@ defmodule Drafter.Terminal.Driver do
     Process.flag(:trap_exit, true)
   end
 
+  @doc false
+  @spec write_synchronously(iodata()) :: :ok
+  def write_synchronously([]), do: :ok
+
+  def write_synchronously(iodata) do
+    case :file.open(~c"/dev/tty", [:write, :raw, :binary]) do
+      {:ok, tty} ->
+        :file.write(tty, iodata)
+        :file.close(tty)
+        :ok
+
+      {:error, _reason} ->
+        IO.write(iodata)
+        :ok
+    end
+  end
+
   defp cleanup_terminal(state) do
     TermiosNif.set_tui_inactive()
 
@@ -296,10 +314,7 @@ defmodule Drafter.Terminal.Driver do
           cleanup_sequences
         end
 
-      if cleanup_sequences != 0 do
-        IO.write(cleanup_sequences)
-        Process.sleep(50)
-      end
+      write_synchronously(cleanup_sequences)
 
       restore_terminal_mode(state.terminal_mode)
 
@@ -355,7 +370,18 @@ defmodule Drafter.Terminal.Driver do
 
   defp setup_stdin do
     :io.setopts(:stdio, [:binary, {:encoding, :unicode}])
-    spawn_link(fn -> stdin_reader() end)
+    spawn_link(&stdin_reader/0)
+  end
+
+  defp stdin_reader do
+    case IO.read(:stdio, 1) do
+      data when is_binary(data) ->
+        send(__MODULE__, {:stdin, data})
+        stdin_reader()
+
+      _ ->
+        :ok
+    end
   end
 
   defp maybe_stop_stdin_reader(nil), do: :ok
@@ -363,6 +389,13 @@ defmodule Drafter.Terminal.Driver do
   defp maybe_stop_stdin_reader(pid) do
     if Process.alive?(pid), do: Process.exit(pid, :kill)
     :ok
+  end
+
+  defp emit_events([]), do: :ok
+
+  defp emit_events(events) do
+    event_manager = Process.get(:event_manager)
+    Enum.each(events, &GenServer.cast(event_manager, {:event, &1}))
   end
 
   defp drain_stdin_messages do
@@ -388,135 +421,33 @@ defmodule Drafter.Terminal.Driver do
     end
   end
 
-  defp stdin_reader do
-    case IO.read(:stdio, 1) do
-      :eof ->
-        :ok
-
-      {:error, _reason} ->
-        :ok
-
-      "\e" ->
-        read_escape_sequence("\e")
-
-      data when is_binary(data) ->
-        send(__MODULE__, {:stdin, data})
-        stdin_reader()
-    end
-  end
-
-  defp read_escape_sequence(buffer) do
-    drain_stale_escape_timeouts()
-    timer_ref = Process.send_after(self(), :escape_timeout, 100)
-
-    case IO.read(:stdio, 1) do
-      :eof ->
-        cancel_escape_timer(timer_ref)
-        send(__MODULE__, {:stdin, buffer})
-
-      {:error, _} ->
-        cancel_escape_timer(timer_ref)
-        send(__MODULE__, {:stdin, buffer})
-        stdin_reader()
-
-      "[" ->
-        cancel_escape_timer(timer_ref)
-        read_csi_sequence(buffer <> "[")
-
-      "O" ->
-        cancel_escape_timer(timer_ref)
-        read_ss3_sequence(buffer <> "O")
-
-      char when is_binary(char) ->
-        cancel_escape_timer(timer_ref)
-        send(__MODULE__, {:stdin, buffer <> char})
-        stdin_reader()
-    end
-  end
-
-  defp read_ss3_sequence(buffer) do
-    case IO.read(:stdio, 1) do
-      :eof ->
-        send(__MODULE__, {:stdin, buffer})
-
-      {:error, _} ->
-        send(__MODULE__, {:stdin, buffer})
-        stdin_reader()
-
-      char when is_binary(char) ->
-        send(__MODULE__, {:stdin, buffer <> char})
-        stdin_reader()
-    end
-  end
-
-  defp drain_stale_escape_timeouts do
-    receive do
-      :escape_timeout -> drain_stale_escape_timeouts()
-    after
-      0 -> :ok
-    end
-  end
-
-  defp cancel_escape_timer(timer_ref) do
-    Process.cancel_timer(timer_ref)
-
-    receive do
-      :escape_timeout -> :ok
-    after
-      0 -> :ok
-    end
-  end
-
-  defp read_csi_sequence(buffer) do
-    case IO.read(:stdio, 1) do
-      :eof ->
-        send(__MODULE__, {:stdin, buffer})
-
-      {:error, _} ->
-        send(__MODULE__, {:stdin, buffer})
-        stdin_reader()
-
-      "<" ->
-        read_sgr_mouse_sequence(buffer <> "<")
-
-      char when is_binary(char) ->
-        dispatch_csi_char(buffer <> char, char)
-    end
-  end
-
-  defp dispatch_csi_char(buffer, <<byte>> ) when byte in ?a..?z or byte in ?A..?Z or byte == ?~ do
-    send(__MODULE__, {:stdin, buffer})
-    stdin_reader()
-  end
-
-  defp dispatch_csi_char(buffer, _char), do: read_csi_sequence(buffer)
-
-  defp read_sgr_mouse_sequence(buffer) do
-    case IO.read(:stdio, 1) do
-      :eof ->
-        send(__MODULE__, {:stdin, buffer})
-
-      {:error, _} ->
-        send(__MODULE__, {:stdin, buffer})
-        stdin_reader()
-
-      char when char == "M" or char == "m" ->
-        send(__MODULE__, {:stdin, buffer <> char})
-        stdin_reader()
-
-      char when is_binary(char) ->
-        read_sgr_mouse_sequence(buffer <> char)
-    end
-  end
-
   defp setup_signal_handling do
     case :os.type() do
-      {:unix, _} ->
-        spawn_link(fn -> poll_terminal_size() end)
-
-      _ ->
-        :ok
+      {:unix, _} -> if watch_sigwinch() == :ok, do: :ok, else: start_size_poll()
+      _ -> :ok
     end
+  end
+
+  defp start_size_poll do
+    spawn_link(fn -> poll_terminal_size() end)
+    :ok
+  end
+
+  defp watch_sigwinch do
+    driver = self()
+    :os.set_signal(:sigwinch, :handle)
+
+    :gen_event.add_sup_handler(
+      :erl_signal_server,
+      {Drafter.Terminal.SignalWatcher, driver},
+      driver
+    )
+
+    :ok
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
   end
 
   defp poll_terminal_size do
@@ -545,13 +476,27 @@ defmodule Drafter.Terminal.Driver do
 
   defp detect_terminal_size_unix do
     if System.get_env("DRAFTER_TPUT_SIZE") in [nil, ""] do
-      case {io_size(:columns), io_size(:rows)} do
-        {cols, rows} when is_integer(cols) and is_integer(rows) -> {cols, rows}
-        _ -> tput_terminal_size()
+      with :error <- ioctl_terminal_size(),
+           {cols, rows} when not (is_integer(cols) and is_integer(rows)) <-
+             {io_size(:columns), io_size(:rows)} do
+        tput_terminal_size()
+      else
+        {cols, rows} -> {cols, rows}
       end
     else
       tput_terminal_size()
     end
+  end
+
+  defp ioctl_terminal_size do
+    case TermiosNif.get_winsize() do
+      {:ok, {cols, rows, _xpixel, _ypixel}} when cols > 0 and rows > 0 -> {cols, rows}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
   end
 
   defp io_size(dimension) do

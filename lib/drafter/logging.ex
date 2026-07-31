@@ -6,9 +6,8 @@ defmodule Drafter.Logging do
   @doc """
   Configure logging for a TUI run.
 
-  By default the console (`:default`) handler is removed so `Logger` output cannot
-  paint over the rendered TUI, and **no log file is written** — file logging is the
-  application's choice.
+  Removes the console (`:default`) handler so `Logger` output cannot paint over the
+  rendered TUI. No log file is written unless `:log` asks for one.
 
   Options:
     * `:log` — `false` (default) silences the console only; `true` writes to

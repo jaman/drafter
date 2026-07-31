@@ -33,10 +33,11 @@ defmodule Drafter.Screen do
   @callback mount(props()) :: state()
   @callback render(state()) :: term()
   @callback handle_event(term(), state()) :: result()
+  @callback handle_event(term(), data :: term(), state()) :: result()
   @callback on_resume(result :: term(), state()) :: state()
   @callback unmount(state()) :: :ok
 
-  @optional_callbacks [on_resume: 2, unmount: 1]
+  @optional_callbacks [handle_event: 3, on_resume: 2, unmount: 1]
 
   defmacro __using__(_opts) do
     quote do
@@ -46,11 +47,18 @@ defmodule Drafter.Screen do
       def mount(_props), do: %{}
       def render(_state), do: []
       def handle_event(_event, state), do: {:noreply, state}
+      def handle_event(event, _data, state), do: handle_event(event, state)
       def on_resume(_result, state), do: state
       def unmount(_state), do: :ok
       def keybindings, do: []
 
-      defoverridable mount: 1, render: 1, handle_event: 2, on_resume: 2, unmount: 1, keybindings: 0
+      defoverridable mount: 1,
+                     render: 1,
+                     handle_event: 2,
+                     handle_event: 3,
+                     on_resume: 2,
+                     unmount: 1,
+                     keybindings: 0
     end
   end
 
@@ -188,7 +196,10 @@ defmodule Drafter.Screen do
   end
 
   defp normalize_screen_result({:ok, new_state}, screen), do: {:ok, %{screen | state: new_state}}
-  defp normalize_screen_result({:noreply, new_state}, screen), do: {:noreply, %{screen | state: new_state}}
+
+  defp normalize_screen_result({:noreply, new_state}, screen),
+    do: {:noreply, %{screen | state: new_state}}
+
   defp normalize_screen_result(other, _screen), do: other
 
   def resume_screen(%__MODULE__{} = screen, result) do

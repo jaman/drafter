@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}])
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule BrailleAreaDemo do
   use Drafter
@@ -41,6 +41,7 @@ defmodule BrailleAreaDemo do
       rule(),
       chart(
         [state.disk_read, state.disk_write, state.disk_seek],
+        renderer: :pixel,
         chart_type: :braille_area,
         colors: [{80, 200, 80}, {200, 180, 40}, {220, 60, 60}],
         show_baseline: true,
@@ -57,6 +58,7 @@ defmodule BrailleAreaDemo do
       rule(),
       chart(
         [state.disk_read |> Enum.map(&(&1 - 55)), state.disk_write |> Enum.map(&(&1 * -1))],
+        renderer: :pixel,
         chart_type: :braille_area,
         colors: [{80, 180, 220}, {220, 100, 80}],
         show_baseline: true,
@@ -73,6 +75,7 @@ defmodule BrailleAreaDemo do
       rule(),
       chart(
         [state.disk_read |> Enum.map(&(&1 - 55)), state.disk_write |> Enum.map(&(&1 * -1))],
+        renderer: :pixel,
         chart_type: :braille_area,
         colors: [{80, 180, 220}, {220, 100, 80}],
         show_baseline: true,

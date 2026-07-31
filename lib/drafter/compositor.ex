@@ -5,6 +5,7 @@ defmodule Drafter.Compositor do
 
   alias Drafter.Draw.Strip
   alias Drafter.{Event, Terminal}
+  alias Drafter.Session.Context
 
   defstruct [
     :terminal_driver,
@@ -54,15 +55,19 @@ defmodule Drafter.Compositor do
   @doc """
   Store the terminal-graphics bytes (kitty/iTerm2/sixel) for an image region.
 
-  Called once per generation (from the widget's async render task) — the bytes never
-  travel through the render loop. `paint` draws the image, `clear` removes it (a kitty
-  delete for the persistent-layer protocol; empty for cell-grid protocols that re-blank).
-  `dx`/`dy` offset the image within the placed cell, and `cols`/`rows` are its cell size.
-  Paint happens via `place_image/3`.
+  Called once per generation, from the widget's async render task. `paint` draws the
+  image and `clear` removes it: a kitty delete for the persistent-layer protocol,
+  empty for cell-grid protocols that re-blank. `dx`/`dy` offset the image within the
+  placed cell, and `cols`/`rows` are its cell size. Painting happens via
+  `place_image/3`.
 
   `stamp` is the per-widget data-time captured when generation was requested. A frame
-  whose stamp is not strictly greater than the highest stamp already displayed for `id`
-  is dropped (out-of-order or superseded), keeping the animation locked to real time.
+  whose stamp is not strictly greater than the highest stamp already displayed for
+  `id` is dropped.
+
+  `place` redraws the image the terminal is already holding, for protocols that hold
+  one. It is used when the image itself has not changed and is only being redrawn
+  because text was written across it; `nil` falls back to sending `paint` again.
   """
   @spec put_image(
           term(),
@@ -72,16 +77,18 @@ defmodule Drafter.Compositor do
           integer(),
           pos_integer(),
           pos_integer(),
-          integer()
+          integer(),
+          iodata() | nil
         ) :: :ok
-  def put_image(id, paint, clear, dx, dy, cols, rows, stamp \\ 0) do
-    GenServer.cast(resolve(), {:put_image, id, paint, clear, dx, dy, cols, rows, stamp})
+  def put_image(id, paint, clear, dx, dy, cols, rows, stamp \\ 0, place \\ nil) do
+    GenServer.cast(resolve(), {:put_image, id, paint, clear, dx, dy, cols, rows, stamp, place})
   end
 
   @doc """
-  Position an image region at a cell and mark it visible — a cheap, byte-free per-frame
-  update from the render loop. The image is (re)painted after the text frame only when
-  its bytes or position changed, or a text row under it was redrawn.
+  Position an image region at a cell and mark it visible.
+
+  Carries no image bytes. The image is repainted after the text frame only when its
+  bytes or position changed, or a text row under it was redrawn.
   """
   @spec place_image(term(), non_neg_integer(), non_neg_integer()) :: :ok
   def place_image(id, x, y) do
@@ -92,6 +99,19 @@ defmodule Drafter.Compositor do
   @spec clear_image(term()) :: :ok
   def clear_image(id) do
     GenServer.cast(resolve(), {:clear_image, id})
+  end
+
+  @doc """
+  Write bytes straight to this session's terminal, outside the screen buffer.
+
+  For control sequences that address the terminal itself rather than the screen —
+  an OSC 52 clipboard write, say. The compositor owns which terminal a session is
+  attached to, so a sequence sent this way reaches the ssh or telnet client that is
+  actually looking at the app rather than the tty the server was started from.
+  """
+  @spec write_raw(iodata()) :: :ok
+  def write_raw(data) do
+    GenServer.cast(resolve(), {:write_raw, data})
   end
 
   @spec get_screen_size() :: {pos_integer(), pos_integer()}
@@ -165,16 +185,25 @@ defmodule Drafter.Compositor do
     schedule_render(new_state)
   end
 
-  def handle_cast({:put_image, id, paint, clear, dx, dy, cols, rows, stamp}, state) do
+  def handle_cast({:put_image, id, paint, clear, dx, dy, cols, rows, stamp, place}, state) do
     if stale_stamp?(state.image_stamps, id, stamp) do
       {:noreply, state}
     else
-      base = Map.get(state.image_regions, id, %{x: 0, y: 0, visible: false, version: 0, clear: ""})
+      base =
+        Map.get(state.image_regions, id, %{
+          x: 0,
+          y: 0,
+          visible: false,
+          version: 0,
+          clear: "",
+          place: nil
+        })
 
       region =
         Map.merge(base, %{
           bytes: paint,
           clear: clear,
+          place: place,
           dx: dx,
           dy: dy,
           cols: cols,
@@ -198,7 +227,19 @@ defmodule Drafter.Compositor do
         {:noreply, state}
 
       nil ->
-        region = %{bytes: nil, clear: "", dx: 0, dy: 0, cols: 0, rows: 0, x: x, y: y, visible: true, version: 0}
+        region = %{
+          bytes: nil,
+          clear: "",
+          dx: 0,
+          dy: 0,
+          cols: 0,
+          rows: 0,
+          x: x,
+          y: y,
+          visible: true,
+          version: 0
+        }
+
         schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
 
       region ->
@@ -213,6 +254,11 @@ defmodule Drafter.Compositor do
     end
   end
 
+  def handle_cast({:write_raw, data}, state) do
+    write_output(state, data)
+    {:noreply, state}
+  end
+
   def handle_cast({:clear_image, id}, state) do
     case Map.get(state.image_regions, id) do
       %{visible: true, bytes: bytes} = region when not is_nil(bytes) ->
@@ -225,7 +271,8 @@ defmodule Drafter.Compositor do
             image_stamps: Map.delete(state.image_stamps, id),
             pending_image_clears: [region.clear | state.pending_image_clears],
             dirty_regions: [image_rect(region) | state.dirty_regions],
-            rendered_buffer: invalidate_rows(state.rendered_buffer, region.y + region.dy, region.rows)
+            rendered_buffer:
+              invalidate_rows(state.rendered_buffer, region.y + region.dy, region.rows)
         })
 
       %{} = region ->
@@ -291,10 +338,7 @@ defmodule Drafter.Compositor do
   defp resize_event?({:resize, _}), do: true
   defp resize_event?(_), do: false
 
-  defp resolve do
-    Process.get(:drafter_compositor) ||
-      raise "No Compositor in process dictionary. Ensure a Drafter session is running."
-  end
+  defp resolve, do: Context.fetch!(:compositor)
 
   defp driver_write(driver, data) when is_atom(driver), do: driver.write(data)
   defp driver_write({mod, pid}, data), do: mod.write(pid, data)
@@ -323,6 +367,11 @@ defmodule Drafter.Compositor do
     }
 
     %{state | screen_buffer: updated_buffer, dirty_regions: [dirty_region | state.dirty_regions]}
+  end
+
+  defp update_buffer(_buffer, strips, 0, 0, buffer_width, buffer_height)
+       when length(strips) == buffer_height do
+    Enum.map(strips, &Strip.pad(&1, buffer_width))
   end
 
   defp update_buffer(buffer, strips, x, y, buffer_width, buffer_height) do
@@ -377,7 +426,12 @@ defmodule Drafter.Compositor do
     {text_rows, changed_lines} = build_terminal_output(state.screen_buffer, state.rendered_buffer)
 
     {image_rows, new_painted} =
-      build_image_output(state.image_regions, state.painted_images, changed_lines, state.screen_size)
+      build_image_output(
+        state.image_regions,
+        state.painted_images,
+        changed_lines,
+        state.screen_size
+      )
 
     image_block = Enum.reverse(state.pending_image_clears) ++ image_rows
     output = compose_output(text_rows, image_block)
@@ -435,6 +489,10 @@ defmodule Drafter.Compositor do
   defp paced_write?, do: System.get_env("DRAFTER_NO_PACED_WRITE") in [nil, ""]
 
   defp trace_frame(text_rows, image_rows) do
+    if Drafter.Trace.enabled?(), do: log_frame(text_rows, image_rows)
+  end
+
+  defp log_frame(text_rows, image_rows) do
     Drafter.Trace.log([
       "F ",
       Drafter.Trace.ts(),
@@ -447,7 +505,9 @@ defmodule Drafter.Compositor do
   end
 
   defp trace_paint(id, reason) do
-    Drafter.Trace.log(["P ", Drafter.Trace.ts(), " ", inspect(id), " ", reason, "\n"])
+    if Drafter.Trace.enabled?() do
+      Drafter.Trace.log(["P ", Drafter.Trace.ts(), " ", inspect(id), " ", reason, "\n"])
+    end
   end
 
   defp build_terminal_output(screen_buffer, rendered_buffer) do
@@ -488,10 +548,17 @@ defmodule Drafter.Compositor do
       (needs_paint?(region, painted) or image_overlaps?(region, changed_set))
   end
 
+  # A repaint the image itself did not ask for — text was drawn across it and has to be drawn
+  # over again — does not need the image sent a second time. Where the protocol can redraw what
+  # the terminal is already holding, that is a few dozen bytes instead of the whole frame.
   defp paint_region(id, region, rows, painted_acc) do
-    reason = if needs_paint?(region, Map.get(painted_acc, id)), do: "v", else: "o"
-    trace_paint(id, reason)
-    cmd = [Terminal.ANSI.cursor_to(region.x + region.dx + 1, region.y + region.dy + 1), region.bytes]
+    changed? = needs_paint?(region, Map.get(painted_acc, id))
+    trace_paint(id, if(changed?, do: "v", else: "o"))
+
+    bytes = if changed?, do: region.bytes, else: Map.get(region, :place) || region.bytes
+
+    cmd = [Terminal.ANSI.cursor_to(region.x + region.dx + 1, region.y + region.dy + 1), bytes]
+
     {[cmd | rows], Map.put(painted_acc, id, {region.version, {region.x, region.y}})}
   end
 
@@ -506,7 +573,9 @@ defmodule Drafter.Compositor do
   end
 
   defp needs_paint?(_region, nil), do: true
-  defp needs_paint?(region, {version, pos}), do: region.version != version or {region.x, region.y} != pos
+
+  defp needs_paint?(region, {version, pos}),
+    do: region.version != version or {region.x, region.y} != pos
 
   defp image_overlaps?(region, changed_set) do
     top = region.y + region.dy

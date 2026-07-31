@@ -178,7 +178,7 @@ defmodule Drafter.Examples.ChartDemo do
   end
 
   defp generate_wave_data(count) do
-    for i <- 0..(count - 1) do
+    for i <- 0..(count - 1)//1 do
       x = i * 0.2
       :math.sin(x) * 30 + 50 + :math.sin(x * 3) * 15 + :rand.uniform() * 5
     end

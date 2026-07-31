@@ -61,12 +61,14 @@ defmodule Drafter.Widget.CollapsibleTest do
     end
 
     test "expanded with list content renders title plus blank placeholder strips" do
-      state = Collapsible.mount(%{
-        title: "Section",
-        content: [%{type: :checkbox}],
-        content_height: 3,
-        expanded: true
-      })
+      state =
+        Collapsible.mount(%{
+          title: "Section",
+          content: [%{type: :checkbox}],
+          content_height: 3,
+          expanded: true
+        })
+
       strips = Collapsible.render(state, %{width: 20, height: 10})
       assert length(strips) >= 4
     end
@@ -133,13 +135,19 @@ defmodule Drafter.Widget.CollapsibleTest do
 
     test "click on title row (y: 0) toggles expanded" do
       state = Collapsible.mount(%{title: "T", content: "body"})
-      assert {:ok, new_state, _actions} = Collapsible.handle_event({:mouse, %{type: :mouse_up, y: 0}}, state)
+
+      assert {:ok, new_state, _actions} =
+               Collapsible.handle_event({:mouse, %{type: :mouse_up, y: 0}}, state)
+
       assert new_state.expanded == true
     end
 
     test "click on body row (y: 1) does not toggle" do
       state = Collapsible.mount(%{title: "T", content: "body"})
-      assert {:bubble, new_state} = Collapsible.handle_event({:mouse, %{type: :click, y: 1}}, state)
+
+      assert {:bubble, new_state} =
+               Collapsible.handle_event({:mouse, %{type: :click, y: 1}}, state)
+
       assert new_state.expanded == false
     end
 

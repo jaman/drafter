@@ -86,7 +86,7 @@ defmodule Drafter.Widget.DataTable.Columns do
 
   def get_col_order_list(state) do
     count = length(state.columns)
-    state._col_order || if count > 0, do: Enum.to_list(0..(count - 1)), else: []
+    state._col_order || if count > 0, do: Enum.to_list(0..(count - 1)//1), else: []
   end
 
   def format_cell_content(content, width, align, cell_padding) when width > 0 do
@@ -142,7 +142,8 @@ defmodule Drafter.Widget.DataTable.Columns do
     |> Enum.map(fn col -> if col.width == :auto, do: 10, else: col.width end)
   end
 
-  def compute_scroll_offset(state, fixed_cols, num_scrollable, remaining_width) when remaining_width > 0 do
+  def compute_scroll_offset(state, fixed_cols, num_scrollable, remaining_width)
+      when remaining_width > 0 do
     if state.cursor_col < fixed_cols do
       0
     else
@@ -151,7 +152,13 @@ defmodule Drafter.Widget.DataTable.Columns do
       cursor_in_scrollable = state.cursor_col - fixed_cols
       current_offset = Map.get(state.scroll, :offset_col, 0)
 
-      scrollable_offset(scrollable_widths, cursor_in_scrollable, current_offset, remaining_width, num_scrollable)
+      scrollable_offset(
+        scrollable_widths,
+        cursor_in_scrollable,
+        current_offset,
+        remaining_width,
+        num_scrollable
+      )
     end
   end
 
@@ -277,7 +284,8 @@ defmodule Drafter.Widget.DataTable.Columns do
 
   def reorder_column(state, _display_col, :left, _trigger_layout_change_fn), do: {:ok, state}
 
-  def reorder_column(state, display_col, :right, trigger_layout_change_fn) when display_col < length(state.columns) - 1 do
+  def reorder_column(state, display_col, :right, trigger_layout_change_fn)
+      when display_col < length(state.columns) - 1 do
     widths = get_column_widths(state, state.width)
     col_order = get_col_order_list(state)
     new_col_order = swap_in_list(col_order, display_col, display_col + 1)

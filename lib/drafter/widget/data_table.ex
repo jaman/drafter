@@ -89,7 +89,7 @@ defmodule Drafter.Widget.DataTable do
 
   use Drafter.Widget,
     traits: [:focusable],
-    handles: [:scroll, :keyboard, :mouse_up, :drag, :hover]
+    handles: [:scroll, :keyboard, :press, :mouse_up, :drag, :hover]
 
   alias Drafter.ThemeManager
   alias Drafter.Widget.Callback
@@ -136,7 +136,8 @@ defmodule Drafter.Widget.DataTable do
       resize_start_width: nil,
       reorder_col: nil,
       dragging_scrollbar: false,
-      hovering_scrollbar: false
+      hovering_scrollbar: false,
+      scrollbar_grab: 0
     },
     scroll: %{
       offset: 0,
@@ -173,7 +174,8 @@ defmodule Drafter.Widget.DataTable do
           callbacks: %{
             on_select: ([row()] -> term()) | nil,
             on_sort: (atom(), sort_direction() -> term()) | nil,
-            on_layout_change: (%{col_widths: [pos_integer()], col_order: [non_neg_integer()]} -> term()) | nil,
+            on_layout_change:
+              (%{col_widths: [pos_integer()], col_order: [non_neg_integer()]} -> term()) | nil,
             on_row_highlight: (row() -> term()) | nil,
             on_header_select: (atom() -> term()) | nil
           },
@@ -189,7 +191,8 @@ defmodule Drafter.Widget.DataTable do
             resize_start_width: integer() | nil,
             reorder_col: non_neg_integer() | nil,
             dragging_scrollbar: boolean(),
-            hovering_scrollbar: boolean()
+            hovering_scrollbar: boolean(),
+            scrollbar_grab: non_neg_integer()
           },
           scroll: %{
             offset: integer(),
@@ -245,7 +248,6 @@ defmodule Drafter.Widget.DataTable do
           {data, nil, :asc}
       end
 
-
     highlighted_index = if sorted_data != [], do: 0, else: nil
     selected_indices = MapSet.new()
 
@@ -269,9 +271,11 @@ defmodule Drafter.Widget.DataTable do
       },
       styles: %{
         base: Map.get(props, :style, %{fg: {200, 200, 200}, bg: {30, 30, 30}}),
-        header: Map.get(props, :header_style, %{fg: {255, 255, 255}, bg: {60, 60, 60}, bold: true}),
+        header:
+          Map.get(props, :header_style, %{fg: {255, 255, 255}, bg: {60, 60, 60}, bold: true}),
         selected: Map.get(props, :selected_style, %{fg: {255, 255, 255}, bg: {0, 120, 215}}),
-        cursor: Map.get(props, :cursor_style, %{fg: {255, 255, 255}, bg: {50, 100, 200}, bold: true})
+        cursor:
+          Map.get(props, :cursor_style, %{fg: {255, 255, 255}, bg: {50, 100, 200}, bold: true})
       },
       drag: %{
         resize_col: nil,
@@ -279,7 +283,8 @@ defmodule Drafter.Widget.DataTable do
         resize_start_width: nil,
         reorder_col: nil,
         dragging_scrollbar: false,
-        hovering_scrollbar: false
+        hovering_scrollbar: false,
+        scrollbar_grab: 0
       },
       scroll: %{
         offset: 0,
@@ -308,13 +313,24 @@ defmodule Drafter.Widget.DataTable do
     }
   end
 
+  @doc """
+  Stores the laid-out geometry on the state.
+
+  Returns the state with `:viewport_height` and `:width` taken from `rect`, so
+  scroll and scrollbar calculations run against the geometry the widget was
+  actually given rather than the values supplied at mount.
+  """
   def on_rect_change(rect, state) do
     %{state | viewport_height: rect.height, width: rect.width}
   end
 
   @impl Drafter.Widget
   def render(state, rect) do
-    st = state |> Rendering.normalize_state() |> Rendering.apply_theme_styles(ThemeManager.get_current_theme())
+    st =
+      state
+      |> Rendering.normalize_state()
+      |> Rendering.apply_theme_styles(ThemeManager.get_current_theme())
+
     st = %{st | viewport_height: rect.height}
 
     content_width = min(st.width, rect.width)
@@ -327,6 +343,7 @@ defmodule Drafter.Widget.DataTable do
       if st.show_header,
         do: [Rendering.render_header(st, column_widths, tbl_width, focused(st))],
         else: []
+
     data_strips = Rendering.render_data_strips(st, column_widths, tbl_width, data_height)
 
     final_strips =
@@ -350,10 +367,17 @@ defmodule Drafter.Widget.DataTable do
   end
 
   @impl Drafter.Widget
-  def handle_key(?+, state), do: Columns.resize_cursor_col(state, 2, &Selection.trigger_layout_change/1)
-  def handle_key(?-, state), do: Columns.resize_cursor_col(state, -2, &Selection.trigger_layout_change/1)
-  def handle_key(:+, state), do: Columns.resize_cursor_col(state, 2, &Selection.trigger_layout_change/1)
-  def handle_key(:-, state), do: Columns.resize_cursor_col(state, -2, &Selection.trigger_layout_change/1)
+  def handle_key(?+, state),
+    do: Columns.resize_cursor_col(state, 2, &Selection.trigger_layout_change/1)
+
+  def handle_key(?-, state),
+    do: Columns.resize_cursor_col(state, -2, &Selection.trigger_layout_change/1)
+
+  def handle_key(:+, state),
+    do: Columns.resize_cursor_col(state, 2, &Selection.trigger_layout_change/1)
+
+  def handle_key(:-, state),
+    do: Columns.resize_cursor_col(state, -2, &Selection.trigger_layout_change/1)
 
   def handle_key(:left, state) do
     if focused(state) do
@@ -378,11 +402,17 @@ defmodule Drafter.Widget.DataTable do
   def handle_key(:page_up, state), do: Selection.action_page_up(state, get_data_height(state))
   def handle_key(:page_down, state), do: Selection.action_page_down(state, get_data_height(state))
   def handle_key(:enter, state), do: Selection.action_select_highlighted(state)
-  def handle_key(:space, state), do: Selection.action_toggle_selection(state)
+  def handle_key(:" ", state), do: Selection.action_toggle_selection(state)
   def handle_key(_key, state), do: {:bubble, state}
 
-  def handle_key(:left, [:shift], state), do: Columns.reorder_column(state, state.cursor_col, :left, &Selection.trigger_layout_change/1)
-  def handle_key(:right, [:shift], state), do: Columns.reorder_column(state, state.cursor_col, :right, &Selection.trigger_layout_change/1)
+  @impl Drafter.Widget
+  def handle_key(:left, [:shift], state),
+    do: Columns.reorder_column(state, state.cursor_col, :left, &Selection.trigger_layout_change/1)
+
+  def handle_key(:right, [:shift], state),
+    do:
+      Columns.reorder_column(state, state.cursor_col, :right, &Selection.trigger_layout_change/1)
+
   def handle_key(_key, _mods, state), do: {:bubble, state}
 
   @impl Drafter.Widget
@@ -401,17 +431,37 @@ defmodule Drafter.Widget.DataTable do
   end
 
   @impl Drafter.Widget
+  def handle_press(x, y, state) do
+    Selection.handle_press(state, x, y)
+  end
+
+  @impl Drafter.Widget
   def handle_mouse_up(x, y, state) do
     was_resizing = state.drag.resize_col != nil
     was_reordering = state.drag.reorder_col != nil
+    was_scrolling = state.drag.dragging_scrollbar
 
-    state = put_in(state.drag, %{state.drag | resize_col: nil, resize_start_x: nil, resize_start_width: nil, reorder_col: nil})
+    state =
+      put_in(state.drag, %{
+        state.drag
+        | resize_col: nil,
+          resize_start_x: nil,
+          resize_start_width: nil,
+          reorder_col: nil,
+          dragging_scrollbar: false,
+          scrollbar_grab: 0
+      })
 
-    if was_resizing or was_reordering do
-      Selection.trigger_layout_change(state)
-      {:ok, state}
-    else
-      Selection.handle_mouse_click(state, x, y)
+    cond do
+      was_scrolling ->
+        {:ok, state}
+
+      was_resizing or was_reordering ->
+        Selection.trigger_layout_change(state)
+        {:ok, state}
+
+      true ->
+        Selection.handle_mouse_click(state, x, y)
     end
   end
 
@@ -428,18 +478,27 @@ defmodule Drafter.Widget.DataTable do
     Columns.do_column_reorder(state, x)
   end
 
-  def handle_drag(x, y, state) when y == 0 and state.show_header and state.locked and state.resizable do
+  def handle_drag(x, y, state)
+      when y == 0 and state.show_header and state.locked and state.resizable do
     col = Columns.calculate_column_from_x(state, x)
     widths = Columns.get_column_widths(state, state.width)
     start_width = Enum.at(widths, col, 10)
-    {:ok, %{state | drag: %{state.drag | resize_col: col, resize_start_x: x, resize_start_width: start_width}, _col_widths: widths}}
+
+    {:ok,
+     %{
+       state
+       | drag: %{state.drag | resize_col: col, resize_start_x: x, resize_start_width: start_width},
+         _col_widths: widths
+     }}
   end
 
   def handle_drag(x, y, state) when y == 0 and state.show_header and not state.locked do
     col = Columns.calculate_column_from_x(state, x)
     widths = Columns.get_column_widths(state, state.width)
     col_order = Columns.get_col_order_list(state)
-    {:ok, %{state | drag: %{state.drag | reorder_col: col}, _col_widths: widths, _col_order: col_order}}
+
+    {:ok,
+     %{state | drag: %{state.drag | reorder_col: col}, _col_widths: widths, _col_order: col_order}}
   end
 
   def handle_drag(x, y, state), do: Selection.handle_mouse_drag(state, x, y)
@@ -453,7 +512,11 @@ defmodule Drafter.Widget.DataTable do
   def handle_custom_event({:mouse, %{type: :mouse_up, x: x, y: y}}, state) do
     cond do
       state.drag.resize_col ->
-        {:ok, %{state | drag: %{state.drag | resize_col: nil, resize_start_x: nil, resize_start_width: nil}}}
+        {:ok,
+         %{
+           state
+           | drag: %{state.drag | resize_col: nil, resize_start_x: nil, resize_start_width: nil}
+         }}
 
       state.drag.dragging_scrollbar ->
         Selection.handle_mouse_release(state, x, y)
@@ -510,7 +573,8 @@ defmodule Drafter.Widget.DataTable do
       state
       | columns: new_columns,
         data: sorted_data,
-        highlighted_index: clamp_highlighted_index(%{state | data: sorted_data}, state.highlighted_index),
+        highlighted_index:
+          clamp_highlighted_index(%{state | data: sorted_data}, state.highlighted_index),
         selection_mode: Map.get(props, :selection_mode, state.selection_mode),
         callbacks: %{
           on_select: Map.get(props, :on_select, state.callbacks.on_select),

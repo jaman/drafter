@@ -64,13 +64,13 @@ defmodule Drafter.Widget.Trait.Editable do
   end
 
   def handle_event({:key, key}, trait_state, _widget_state)
-      when key in [:left, :"ArrowLeft"] do
+      when key in [:left, :ArrowLeft] do
     new_pos = max(0, trait_state._cursor_position - 1)
     {:ok, %{trait_state | _cursor_position: new_pos, _selection_start: nil, _selection_end: nil}}
   end
 
   def handle_event({:key, key}, trait_state, _widget_state)
-      when key in [:right, :"ArrowRight"] do
+      when key in [:right, :ArrowRight] do
     max_pos = String.length(trait_state._text)
     new_pos = min(max_pos, trait_state._cursor_position + 1)
     {:ok, %{trait_state | _cursor_position: new_pos, _selection_start: nil, _selection_end: nil}}

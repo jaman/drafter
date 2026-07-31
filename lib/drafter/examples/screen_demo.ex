@@ -10,7 +10,8 @@ defmodule Drafter.Examples.ScreenDemo do
   end
 
   def handle_event(:show_modal_on_start, _data, _state) do
-    {:show_modal, Drafter.Examples.ScreenDemo.InfoModal, %{title: "Auto-Opened Modal"}, [title: "Info Modal", width: 50, height: 15]}
+    {:show_modal, Drafter.Examples.ScreenDemo.InfoModal, %{title: "Auto-Opened Modal"},
+     [title: "Info Modal", width: 50, height: 15]}
   end
 
   def handle_event(:increment, _data, state) do
@@ -92,20 +93,24 @@ defmodule Drafter.Examples.ScreenDemo do
   end
 
   def handle_event(:show_modal_on_start, _state) do
-    {:show_modal, Drafter.Examples.ScreenDemo.InfoModal, %{title: "Auto-Opened Modal"}, [title: "Info Modal", width: 50, height: 15]}
+    {:show_modal, Drafter.Examples.ScreenDemo.InfoModal, %{title: "Auto-Opened Modal"},
+     [title: "Info Modal", width: 50, height: 15]}
   end
 
   def handle_event({:key, ?m}, state), do: handle_event({:key, :m}, state)
+
   def handle_event({:key, :m}, _state) do
     {:show_modal, Drafter.Examples.ScreenDemo.InfoModal, %{}, [title: "Quick Modal"]}
   end
 
   def handle_event({:key, ?t}, state), do: handle_event({:key, :t}, state)
+
   def handle_event({:key, :t}, _state) do
     {:show_toast, "Keyboard shortcut toast!", []}
   end
 
   def handle_event({:key, ?q}, state), do: handle_event({:key, :q}, state)
+
   def handle_event({:key, :q}, _state) do
     {:stop, :normal}
   end
@@ -190,7 +195,10 @@ defmodule Drafter.Examples.ScreenDemo.ConfirmModal do
               on_click: :cancel,
               variant: if(state.selected == :no, do: :primary, else: :default)
             )
-          ], gap: 2, align: :center)
+          ],
+          gap: 2,
+          align: :center
+        )
       ],
       padding: 1
     )

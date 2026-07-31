@@ -43,7 +43,7 @@ defmodule Drafter.Widget.Trait.CollapsibleTraitTest do
 
     test "space toggles expanded state" do
       state = %{Collapsible.default_state() | _expanded: true}
-      {:ok, new_state} = Collapsible.handle_event({:key, :space}, state, %{})
+      {:ok, new_state} = Collapsible.handle_event({:key, :" "}, state, %{})
       assert new_state._expanded == false
     end
 

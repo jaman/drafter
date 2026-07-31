@@ -2,7 +2,7 @@ Mix.install([
   {:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"},
   {:elixir_make, "~> 0.9"},
   {:spark, "~> 2.6"}
-])
+], consolidate_protocols: false)
 
 defmodule NewWidgetsDemo do
   use Drafter.App

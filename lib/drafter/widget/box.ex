@@ -68,9 +68,36 @@ defmodule Drafter.Widget.Box do
     border_offset = if has_border, do: 1, else: 0
 
     content_height = max(0, rect.height - border_offset * 2 - state.padding * 2)
-    top = if has_border, do: [render_top_border(chars, rect.width, state.title, border_style_map, title_style_map)], else: []
-    pad_top = if state.padding > 0, do: render_padding_rows(chars, rect.width, state.padding, has_border, base_style, border_style_map), else: []
-    content = render_content_rows(chars, rect.width, content_height, state.padding, has_border, base_style, border_style_map)
+
+    top =
+      if has_border,
+        do: [render_top_border(chars, rect.width, state.title, border_style_map, title_style_map)],
+        else: []
+
+    pad_top =
+      if state.padding > 0,
+        do:
+          render_padding_rows(
+            chars,
+            rect.width,
+            state.padding,
+            has_border,
+            base_style,
+            border_style_map
+          ),
+        else: []
+
+    content =
+      render_content_rows(
+        chars,
+        rect.width,
+        content_height,
+        state.padding,
+        has_border,
+        base_style,
+        border_style_map
+      )
+
     pad_bot = pad_top
     bot = if has_border, do: [render_bottom_border(chars, rect.width, border_style_map)], else: []
 

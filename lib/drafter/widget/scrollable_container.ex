@@ -109,7 +109,7 @@ defmodule Drafter.Widget.ScrollableContainer do
     viewport_height = min(rect.height, state.viewport_height)
     {thumb_start, thumb_height} = get_thumb_position(state)
 
-    Enum.map(0..(viewport_height - 1), fn row ->
+    Enum.map(0..(viewport_height - 1)//1, fn row ->
       is_thumb = row >= thumb_start and row < thumb_start + thumb_height
       {char, style} = scrollbar_cell(is_thumb, state, styles)
       Strip.new([Segment.new(char, style)])
@@ -131,8 +131,13 @@ defmodule Drafter.Widget.ScrollableContainer do
   end
 
   defp scrollbar_cell(false, _state, styles), do: {CharacterSet.scroll(:track), styles.track}
-  defp scrollbar_cell(true, %{dragging_scrollbar: true}, styles), do: {CharacterSet.scroll(:thumb_drag), styles.thumb_drag}
-  defp scrollbar_cell(true, %{hovering_scrollbar: true}, styles), do: {CharacterSet.scroll(:thumb_hover), styles.thumb_hover}
+
+  defp scrollbar_cell(true, %{dragging_scrollbar: true}, styles),
+    do: {CharacterSet.scroll(:thumb_drag), styles.thumb_drag}
+
+  defp scrollbar_cell(true, %{hovering_scrollbar: true}, styles),
+    do: {CharacterSet.scroll(:thumb_hover), styles.thumb_hover}
+
   defp scrollbar_cell(true, _state, styles), do: {CharacterSet.scroll(:thumb), styles.thumb}
 
   def handle_event({:key, :up}, state), do: scroll_by(state, 0, -1)
@@ -147,7 +152,9 @@ defmodule Drafter.Widget.ScrollableContainer do
   end
 
   def handle_event({:mouse, %{type: :scroll, direction: :up}}, state), do: scroll_by(state, 0, -3)
-  def handle_event({:mouse, %{type: :scroll, direction: :down}}, state), do: scroll_by(state, 0, 3)
+
+  def handle_event({:mouse, %{type: :scroll, direction: :down}}, state),
+    do: scroll_by(state, 0, 3)
 
   def handle_event({:mouse, %{type: :mouse_down, x: 0, y: y}}, state) do
     {thumb_start, thumb_height} = get_thumb_position(state)

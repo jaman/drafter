@@ -204,7 +204,12 @@ defmodule Drafter.Widget.Calendar do
 
       trailing =
         if padding_width > 0 do
-          [Segment.new(String.duplicate(" ", padding_width), %{fg: theme.text_primary, bg: theme.background})]
+          [
+            Segment.new(String.duplicate(" ", padding_width), %{
+              fg: theme.text_primary,
+              bg: theme.background
+            })
+          ]
         else
           []
         end

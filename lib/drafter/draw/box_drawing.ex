@@ -1,9 +1,9 @@
 defmodule Drafter.Draw.BoxDrawing do
   @moduledoc """
-  Unicode box drawing characters and logical combination.
+  Unicode box drawing characters and the rules for combining them.
 
-  Provides comprehensive support for drawing boxes, lines, and borders
-  using Unicode box drawing characters with proper character combination logic.
+  Provides character sets for each line type, functions for drawing boxes, lines
+  and borders, and the junction character that results when two lines meet.
   """
 
   @type line_type :: :light | :heavy | :double | :dotted | :dashed

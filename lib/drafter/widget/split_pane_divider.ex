@@ -38,6 +38,7 @@ defmodule Drafter.Widget.SplitPaneDivider do
   ]
 
   @spec mount(map()) :: %__MODULE__{}
+  @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
       id: Map.get(props, :id),
@@ -53,6 +54,7 @@ defmodule Drafter.Widget.SplitPaneDivider do
   end
 
   @spec update(map(), %__MODULE__{}) :: %__MODULE__{}
+  @impl Drafter.Widget
   def update(props, state) do
     new_total = Map.get(props, :total_size, state.total_size)
 
@@ -78,6 +80,7 @@ defmodule Drafter.Widget.SplitPaneDivider do
   end
 
   @spec render(%__MODULE__{}, map()) :: [Strip.t()]
+  @impl Drafter.Widget
   def render(state, rect) do
     theme = ThemeManager.get_current_theme()
     color = if state.focused, do: theme.primary, else: theme.text_muted
@@ -88,31 +91,41 @@ defmodule Drafter.Widget.SplitPaneDivider do
     end
   end
 
-  @spec handle_key(term(), %__MODULE__{}) :: {:ok, %__MODULE__{}} | {:bubble, %__MODULE__{}}
-  def handle_key({:alt, :left}, %{orientation: :horizontal} = state) do
-    {:ok, nudge(state, -@nudge_px)}
+  @impl Drafter.Widget
+  @spec handle_key(term(), Drafter.Widget.modifiers(), %__MODULE__{}) ::
+          {:ok, %__MODULE__{}} | {:bubble, %__MODULE__{}}
+  def handle_key(direction, mods, state) when is_list(mods) do
+    if resize_modifier?(mods) do
+      nudge_toward(direction, state)
+    else
+      {:bubble, state}
+    end
   end
 
-  def handle_key({:alt, :right}, %{orientation: :horizontal} = state) do
-    {:ok, nudge(state, @nudge_px)}
-  end
-
-  def handle_key({:alt, :up}, %{orientation: :vertical} = state) do
-    {:ok, nudge(state, -@nudge_px)}
-  end
-
-  def handle_key({:alt, :down}, %{orientation: :vertical} = state) do
-    {:ok, nudge(state, @nudge_px)}
-  end
-
+  @impl Drafter.Widget
+  @spec handle_key(term(), %__MODULE__{}) :: {:bubble, %__MODULE__{}}
   def handle_key(_key, state), do: {:bubble, state}
 
+  defp resize_modifier?(mods), do: Enum.any?(mods, &(&1 in [:alt, :shift]))
+
+  defp nudge_toward(:left, %{orientation: :horizontal} = state),
+    do: {:ok, nudge(state, -@nudge_px)}
+
+  defp nudge_toward(:right, %{orientation: :horizontal} = state),
+    do: {:ok, nudge(state, @nudge_px)}
+
+  defp nudge_toward(:up, %{orientation: :vertical} = state), do: {:ok, nudge(state, -@nudge_px)}
+  defp nudge_toward(:down, %{orientation: :vertical} = state), do: {:ok, nudge(state, @nudge_px)}
+  defp nudge_toward(_direction, state), do: {:bubble, state}
+
   @spec handle_press(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}}
+  @impl Drafter.Widget
   def handle_press(_x, _y, state) do
     {:ok, %{state | dragging: true, drag_start_pos: effective_pos(state)}}
   end
 
   @spec handle_drag(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}, list()}
+  @impl Drafter.Widget
   def handle_drag(x, y, %{resize_mode: :live} = state) do
     delta = if state.orientation == :horizontal, do: x, else: y
     new_pos = clamp_pos(effective_pos(state) + delta, state.total_size)
@@ -126,6 +139,7 @@ defmodule Drafter.Widget.SplitPaneDivider do
   end
 
   @spec handle_mouse_up(integer(), integer(), %__MODULE__{}) :: {:ok, %__MODULE__{}, list()}
+  @impl Drafter.Widget
   def handle_mouse_up(_x, _y, %{resize_mode: :live} = state) do
     {:ok, %{state | dragging: false}}
   end
@@ -153,7 +167,7 @@ defmodule Drafter.Widget.SplitPaneDivider do
     char = CharacterSet.box(:v_line)
     mid_row = div(rect.height, 2)
 
-    Enum.map(0..(rect.height - 1), fn row ->
+    Enum.map(0..(rect.height - 1)//1, fn row ->
       display_char =
         if state.show_handle && state.focused && row == mid_row do
           CharacterSet.box(:cross)
@@ -172,7 +186,9 @@ defmodule Drafter.Widget.SplitPaneDivider do
     line =
       if state.show_handle && state.focused && rect.width > 1 do
         mid = div(rect.width, 2)
-        String.slice(line, 0, mid) <> CharacterSet.box(:cross) <> String.slice(line, mid + 1, rect.width)
+
+        String.slice(line, 0, mid) <>
+          CharacterSet.box(:cross) <> String.slice(line, mid + 1, rect.width)
       else
         line
       end

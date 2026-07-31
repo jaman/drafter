@@ -33,6 +33,7 @@ defmodule Drafter.Widget.RichLog do
   use Drafter.Widget
 
   alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.RingBuffer
   alias Drafter.Style.Computed
   alias Drafter.Text
 
@@ -60,7 +61,7 @@ defmodule Drafter.Widget.RichLog do
     reverse = Map.get(props, :reverse, true)
 
     %__MODULE__{
-      lines: Map.get(props, :lines, []) |> Enum.take(max_lines),
+      lines: props |> Map.get(:lines, []) |> normalize_lines(max_lines),
       max_lines: max_lines,
       auto_scroll: auto_scroll,
       wrap: wrap,
@@ -97,27 +98,39 @@ defmodule Drafter.Widget.RichLog do
 
     visible_lines = get_visible_lines(state, rect.height)
 
-    rendered_lines =
-      Enum.with_index(visible_lines, fn line, idx ->
-        render_rich_line(
-          line,
-          idx,
-          state,
-          content_width,
-          line_number_width,
-          default_fg,
-          default_bg
-        )
-      end)
+    rows =
+      Enum.flat_map(
+        Enum.with_index(visible_lines),
+        fn {line, idx} ->
+          render_rich_line(
+            line,
+            idx,
+            state,
+            content_width,
+            line_number_width,
+            default_fg,
+            default_bg
+          )
+        end
+      )
 
-    all_segments = List.flatten(rendered_lines)
+    blank =
+      Strip.new([
+        Segment.new(String.duplicate(" ", rect.width), %{fg: default_fg, bg: default_bg})
+      ])
 
-    if all_segments != [] do
-      [Strip.new(all_segments)]
-    else
-      empty_line = String.duplicate(" ", rect.width)
-      empty_style = %{fg: default_fg, bg: default_bg}
-      [Strip.new([Segment.new(empty_line, empty_style)])]
+    rows
+    |> Enum.map(&Strip.new/1)
+    |> fit_to_height(rect.height, blank, state.reverse)
+  end
+
+  defp fit_to_height(strips, height, blank, reverse) do
+    overflow = length(strips) - height
+
+    cond do
+      overflow > 0 and reverse -> Enum.drop(strips, overflow)
+      overflow > 0 -> Enum.take(strips, height)
+      true -> strips ++ List.duplicate(blank, -overflow)
     end
   end
 
@@ -127,13 +140,16 @@ defmodule Drafter.Widget.RichLog do
     dispatch_rich_log_event(event, state)
   end
 
-  defp dispatch_rich_log_event({:write, content}, state) when is_binary(content) or is_tuple(content) do
+  defp dispatch_rich_log_event({:write, content}, state)
+       when is_binary(content) or is_tuple(content) do
     new_state = %{state | lines: add_line(state, content)}
     {:ok, if(state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state)}
   end
 
   defp dispatch_rich_log_event({:write_lines, lines}, state) when is_list(lines) do
-    new_lines = Enum.reduce(lines, state.lines, fn line, acc -> add_line(%{state | lines: acc}, line) end)
+    new_lines =
+      Enum.reduce(lines, state.lines, fn line, acc -> add_line(%{state | lines: acc}, line) end)
+
     new_state = %{state | lines: new_lines}
     {:ok, if(state.auto_scroll, do: scroll_to_bottom(new_state), else: new_state)}
   end
@@ -149,9 +165,12 @@ defmodule Drafter.Widget.RichLog do
 
   @impl Drafter.Widget
   def update(props, state) do
+    max_lines = Map.get(props, :max_lines, state.max_lines)
+
     %{
       state
-      | max_lines: Map.get(props, :max_lines, state.max_lines),
+      | lines: props |> Map.get(:lines, state.lines) |> normalize_lines(max_lines),
+        max_lines: max_lines,
         auto_scroll: Map.get(props, :auto_scroll, state.auto_scroll),
         wrap: Map.get(props, :wrap, state.wrap),
         show_line_numbers: Map.get(props, :show_line_numbers, state.show_line_numbers),
@@ -182,15 +201,32 @@ defmodule Drafter.Widget.RichLog do
     }
   end
 
-  def update_props_from_mount(_mount_props, _existing_state, _opts), do: %{}
+  def update_props_from_mount(mount_props, _existing_state, _opts) do
+    Map.take(mount_props, [:lines, :max_lines, :auto_scroll, :wrap, :reverse, :show_line_numbers])
+  end
+
+  @impl Drafter.Widget
+  def apply_data_buffer(state, buffer, _rect) do
+    %{
+      state
+      | lines: buffer |> RingBuffer.last_n(state.max_lines) |> normalize_lines(state.max_lines)
+    }
+  end
 
   defp add_line(state, line) do
     new_lines = state.lines ++ [parse_line(line)]
     Enum.take(new_lines, -state.max_lines)
   end
 
-  defp parse_line(line) when is_binary(line), do: {line, %{}}
+  defp normalize_lines(lines, max_lines) do
+    lines
+    |> Enum.map(&parse_line/1)
+    |> Enum.take(-max_lines)
+  end
+
   defp parse_line({line, meta}) when is_binary(line) and is_map(meta), do: {line, meta}
+  defp parse_line(line) when is_binary(line), do: {line, %{}}
+  defp parse_line(other), do: {to_string(other), %{}}
 
   defp get_visible_lines(state, visible_count) do
     total_lines = length(state.lines)
@@ -259,13 +295,22 @@ defmodule Drafter.Widget.RichLog do
         [Text.truncate(text, width)]
       end
 
-    content_segments =
-      Enum.map(wrapped, fn wrapped_line ->
-        padded = String.pad_trailing(wrapped_line, width, " ")
-        Segment.new(padded, line_style)
-      end)
+    gutter =
+      List.duplicate(
+        Segment.new(String.duplicate(" ", line_number_width), %{bg: bg}),
+        min(1, line_number_width)
+      )
 
-    line_number ++ content_segments
+    wrapped
+    |> Enum.with_index()
+    |> Enum.map(fn {wrapped_line, row} ->
+      prefix = if row == 0, do: line_number, else: gutter
+      prefix ++ [Segment.new(pad_to_width(wrapped_line, width), line_style)]
+    end)
+  end
+
+  defp pad_to_width(text, width) do
+    text <> String.duplicate(" ", max(0, width - Text.display_width(text)))
   end
 
   defp scroll_to_bottom(state) do

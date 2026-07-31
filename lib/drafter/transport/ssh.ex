@@ -62,11 +62,11 @@ defmodule Drafter.Transport.SSH do
 
   defp build_session_opts(app_module, :shared, mount_props) do
     shared_state = Session.SharedState.get_or_start(app_module)
-    [mode: :shared, shared_state: shared_state] ++ Map.to_list(mount_props)
+    [mode: :shared, shared_state: shared_state, props: mount_props]
   end
 
   defp build_session_opts(_app_module, mode, mount_props) do
-    [mode: mode] ++ Map.to_list(mount_props)
+    [mode: mode, props: mount_props]
   end
 
   defp start_session_services(driver_pid) do
@@ -83,7 +83,13 @@ defmodule Drafter.Transport.SSH do
     {:ok, eh} = EventHandler.start_link(name: nil)
     {:ok, sm} = ScreenManager.start_link(name: nil, event_handler: eh)
 
-    %{event_manager: em, compositor: comp, screen_manager: sm, theme_manager: tm, event_handler: eh}
+    %{
+      event_manager: em,
+      compositor: comp,
+      screen_manager: sm,
+      theme_manager: tm,
+      event_handler: eh
+    }
   end
 
   defp stop_session_services(ctx) do

@@ -178,7 +178,10 @@ defmodule Drafter.Widget.Tree do
     content_height = rect.height
 
     all_items = flatten_for_display(normalized_state)
-    thumb = Scrollbar.thumb_rows(normalized_state.scroll_offset, length(all_items), content_height)
+
+    thumb =
+      Scrollbar.thumb_rows(normalized_state.scroll_offset, length(all_items), content_height)
+
     item_width = if thumb, do: max(1, content_width - 1), else: content_width
     sb_styles = Scrollbar.styles(theme)
 
@@ -220,18 +223,28 @@ defmodule Drafter.Widget.Tree do
   @impl Drafter.Widget
   def handle_event({:key, :up}, %{focused: true} = state), do: move_cursor_up(state)
   def handle_event({:key, :down}, %{focused: true} = state), do: move_cursor_down(state)
-  def handle_event({:key, {:shift, :left}}, %{focused: true} = state), do: move_to_prev_sibling(state)
-  def handle_event({:key, {:shift, :right}}, %{focused: true} = state), do: move_to_next_sibling(state)
+
+  def handle_event({:key, :left, [:shift]}, %{focused: true} = state),
+    do: move_to_prev_sibling(state)
+
+  def handle_event({:key, :right, [:shift]}, %{focused: true} = state),
+    do: move_to_next_sibling(state)
+
   def handle_event({:key, :left}, %{focused: true} = state), do: collapse_current_node(state)
   def handle_event({:key, :right}, %{focused: true} = state), do: expand_current_node(state)
   def handle_event({:key, :enter}, %{focused: true} = state), do: toggle_current_node(state)
-  def handle_event({:key, :space}, %{focused: true} = state), do: toggle_selection(state)
-  def handle_event({:key, "+"}, %{focused: true} = state), do: expand_current_node(state)
-  def handle_event({:key, "-"}, %{focused: true} = state), do: collapse_current_node(state)
-  def handle_event({:key, "*"}, %{focused: true} = state), do: expand_all_nodes(state)
-  def handle_event({:key, "/"}, %{focused: true} = state), do: collapse_all_nodes(state)
-  def handle_event({:mouse, %{type: :mouse_up, x: _x, y: y}}, state), do: handle_mouse_click(state, y)
-  def handle_event({:mouse, %{type: :scroll, direction: dir}}, state), do: handle_scroll(dir, state)
+  def handle_event({:key, :" "}, %{focused: true} = state), do: toggle_selection(state)
+  def handle_event({:key, :+}, %{focused: true} = state), do: expand_current_node(state)
+  def handle_event({:key, :-}, %{focused: true} = state), do: collapse_current_node(state)
+  def handle_event({:key, :*}, %{focused: true} = state), do: expand_all_nodes(state)
+  def handle_event({:key, :/}, %{focused: true} = state), do: collapse_all_nodes(state)
+
+  def handle_event({:mouse, %{type: :mouse_up, x: _x, y: y}}, state),
+    do: handle_mouse_click(state, y)
+
+  def handle_event({:mouse, %{type: :scroll, direction: dir}}, state),
+    do: handle_scroll(dir, state)
+
   def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
   def handle_event(_event, state), do: {:noreply, state}
@@ -240,10 +253,8 @@ defmodule Drafter.Widget.Tree do
   def update(props, state) do
     new_data = Map.get(props, :data, state.data)
 
-    # Preserve expansion state when data updates
     normalized_data = normalize_tree_data(new_data)
 
-    # Adjust cursor if it's out of bounds
     display_items = flatten_for_display(%{state | data: normalized_data})
     max_index = max(0, length(display_items) - 1)
     cursor_index = min(state.cursor_index, max_index)
@@ -267,8 +278,6 @@ defmodule Drafter.Widget.Tree do
         height: Map.get(props, :height, state.height)
     }
   end
-
-  # Navigation functions
 
   defp move_cursor_up(state) do
     if state.cursor_index > 0 do
@@ -303,8 +312,6 @@ defmodule Drafter.Widget.Tree do
       {:noreply, state}
     end
   end
-
-  # Expansion/collapse functions
 
   defp expand_current_node(state) do
     display_items = flatten_for_display(state)
@@ -381,8 +388,6 @@ defmodule Drafter.Widget.Tree do
     {:ok, %{state | expanded_nodes: MapSet.new()}}
   end
 
-  # Selection functions
-
   defp toggle_selection(state) do
     case state.selection_mode do
       :none ->
@@ -430,8 +435,6 @@ defmodule Drafter.Widget.Tree do
     end
   end
 
-  # Mouse handling
-
   defp handle_mouse_click(state, y) do
     clicked_index = y + state.scroll_offset
     display_items = flatten_for_display(state)
@@ -446,7 +449,8 @@ defmodule Drafter.Widget.Tree do
     end
   end
 
-  defp click_toggle_node(state, %{children: children} = item) when is_list(children) and children != [] do
+  defp click_toggle_node(state, %{children: children} = item)
+       when is_list(children) and children != [] do
     new_state =
       if MapSet.member?(state.expanded_nodes, item.id) do
         trigger_expand(state, item, false)
@@ -463,15 +467,15 @@ defmodule Drafter.Widget.Tree do
 
   defp select_on_click(state, item) do
     case state.selection_mode do
-      :none -> {:ok, state}
+      :none ->
+        {:ok, state}
+
       _ ->
         new_state = %{state | selected_nodes: MapSet.new([item.id])}
         trigger_selection(new_state)
         {:ok, new_state}
     end
   end
-
-  # Rendering functions
 
   defp expansion_char(item, expanded_nodes) do
     if item.children && item.children != [] do
@@ -520,8 +524,6 @@ defmodule Drafter.Widget.Tree do
 
     Strip.new([Segment.new(formatted_content, style)])
   end
-
-  # Helper functions
 
   defp normalize_tree_data(data) when is_map(data) do
     data
