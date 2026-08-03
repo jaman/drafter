@@ -135,7 +135,7 @@ defmodule Drafter.MixProject do
     [
       {:elixir_make, "~> 0.9"},
       {:spark, "~> 2.6"},
-      {:french_curve, github: "jaman/french_curve"},
+      {:french_curve, "~> 0.1"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:plumb, "~> 0.1", only: :dev, runtime: false},
       {:phoenix_pubsub, "~> 2.1"},
