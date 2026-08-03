@@ -865,7 +865,6 @@ elixir examples/spark/34_breakpoints.exs
 - [Remote TUI](guides/remote_tui.md) - serve an app over SSH or Telnet
 - [Large Text](guides/large_text.md) - the `digits` font catalogue, how the fonts are built, and how to choose between them
 - [Design Notes](guides/design_notes.md) - why the internals are built the way they are; background for anyone changing them
-- [Contributing](CONTRIBUTING.md) - source layout, house style, and what to run before opening a pull request
 
 ## Keyboard Shortcuts
 

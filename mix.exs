@@ -23,7 +23,6 @@ defmodule Drafter.MixProject do
         extras: [
           "README.md",
           "CHANGELOG.md",
-          "CONTRIBUTING.md",
           "guides/remote_tui.md": [title: "Remote TUI"],
           "guides/writing_widgets.md": [title: "Writing Widgets & Libraries"],
           "guides/large_text.md": [title: "Large Text"],
@@ -129,8 +128,7 @@ defmodule Drafter.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "dev", "test/support"]
-  defp elixirc_paths(:dev), do: ["lib", "dev"]
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
@@ -148,8 +146,7 @@ defmodule Drafter.MixProject do
   defp package do
     [
       maintainers: ["Drafter"],
-      files:
-        ~w(lib c_src guides Makefile mix.exs .formatter.exs README.md CHANGELOG.md CONTRIBUTING.md),
+      files: ~w(lib c_src guides Makefile mix.exs .formatter.exs README.md CHANGELOG.md),
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/jaman/drafter"}
     ]
