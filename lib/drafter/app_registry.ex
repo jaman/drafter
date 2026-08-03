@@ -19,6 +19,12 @@ defmodule Drafter.AppRegistry do
   @table :drafter_app_registry
   @ambiguity_warned {__MODULE__, :ambiguity_warned}
 
+  @doc """
+  Creates the backing ETS table if it does not exist. Returns `:ok` either way.
+
+  Called by `register/0`, `unregister/0`, and `set_frame_interval/1`, so callers do
+  not normally need it.
+  """
   @spec ensure_table() :: :ok
   def ensure_table do
     case :ets.whereis(@table) do
@@ -33,18 +39,36 @@ defmodule Drafter.AppRegistry do
     ArgumentError -> :ok
   end
 
+  @doc """
+  Registers the calling process as the application loop for its session.
+
+  The session id is the `:drafter_compositor` pid in the caller's process
+  dictionary, so this must be called from the loop process itself, after that pid has
+  been adopted. Replaces any loop already registered for that session. Returns `true`.
+  """
   @spec register() :: true
   def register do
     ensure_table()
     :ets.insert(@table, {{:loop, session_key()}, self()})
   end
 
+  @doc """
+  Removes the entry for the calling process's session. Returns `true`, whether or not
+  an entry existed.
+  """
   @spec unregister() :: true
   def unregister do
     ensure_table()
     :ets.delete(@table, {:loop, session_key()})
   end
 
+  @doc """
+  The live loop for the calling process's session, or `nil`.
+
+  Falls back to the sole registered loop when the caller carries no session id.
+  Returns `nil`, after logging once per node, when there is no session id and several
+  loops are running.
+  """
   @spec whereis() :: pid() | nil
   def whereis do
     case :ets.whereis(@table) do
@@ -98,12 +122,22 @@ defmodule Drafter.AppRegistry do
     :ok
   end
 
+  @doc """
+  Records the render frame interval that per-widget render processes throttle to.
+
+  `ms` is a millisecond interval, or `nil` for unthrottled rendering. One value is
+  held per node, not per session. Returns `true`.
+  """
   @spec set_frame_interval(pos_integer() | nil) :: true
   def set_frame_interval(ms) do
     ensure_table()
     :ets.insert(@table, {:frame_interval, ms})
   end
 
+  @doc """
+  The recorded frame interval in milliseconds, or `nil` when none was set or the
+  registry has not been started.
+  """
   @spec get_frame_interval() :: pos_integer() | nil
   def get_frame_interval do
     case :ets.whereis(@table) do

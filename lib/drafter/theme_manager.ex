@@ -17,6 +17,17 @@ defmodule Drafter.ThemeManager do
             available_themes: [],
             app_pid: nil
 
+  @doc """
+  Start a theme manager.
+
+  ## Options
+
+    * `:name` - registered name, or `nil` to start it unnamed for a single session.
+      Default: `Drafter.ThemeManager`.
+
+  Any other options are accepted and ignored; the starting theme is always
+  `Drafter.Theme.dark_theme/0`.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -24,16 +35,34 @@ defmodule Drafter.ThemeManager do
     GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
+  @doc """
+  The active theme for the calling session.
+
+  Resolved through `Drafter.Session.Context`, so it raises when no theme manager is
+  reachable.
+  """
   @spec get_current_theme() :: Drafter.Theme.t()
   def get_current_theme do
     GenServer.call(resolve(), :get_current_theme)
   end
 
+  @doc """
+  Switch the active theme by name, as `Drafter.Theme.get_theme/1` resolves it.
+
+  A name no built-in theme matches is silently ignored and the active theme is left
+  alone. Asynchronous: returns `:ok` before the switch has happened.
+  """
   @spec set_theme(String.t()) :: :ok
   def set_theme(theme_name) do
     GenServer.cast(resolve(), {:set_theme, theme_name})
   end
 
+  @doc """
+  Register the app loop process to receive `{:theme_updated, theme}` on each change.
+
+  Only one process is registered at a time; registering again replaces the previous
+  one. Asynchronous.
+  """
   @spec register_app(pid()) :: :ok
   def register_app(app_pid) do
     GenServer.cast(resolve(), {:register_app, app_pid})

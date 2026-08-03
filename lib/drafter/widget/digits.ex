@@ -11,16 +11,52 @@ defmodule Drafter.Widget.Digits do
   fonts loaded at runtime. See the [large text guide](large_text.md) for the
   catalogue and how to choose between fonts.
 
+  ## Component tag
+
+  Tag `:digits`, built by `Drafter.App` as `{:digits, value, opts}`:
+
+      digits(value, opts)
+
+  The positional argument is passed through `to_string/1` to become `:text`, so
+  it may be any term implementing `String.Chars`. All other props come from
+  `opts`.
+
   ## Options
 
-    * `:text` - string of characters to render (default `""`)
-    * `:style` - map of style properties applied to all characters
-    * `:align` - horizontal alignment within the available width: `:left` (default), `:center`, `:right`
-    * `:font` - a name from `Drafter.Widget.Digits.Font.names/0`, or a font map; overrides `:size`
-    * `:size` - coarse size when no `:font` is given: `:large` (default, 7×5) or `:small` (5×3)
-    * `:renderer` - `:text` (default) draws cells; `:graphics` transmits an image on a terminal that supports kitty, iTerm2, or sixel, falling back to cells where none is available
-    * `:bg_data` - optional list of numbers; when set, renders an area-chart fill behind the digits using per-cell bg colors (same composite as Grafana's graphMode: area stat panel)
-    * `:color` - `{r, g, b}` fill color for the area chart (default `{0, 150, 255}`); digit glyphs are rendered with an auto-contrasting fg color
+    * `:text` - `t:String.t/0` of characters to render. Default `""`. Supplied
+      positionally through the `digits/2` element, passed through `to_string/1`.
+      Empty text renders nothing at all
+    * `:style` - `t:map/0` of style properties applied to all characters. Default
+      `%{}`
+    * `:align` - horizontal alignment within the available width: `:left` (default),
+      `:center`, `:right`
+    * `:font` - a name from `Drafter.Widget.Digits.Font.names/0`, or a font map.
+      Default `nil`. Overrides `:size` when set
+    * `:size` - coarse size when no `:font` is given: `:large` (default, the
+      `:block` font) or `:small` (the `:compact` font)
+    * `:renderer` - `:text` (default) draws cells; any other value transmits an
+      image on a terminal supporting kitty, iTerm2, or sixel, falling back to cells
+      where none is available
+    * `:bg_data` - list of numbers. Default `nil`. When set, an area-chart fill is
+      drawn behind the digits using per-cell background colours
+    * `:color` - `{r, g, b}` fill colour for the area chart. Default
+      `{0, 150, 255}`. Digit glyphs are drawn in an auto-contrasting foreground
+    * `:bg_min` - value mapped to the bottom of the `:bg_data` area fill. Default `0`
+    * `:bg_max` - value mapped to the top of the `:bg_data` area fill. Default `nil`,
+      which uses the largest sampled value, or `1` when `:bg_data` is empty
+
+  `update/2` merges the props map into the state, so every option is live, and a
+  re-render passes all of them through.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns the rendered `:text` as a `t:String.t/0`,
+  because the value extractor reads the `:text` field.
+
+  ## Data channel
+
+  When the widget is declared with a data buffer, `apply_data_buffer/3` sets `:text`
+  to `to_string/1` of the last item in the buffer.
 
   ## Usage
 
@@ -51,6 +87,30 @@ defmodule Drafter.Widget.Digits do
 
   defp glyph(font, character), do: Font.glyph(font, character)
 
+  @type t :: %{
+          text: String.t(),
+          style: map(),
+          align: :left | :center | :right,
+          size: :large | :small,
+          font: atom() | map() | nil,
+          renderer: atom(),
+          bg_data: [number()] | nil,
+          color: {0..255, 0..255, 0..255},
+          bg_min: number(),
+          bg_max: number() | nil
+        }
+
+  @doc """
+  Builds the digits state from `props`. The state is a plain map, not a struct.
+
+      iex> d = Drafter.Widget.Digits.mount(%{text: "42", size: :small})
+      iex> {d.text, d.size, d.font, d.align}
+      {"42", :small, nil, :left}
+
+      iex> Drafter.Widget.Digits.mount(%{})
+      %{text: "", style: %{}, align: :left, size: :large, font: nil, renderer: :text, bg_data: nil, color: {0, 150, 255}, bg_min: 0, bg_max: nil}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %{
@@ -67,6 +127,18 @@ defmodule Drafter.Widget.Digits do
     }
   end
 
+  @doc """
+  Draws the large characters into `rect`.
+
+  Returns `[]` for empty `:text`. Otherwise it emits one strip per row of the
+  selected font's height, positioned horizontally according to `:align`. With
+  `:bg_data` set, each cell also carries the area-chart background colour for its
+  column.
+
+      iex> Drafter.Widget.Digits.render(Drafter.Widget.Digits.mount(%{}), %{x: 0, y: 0, width: 20, height: 7})
+      []
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     digits = String.graphemes(state.text)
@@ -81,11 +153,24 @@ defmodule Drafter.Widget.Digits do
     end
   end
 
+  @doc """
+  Merges `props` into `state`, so every option is live-updatable.
+
+      iex> d = Drafter.Widget.Digits.mount(%{text: "1"})
+      iex> Drafter.Widget.Digits.update(%{text: "2", align: :center}, d).text
+      "2"
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     Map.merge(state, props)
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`. The widget is not focusable
+  and never consumes input.
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:noreply, t()}
   @impl Drafter.Widget
   def handle_event(_event, state) do
     {:noreply, state}
@@ -103,6 +188,19 @@ defmodule Drafter.Widget.Digits do
     {1, 3} => 0x80
   }
 
+  @doc """
+  The row height of the font `opts` selects.
+
+  `opts[:font]` wins; otherwise `opts[:size]` picks `:block` for `:large` (the
+  default) and `:compact` for `:small`.
+
+      iex> Drafter.Widget.Digits.preferred_height("42", size: :small)
+      3
+
+      iex> Drafter.Widget.Digits.preferred_height("42", [])
+      5
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts) do
     opts
     |> Keyword.get(:font)
@@ -110,8 +208,26 @@ defmodule Drafter.Widget.Digits do
     |> Font.height()
   end
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.Digits.component_tag()
+      :digits
+  """
+  @spec component_tag() :: :digits
   def component_tag, do: :digits
 
+  @doc """
+  Turns the `{:digits, value, opts}` element into a props map for `mount/1`.
+
+  `value` becomes `:text` through `to_string/1`, so it may be any term implementing
+  `String.Chars`.
+
+      iex> props = Drafter.Widget.Digits.from_component_opts(42, align: :center)
+      iex> {props.text, props.align, props.size, props.color, props.bg_min}
+      {"42", :center, :large, {0, 150, 255}, 0}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(value, opts) do
     %{
       text: to_string(value),
@@ -127,6 +243,11 @@ defmodule Drafter.Widget.Digits do
     }
   end
 
+  @doc """
+  Passes every option through to `update/2` on a re-render, so nothing about a
+  digits widget is mount-only.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       text: mount_props.text,
@@ -142,6 +263,15 @@ defmodule Drafter.Widget.Digits do
     }
   end
 
+  @doc """
+  Builds the terminal-graphics payload for the text, or `nil`.
+
+  Returns `nil` when `:renderer` is `:text`, when `rect` has no area, or when no
+  supported graphics protocol is available. Otherwise returns
+  `{paint, clear, placement}`, where `placement` is
+  `%{dx: 0, dy: 0, cols: rect.width, rows: rect.height}`.
+  """
+  @spec image(t(), Drafter.Widget.rect(), term()) :: {iodata(), iodata(), map()} | nil
   def image(state, rect, id) do
     with renderer when renderer != :text <- Map.get(state, :renderer, :text),
          cols when cols > 0 <- rect.width,
@@ -149,6 +279,21 @@ defmodule Drafter.Widget.Digits do
       paint_image(state, {cols, rows}, renderer, id)
     else
       _ -> nil
+    end
+  end
+
+  @doc """
+  Whether these digits are drawing a transmitted image rather than cells.
+
+  True when `:renderer` is anything but `:text` and the terminal has a graphics
+  protocol to draw it with.
+  """
+  @spec image_active?(t()) :: boolean()
+  @impl Drafter.Widget
+  def image_active?(state) do
+    case Map.get(state, :renderer, :text) do
+      :text -> false
+      renderer -> Image.protocol(image_renderer(renderer)) != nil
     end
   end
 
@@ -168,6 +313,13 @@ defmodule Drafter.Widget.Digits do
   defp image_renderer(:graphics), do: :auto
   defp image_renderer(renderer), do: renderer
 
+  @doc """
+  Sets `:text` to `to_string/1` of the newest item in the widget's data buffer.
+
+  Everything buffered before the last item is discarded. An empty buffer leaves the
+  state alone.
+  """
+  @spec apply_data_buffer(t(), Drafter.RingBuffer.t(), Drafter.Widget.rect()) :: t()
   @impl Drafter.Widget
   def apply_data_buffer(state, buffer, _rect) do
     case Drafter.RingBuffer.last(buffer) do

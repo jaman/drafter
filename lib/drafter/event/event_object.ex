@@ -2,15 +2,16 @@ defmodule Drafter.Event.Object do
   @moduledoc """
   Rich event struct with DOM-like three-phase dispatch and propagation control.
 
-  An `Event.Object` wraps a legacy event tuple and adds phase tracking,
+  An `Event.Object` carries an event's type and payload alongside phase tracking,
   propagation control, and a monotonic timestamp. Events travel through
   three phases: `:capture` (root → target), `:target`, then `:bubble`
   (target → root). Any handler may call `prevent_default/1`,
   `stop_propagation/1`, or `stop_immediate_propagation/1` to modify how
   the event continues.
 
-  Convert from a legacy tuple with `from_tuple/1` and back with `to_tuple/1`
-  for backward compatibility with code that pattern-matches on raw tuples.
+  `from_tuple/1` builds one from a `Drafter.Event` tuple and `to_tuple/1` returns
+  that form, for code that pattern-matches on raw tuples. The round trip is not
+  lossless: phase, target and propagation flags are dropped by `to_tuple/1`.
 
   Struct fields:
 
@@ -70,6 +71,40 @@ defmodule Drafter.Event.Object do
           timestamp: integer() | nil
         }
 
+  @doc """
+  Build an event object of `type` carrying `data`.
+
+  Options:
+
+    * `:target` — widget id the event is aimed at, default `nil`
+    * `:current_target` — widget id currently handling it, default `nil`
+    * `:phase` — `:capture`, `:target` or `:bubble`, default `:bubble`
+    * `:timestamp` — default `System.monotonic_time(:millisecond)`
+
+  The propagation flags always start `false`. Nothing is validated: `type` is
+  stored as given, even when it is not one of `t:event_type/0`.
+
+  ## Examples
+
+      iex> Drafter.Event.Object.new(:key, :enter, timestamp: 0)
+      %Drafter.Event.Object{
+        type: :key,
+        data: :enter,
+        target: nil,
+        current_target: nil,
+        phase: :bubble,
+        default_prevented: false,
+        propagation_stopped: false,
+        immediate_propagation_stopped: false,
+        timestamp: 0
+      }
+
+      iex> event = Drafter.Event.Object.new(:key, :enter, target: :save, phase: :capture)
+      iex> {event.target, event.phase}
+      {:save, :capture}
+
+  """
+  @spec new(event_type(), term(), keyword()) :: t()
   def new(type, data, opts \\ []) do
     %__MODULE__{
       type: type,
@@ -81,18 +116,101 @@ defmodule Drafter.Event.Object do
     }
   end
 
+  @doc """
+  Mark the event's default action as prevented.
+
+  Does not stop the event travelling; handlers further along still see it and can
+  read `:default_prevented`.
+
+  ## Examples
+
+      iex> Drafter.Event.Object.new(:key, :enter)
+      ...> |> Drafter.Event.Object.prevent_default()
+      ...> |> Map.fetch!(:default_prevented)
+      true
+
+  """
+  @spec prevent_default(t()) :: t()
   def prevent_default(%__MODULE__{} = event) do
     %{event | default_prevented: true}
   end
 
+  @doc """
+  Stop the event travelling to the next widget in the dispatch path.
+
+  Handlers already reached on the current widget are unaffected, and
+  `:immediate_propagation_stopped` stays `false`.
+
+  ## Examples
+
+      iex> event = Drafter.Event.Object.stop_propagation(Drafter.Event.Object.new(:key, :enter))
+      iex> {event.propagation_stopped, event.immediate_propagation_stopped}
+      {true, false}
+
+  """
+  @spec stop_propagation(t()) :: t()
   def stop_propagation(%__MODULE__{} = event) do
     %{event | propagation_stopped: true}
   end
 
+  @doc """
+  Stop the event travelling further, including to other handlers on the current widget.
+
+  Sets both `:immediate_propagation_stopped` and `:propagation_stopped`.
+
+  ## Examples
+
+      iex> event = Drafter.Event.Object.new(:key, :enter)
+      iex> event = Drafter.Event.Object.stop_immediate_propagation(event)
+      iex> {event.propagation_stopped, event.immediate_propagation_stopped}
+      {true, true}
+
+  """
+  @spec stop_immediate_propagation(t()) :: t()
   def stop_immediate_propagation(%__MODULE__{} = event) do
     %{event | immediate_propagation_stopped: true, propagation_stopped: true}
   end
 
+  @doc """
+  Wrap an event tuple in an event object.
+
+  Recognised tuples are the ones listed in `Drafter.Event`; a bare atom becomes an
+  event of that type with `nil` data, any other two-element tuple becomes an event
+  whose type is its first element, and anything else becomes `:custom` carrying the
+  whole term. `{:key, key, modifiers}` is folded into `%{key: key, modifiers: mods}`
+  data and `{:resize, {w, h}}` into `%{width: w, height: h}`, both of which
+  `to_tuple/1` restores.
+
+  The phase starts at `:bubble` and the timestamp is taken now. `:target` and
+  `:current_target` are left `nil`, so a caller that needs them must set them
+  afterwards.
+
+  ## Examples
+
+      iex> event = Drafter.Event.Object.from_tuple({:key, :enter})
+      iex> {event.type, event.data, event.phase}
+      {:key, :enter, :bubble}
+
+      iex> Drafter.Event.Object.from_tuple({:key, :a, [:ctrl]}).data
+      %{key: :a, modifiers: [:ctrl]}
+
+      iex> Drafter.Event.Object.from_tuple({:resize, {80, 24}}).data
+      %{width: 80, height: 24}
+
+      iex> event = Drafter.Event.Object.from_tuple(:tick)
+      iex> {event.type, event.data}
+      {:tick, nil}
+
+      iex> event = Drafter.Event.Object.from_tuple({:scroll, :up})
+      iex> {event.type, event.data}
+      {:scroll, :up}
+
+      iex> event = Drafter.Event.Object.from_tuple({:a, :b, :c, :d})
+      iex> {event.type, event.data}
+      {:custom, {:a, :b, :c, :d}}
+
+  """
+  @spec from_tuple(tuple() | atom()) :: t()
   def from_tuple({:key, key}) do
     new(:key, key)
   end
@@ -188,6 +306,40 @@ defmodule Drafter.Event.Object do
     end
   end
 
+  @doc """
+  Unwrap an event object back to the event tuple form.
+
+  The inverse of `from_tuple/1` for every tuple it recognises. Phase, target and
+  propagation flags are dropped, so a caller that needs them must read them from
+  the object before converting.
+
+  `:focus`, `:blur`, `:focus_in` and `:focus_out` with `nil` data give the
+  one-element tuple `{:focus}` and friends. An event of any type this function does
+  not name gives the bare type atom when its data is `nil`, and `{type, data}`
+  otherwise. A named type with `nil` data still gives a tuple: `:key` with `nil`
+  data is `{:key, nil}`, not `:key`.
+
+  ## Examples
+
+      iex> Drafter.Event.Object.new(:key, %{key: :a, modifiers: [:ctrl]})
+      ...> |> Drafter.Event.Object.to_tuple()
+      {:key, :a, [:ctrl]}
+
+      iex> Drafter.Event.Object.new(:resize, %{width: 80, height: 24})
+      ...> |> Drafter.Event.Object.to_tuple()
+      {:resize, {80, 24}}
+
+      iex> Drafter.Event.Object.to_tuple(Drafter.Event.Object.new(:focus, nil))
+      {:focus}
+
+      iex> Drafter.Event.Object.to_tuple(Drafter.Event.Object.new(:custom, nil))
+      :custom
+
+      iex> Drafter.Event.Object.to_tuple(Drafter.Event.Object.new(:key, nil))
+      {:key, nil}
+
+  """
+  @spec to_tuple(t()) :: tuple() | atom()
   def to_tuple(%__MODULE__{type: :key, data: key}) when is_atom(key) do
     {:key, key}
   end

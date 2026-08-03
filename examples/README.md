@@ -55,3 +55,9 @@ Or browse them all in the gallery: `elixir run_examples.exs`.
 | `26_braille_area.exs` | Braille-dot area chart rendering |
 | `ssh_chat.exs` | Shared multi-user chat app served over SSH |
 | `widgets.exs` | Showcase of common widgets: buttons, text input, checkbox, switch, option list, progress bar |
+
+## `spark/` extras
+
+| Example | Description |
+|---------|-------------|
+| `32_slider.exs` | Sliders: bound values, integer steps, formatted readouts, a vertical mixer, and the text / braille / graphics renderers |

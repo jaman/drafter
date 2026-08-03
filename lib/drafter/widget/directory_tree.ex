@@ -9,25 +9,61 @@ defmodule Drafter.Widget.DirectoryTree do
   Horizontal scrolling is available when path names are wider than the widget via the
   left/right arrow keys.
 
+  ## Component tag
+
+  Tag `:directory_tree`, built by `Drafter.App` as `{:directory_tree, opts}`:
+
+      directory_tree(opts)
+
+  There is no positional argument; every prop comes from `opts` via
+  `from_component_opts/2`, which wraps `:on_select` and `:on_file_select` with
+  `Drafter.Widget.Callback` so they may be given as atom event names.
+
   ## Options
 
-    * `:path` - absolute root path to display (default: current working directory)
-    * `:show_hidden` - include hidden files and directories starting with `.` (default: `false`)
-    * `:on_select` - `(String.t() -> term())` called with the path of any selected item
-    * `:on_file_select` - `(String.t() -> term())` called only when a file (not a directory) is selected
-    * `:target` - optional atom or string identifier used when wiring into the app's event system
-    * `:style` - map of style overrides
-    * `:classes` - list of theme class atoms
-    * `:handles` - list of event types to respond to; defaults to `[:keyboard, :click, :scroll]`
+    * `:path` - absolute root path to display. Default `File.cwd!()`. Only this
+      directory starts expanded
+    * `:show_hidden` - `t:boolean/0`, include entries starting with `.`. Default
+      `false`
+    * `:on_select` - atom event name or `(String.t() -> term())` called with the
+      path of any selected item, file or directory. Default `nil`. A non-`nil`
+      return value is emitted as an action
+    * `:on_file_select` - atom event name or `(String.t() -> term())` called only
+      when a file is selected. Default `nil`. A non-`nil` return value is emitted as
+      an action
+    * `:target` - atom or string identifier. Default `nil`. Carried on the state but
+      never read, and not re-read by `update/2`
+    * `:style` - `t:map/0` of style overrides. Default `%{}`
+    * `:class` - theme class atom or list of them, reaching `mount/1` as
+      `:classes`. Default `[]`
+    * `:handles` - list of event types to respond to. Default
+      `[:keyboard, :mouse_up, :scroll]`. Removing `:mouse_up` or `:scroll` makes the
+      corresponding handler consume the event without acting on it
+    * `:height` - read only by `preferred_height/2`, never by `mount/1`. Default
+      `:auto`
+
+  `update/2` re-reads `:path`, `:show_hidden`, `:style`, `:classes`, `:app_module`,
+  `:on_select`, `:on_file_select` and `:handles`. A new `:path` collapses everything
+  but the new root and resets the cursor and scroll offset. `:target` is mount-only.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`;
+  the selection is reported through `:on_select` and `:on_file_select`.
 
   ## Key bindings
 
-    * `↑` / `↓` — move cursor one item up/down
+    * `↑` / `↓` — move cursor one item up/down, scrolling the viewport to follow.
+      Landing on a file fires `:on_file_select`
     * `Enter` — expand/collapse directory, or select file
     * `Space` — toggle directory expand/collapse; select file
-    * `←` / `→` — scroll view horizontally
+    * `←` / `→` — scroll view horizontally by two columns, clamped at `0` on the
+      left and unbounded on the right
     * Mouse click — move cursor and activate item
     * Mouse scroll — move cursor 3 items at a time
+
+  Every other key is consumed and leaves the state unchanged, so nothing bubbles out
+  of a focused tree.
 
   ## Usage
 
@@ -87,6 +123,20 @@ defmodule Drafter.Widget.DirectoryTree do
     handles: [:keyboard, :mouse_up, :scroll]
   ]
 
+  @doc """
+  Builds the tree state from `props`, with only the root directory expanded.
+
+  `:selected_file`, `:cursor_pos` and both scroll offsets always start at `nil`/`0`.
+
+      iex> t = Drafter.Widget.DirectoryTree.mount(%{path: "/tmp", show_hidden: true})
+      iex> {t.path, MapSet.to_list(t.expanded_dirs), t.show_hidden, t.cursor_pos}
+      {"/tmp", ["/tmp"], true, 0}
+
+      iex> t = Drafter.Widget.DirectoryTree.mount(%{path: "/tmp"})
+      iex> {t.selected_file, t.scroll_offset, t.h_scroll_offset, t.viewport_height, t.handles}
+      {nil, 0, 0, 10, [:keyboard, :mouse_up, :scroll]}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     path = Map.get(props, :path, File.cwd!())
@@ -111,10 +161,29 @@ defmodule Drafter.Widget.DirectoryTree do
     }
   end
 
+  @doc """
+  Records the rect's height as the viewport height used by cursor scrolling.
+
+  Called by the runtime whenever the widget's rect changes.
+
+      iex> t = Drafter.Widget.DirectoryTree.mount(%{path: "/tmp"})
+      iex> Drafter.Widget.DirectoryTree.on_rect_change(%{x: 0, y: 0, width: 40, height: 25}, t).viewport_height
+      25
+  """
+  @spec on_rect_change(Drafter.Widget.rect(), t()) :: t()
   def on_rect_change(rect, state) do
     %{state | viewport_height: rect.height}
   end
 
+  @doc """
+  Draws the visible slice of the tree into `rect`.
+
+  Accepts either a `t:t/0` or a raw props map, which is mounted first. Directories
+  are read from disk on every call, so an unreadable directory simply contributes no
+  children. Emits at most `rect.height` strips starting at `:scroll_offset`, and one
+  blank strip when nothing is visible.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     state = ensure_mounted(state)
@@ -141,6 +210,29 @@ defmodule Drafter.Widget.DirectoryTree do
     end
   end
 
+  @doc """
+  Moves the cursor, activates the item under it, or scrolls horizontally.
+
+  `:up` and `:down` return `{:ok, state, actions}`, where `actions` carries the
+  `:on_file_select` result when the cursor lands on a file. `:enter` and `:" "`
+  toggle a directory or select a file, also returning `{:ok, state, actions}`.
+  `:left` and `:right` move `:h_scroll_offset` by two columns and return
+  `{:ok, state}`. Every other key returns `{:ok, state}` unchanged, so nothing
+  bubbles.
+
+      iex> t = Drafter.Widget.DirectoryTree.mount(%{path: "/tmp"})
+      iex> {:ok, moved} = Drafter.Widget.DirectoryTree.handle_key(:right, t)
+      iex> {:ok, back} = Drafter.Widget.DirectoryTree.handle_key(:left, moved)
+      iex> {moved.h_scroll_offset, back.h_scroll_offset}
+      {2, 0}
+
+      iex> t = Drafter.Widget.DirectoryTree.mount(%{path: "/tmp"})
+      iex> {:ok, ^t} = Drafter.Widget.DirectoryTree.handle_key(:escape, t)
+      iex> t.cursor_pos
+      0
+  """
+  @spec handle_key(Drafter.Widget.key(), t() | Drafter.Widget.props()) ::
+          {:ok, t()} | {:ok, t(), [term()]}
   @impl Drafter.Widget
   def handle_key(:up, state) do
     state = ensure_mounted(state)
@@ -195,6 +287,14 @@ defmodule Drafter.Widget.DirectoryTree do
     {:ok, ensure_mounted(state)}
   end
 
+  @doc """
+  Moves the cursor three items per wheel notch.
+
+  Returns `{:ok, state}` unchanged when `:scroll` is not in the widget's `:handles`,
+  so the event is consumed either way.
+  """
+  @spec handle_scroll(:up | :down, t() | Drafter.Widget.props()) ::
+          {:ok, t()} | {:ok, t(), [term()]}
   @impl Drafter.Widget
   def handle_scroll(direction, state) do
     state = ensure_mounted(state)
@@ -206,6 +306,15 @@ defmodule Drafter.Widget.DirectoryTree do
     end
   end
 
+  @doc """
+  Moves the cursor to the item on row `y` and activates it.
+
+  `y` is counted from the top of the widget, so the item is
+  `scroll_offset + y`. A release past the last item, or one arriving when
+  `:mouse_up` is not in the widget's `:handles`, returns `{:ok, state}` unchanged.
+  """
+  @spec handle_mouse_up(integer(), integer(), t() | Drafter.Widget.props()) ::
+          {:ok, t()} | {:ok, t(), [term()]}
   @impl Drafter.Widget
   def handle_mouse_up(_x, y, state) do
     state = ensure_mounted(state)
@@ -226,6 +335,21 @@ defmodule Drafter.Widget.DirectoryTree do
     end
   end
 
+  @doc """
+  Folds fresh props into `state`.
+
+  Re-reads `:path`, `:show_hidden`, `:style`, `:classes`, `:app_module`,
+  `:on_select`, `:on_file_select` and `:handles`. A new `:path` collapses every
+  expanded directory except the new root and resets `:cursor_pos` and
+  `:scroll_offset` to `0`. `:target`, `:selected_file`, `:h_scroll_offset` and
+  `:viewport_height` are left alone.
+
+      iex> t = Drafter.Widget.DirectoryTree.mount(%{path: "/tmp"})
+      iex> moved = Drafter.Widget.DirectoryTree.update(%{path: "/"}, t)
+      iex> {moved.path, MapSet.to_list(moved.expanded_dirs), moved.cursor_pos}
+      {"/", ["/"], 0}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     new_path = Map.get(props, :path, state.path)
@@ -256,10 +380,41 @@ defmodule Drafter.Widget.DirectoryTree do
     }
   end
 
+  @doc """
+  `opts[:height]`, or `:auto` when it is absent, letting the layout give the tree
+  whatever space is left.
+
+      iex> Drafter.Widget.DirectoryTree.preferred_height(nil, [])
+      :auto
+
+      iex> Drafter.Widget.DirectoryTree.preferred_height(nil, height: 12)
+      12
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer() | :auto
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, :auto)
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.DirectoryTree.component_tag()
+      :directory_tree
+  """
+  @spec component_tag() :: :directory_tree
   def component_tag, do: :directory_tree
 
+  @doc """
+  Turns the `{:directory_tree, opts}` element into a props map for `mount/1`.
+
+  The positional argument is ignored. `:class` is normalised into `:classes`,
+  `:on_select` and `:on_file_select` are wrapped by
+  `Drafter.Widget.Callback.wrap_1/1`, and `:__app_module__` becomes `:app_module`.
+  `:handles` is included only when given, so its default lives in `mount/1`.
+
+      iex> props = Drafter.Widget.DirectoryTree.from_component_opts(nil, path: "/tmp")
+      iex> {props.path, props.show_hidden, props.on_select, props.classes, Map.has_key?(props, :handles)}
+      {"/tmp", false, nil, [], false}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
@@ -280,6 +435,12 @@ defmodule Drafter.Widget.DirectoryTree do
     end
   end
 
+  @doc """
+  Narrows the props a re-render feeds to `update/2` to `:path`, `:show_hidden`,
+  `:on_select`, `:on_file_select`, `:target` and, when present, `:handles`. `:style`
+  and `:classes` stay as mounted.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     base = %{
       path: mount_props.path,
@@ -478,7 +639,7 @@ defmodule Drafter.Widget.DirectoryTree do
     [dir_item | children]
   end
 
-  @spec handle_item_selection(t(), tree_item()) :: {:ok, t()}
+  @spec handle_item_selection(t(), tree_item()) :: {:ok, t(), [term()]}
   defp handle_item_selection(state, %{type: :dir, path: path}) do
     {:ok, new_state} = toggle_directory(state, path)
     {:ok, new_state, select_actions(state, path)}

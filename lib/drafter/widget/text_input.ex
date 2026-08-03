@@ -6,24 +6,79 @@ defmodule Drafter.Widget.TextInput do
   Placeholder text is displayed when the field is empty and unfocused. Validation errors
   appear below the input border in red when the field has been touched (blurred at least once).
 
+  ## Component tag
+
+  Tag `:text_input`, built by `Drafter.App` as `{:text_input, opts}`:
+
+      text_input(opts)
+
+  There is no positional argument. The value goes through `Drafter.Binding`:
+  passing `bind: :some_key` seeds the text from that app-state key and writes
+  every keystroke back to it. `:width` is always the allocated rect width less
+  two columns for the border.
+
   ## Options
 
-    * `:text` - initial text value (default: `""`)
-    * `:placeholder` - hint text shown when empty and unfocused (default: `""`)
-    * `:bind` - app state key atom for two-way binding; the app state key is kept in sync
-    * `:id` - atom identifier for programmatic access via `Drafter.get_widget_value/1`
-    * `:on_change` - `({String.t(), validation_result()} -> term())` called on every keystroke
-    * `:on_submit` - `({String.t(), validation_result()} -> term())` called when Enter is pressed
-    * `:max_length` - maximum number of characters allowed
-    * `:validators` - list of `Drafter.Validation` validators run on blur
-    * `:disabled` - when `true`, the field is non-interactive (default: `false`)
-    * `:readonly` - when `true`, focus is accepted but text cannot be edited (default: `false`)
-    * `:password` - when `true`, renders characters as `•` (default: `false`)
-    * `:restrict` - a `Regex.t()` or string pattern; only matching characters are allowed
-    * `:type` - `:text` (default), `:integer`, or `:number`; built-in character restriction
-    * `:select_on_focus` - when `true`, selects all text on focus (default: `false`)
-    * `:style` - map of style overrides
-    * `:classes` - list of theme class atoms
+    * `:text` - `t:String.t/0` initial value. Default `""`. Through the element the
+      value comes from `:bind` instead.
+    * `:placeholder` - `t:String.t/0` hint shown while the field is empty and
+      unfocused. Default `""`.
+    * `:bind` - app state key atom for two-way binding; the key is written on every
+      keystroke. Default: none.
+    * `:id` - atom identifier for programmatic access via
+      `Drafter.get_widget_value/1`. Default: none.
+    * `:on_change` - `({String.t(), validation_result()} -> term())` called on every
+      keystroke, cursor move and selection change. Default `nil`. Through the
+      element it is built by `Drafter.Binding.create_text_input_callback/1`, which
+      returns `nil` when neither `:bind` nor `:on_change` is given. An exception it
+      raises is swallowed.
+    * `:on_submit` - atom event name or
+      `({String.t(), validation_result()} -> term())` called when `enter` is
+      pressed. Default `nil`. Setting it makes `enter` clear the field.
+    * `:keep_focus` - `t:boolean/0`, refocus the widget after `:on_submit` fires.
+      Default `false`. Read by `from_component_opts/2` only.
+    * `:validators` - list of `Drafter.Validation` validators run on blur. Default
+      `nil`.
+    * `:disabled` - `t:boolean/0`; the field takes focus but ignores every other
+      event. Default `false`.
+    * `:readonly` - `t:boolean/0`; same handling as `:disabled`. Default `false`.
+    * `:password` - `t:boolean/0`, render each character as `•`. Default `false`.
+    * `:restrict` - a `t:Regex.t/0` or a string pattern compiled with
+      `Regex.compile!/1`; only matching characters may be typed. Default `nil`.
+    * `:type` - `:text | :integer | :number`. Default `:text`. `:integer` allows
+      `0-9` and `-`, `:number` also allows `.`, and both apply on top of
+      `:restrict`.
+    * `:select_on_focus` - `t:boolean/0`, select the whole value on focus. Default
+      `false`.
+    * `:style` - `t:map/0` of style overrides passed to the theme computation.
+      Default `%{}`.
+    * `:class` - theme class atom or list of them, normalised by
+      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      Default `[]`.
+    * `:max_length` - `t:pos_integer/0` cap on the number of characters. Default
+      `nil`, no cap. Read by `mount/1` and `update/2` only; the `text_input/1`
+      element does not forward it.
+    * `:width` - `t:pos_integer/0` inner width the scroll offset works against.
+      Default `40` when mounting directly. A `:width` in `opts` is ignored by the
+      element, which always uses the allocated rect width less the two border
+      columns.
+    * `:cursor_position`, `:scroll_offset`, `:selection_start`, `:selection_end`,
+      `:focused`, `:touched`, `:error` - read by `mount/1` with defaults `0`, `0`,
+      `nil`, `nil`, `false`, `false` and `nil`.
+
+  `update/2` accepts every key above except `:cursor_position` and
+  `:scroll_offset`, and ignores `:text` entirely while the field is focused so
+  typing is never overwritten by a re-render. Through the component tree
+  `update_props_from_mount/3` always passes `:on_change`, `:on_submit`,
+  `:classes`, `:validators`, `:disabled`, `:readonly`, `:password`, `:restrict`,
+  `:type` and `:select_on_focus`; `:width` and `:placeholder` only when they
+  changed, and `:text` only when `opts` carries `:bind` or `:value` and the text
+  differs.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns the current text, and
+  `Drafter.set_widget_value/2` replaces it.
 
   ## Key bindings
 
@@ -36,8 +91,12 @@ defmodule Drafter.Widget.TextInput do
     * `Ctrl+K` — delete from cursor to end of line
     * `Ctrl+W` — delete word to the left of cursor
     * `Backspace` / `Delete` — delete character or selection
-    * `Enter` — trigger `:on_submit`
+    * `Enter` — call `:on_submit` and clear the field; bubbles when no
+      `:on_submit` is set
     * `Home` / `End` — move cursor to start/end of text
+
+  A `:disabled` or `:readonly` field accepts `{:focus}`, `{:blur}` and `:activate`
+  and returns `{:noreply, state}` for everything else.
 
   ## Usage
 
@@ -107,6 +166,24 @@ defmodule Drafter.Widget.TextInput do
           select_on_focus: boolean()
         }
 
+  @doc """
+  Builds the widget state from `props`.
+
+  Every option listed in the module doc is read here with the default stated there.
+  `:restrict` is compiled to a `t:Regex.t/0` when it is given as a string.
+
+      iex> state = Drafter.Widget.TextInput.mount(%{})
+      iex> {state.text, state.cursor_position, state.width, state.type, state.focused}
+      {"", 0, 40, :text, false}
+
+      iex> state = Drafter.Widget.TextInput.mount(%{text: "hi", placeholder: "name"})
+      iex> {state.text, state.placeholder, state.max_length, state.error}
+      {"hi", "name", nil, nil}
+
+      iex> Drafter.Widget.TextInput.mount(%{restrict: "^[a-z]$"}).restrict |> Regex.source()
+      "^[a-z]$"
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
@@ -136,6 +213,19 @@ defmodule Drafter.Widget.TextInput do
     }
   end
 
+  @doc """
+  Draws the bordered field into `rect`, always returning exactly `rect.height`
+  strips.
+
+  `state` may be a plain props map, in which case it is passed through `mount/1`
+  first. The first three strips are the top border, the content row and the bottom
+  border; a non-`nil` `:error` adds a fourth in red. Shorter output is padded with
+  blank rows and longer output is truncated, so a rect under three rows high loses
+  the bottom of the box. The content is `min(state.width, rect.width - 2)` columns
+  wide, drawn from `:scroll_offset`, with the cursor block shown only while
+  focused.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     normalized_state =
@@ -243,6 +333,47 @@ defmodule Drafter.Widget.TextInput do
     end
   end
 
+  @doc """
+  Handles the field's own events, replacing the dispatch `use Drafter.Widget`
+  would otherwise generate.
+
+  Routing goes in three stages. A `:disabled` or `:readonly` field only handles
+  `{:focus}`, `{:blur}` and `:activate`, and returns `{:noreply, state}` for
+  everything else. An unfocused field additionally handles a mouse up, `:validate`
+  and `:clear_error`. A focused field handles the full set of key bindings listed
+  in the module doc, `{:char, code}`, `{:bracketed_paste, text}`, mouse up and
+  drag.
+
+  Most handled events return `{:ok, new_state}`; `enter` with an `:on_submit`
+  returns `{:ok, cleared_state, actions}`; `ctrl` with an unhandled key and `enter`
+  without an `:on_submit` return `{:bubble, state}`; a keystroke the restriction
+  rejects, a backspace at position zero and a delete at the end return
+  `{:noreply, state}`.
+
+      iex> state = Drafter.Widget.TextInput.mount(%{focused: true})
+      iex> {:ok, typed} = Drafter.Widget.TextInput.handle_event({:char, ?a}, state)
+      iex> {typed.text, typed.cursor_position}
+      {"a", 1}
+
+      iex> state = Drafter.Widget.TextInput.mount(%{focused: true, type: :integer})
+      iex> Drafter.Widget.TextInput.handle_event({:char, ?a}, state) |> elem(0)
+      :noreply
+
+      iex> state = Drafter.Widget.TextInput.mount(%{text: "hi", focused: true, cursor_position: 2})
+      iex> {:ok, deleted} = Drafter.Widget.TextInput.handle_event({:key, :backspace}, state)
+      iex> {deleted.text, deleted.cursor_position}
+      {"h", 1}
+
+      iex> state = Drafter.Widget.TextInput.mount(%{text: "hi", disabled: true})
+      iex> Drafter.Widget.TextInput.handle_event({:char, ?a}, state) |> elem(0)
+      :noreply
+
+      iex> state = Drafter.Widget.TextInput.mount(%{text: "hi", focused: true})
+      iex> Drafter.Widget.TextInput.handle_event({:key, :enter}, state) |> elem(0)
+      :bubble
+  """
+  @spec handle_event(term(), t()) ::
+          {:ok, t()} | {:ok, t(), list()} | {:bubble, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_event(event, state) do
     if state.disabled or state.readonly do
@@ -588,6 +719,29 @@ defmodule Drafter.Widget.TextInput do
     {:ok, new_state}
   end
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  `:text` is ignored entirely while the field is focused, so a re-render never
+  overwrites what is being typed. Unfocused, it accepts either a string or a
+  `{text, validation_result}` tuple and falls back to the current text for anything
+  else. `:cursor_position` and `:scroll_offset` are never set here, so a shorter
+  new text can leave the cursor past its end until the next keystroke.
+
+      iex> state = Drafter.Widget.TextInput.mount(%{text: "old"})
+      iex> Drafter.Widget.TextInput.update(%{text: "new"}, state).text
+      "new"
+
+      iex> state = Drafter.Widget.TextInput.mount(%{text: "typing", focused: true})
+      iex> Drafter.Widget.TextInput.update(%{text: "clobber"}, state).text
+      "typing"
+
+      iex> state = Drafter.Widget.TextInput.mount(%{text: "old"})
+      iex> Drafter.Widget.TextInput.update(%{text: {"tupled", {:ok, "tupled"}}}, state).text
+      "tupled"
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     bound_text =
@@ -623,10 +777,48 @@ defmodule Drafter.Widget.TextInput do
     }
   end
 
+  @doc """
+  The number of rows the element asks for: always `3`, the two border rows plus the
+  content row. There is no `:height` override, and a validation error row is not
+  accounted for.
+
+      iex> Drafter.Widget.TextInput.preferred_height(nil, height: 10)
+      3
+  """
+  @spec preferred_height(term(), keyword()) :: 3
   def preferred_height(_args, _opts), do: 3
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.TextInput.component_tag()
+      :text_input
+  """
+  @spec component_tag() :: :text_input
   def component_tag, do: :text_input
 
+  @doc """
+  Builds the props map for a `{:text_input, opts}` element.
+
+  The positional argument is ignored. `:text` comes from
+  `Drafter.Binding.get_bound_value/3`, so `bind: :key` seeds it from
+  `opts[:__app_state__]` and plain `value:` is used otherwise, defaulting to `""`.
+  `:width` is the width of `opts[:__rect__]` less two border columns, with the rect
+  defaulting to `%{width: 2}`. `:on_change` is the binding's writer and `:on_submit`
+  is wrapped so that it dispatches the text and, when `:keep_focus` is set, sends
+  `{:focus_widget, id}` back to the session. `:max_length`, `:style` and any
+  `:width` in `opts` are not forwarded.
+
+      iex> props = Drafter.Widget.TextInput.from_component_opts(nil, placeholder: "Email")
+      iex> {props.text, props.placeholder, props.width, props.type, props.on_change}
+      {"", "Email", 0, :text, nil}
+
+      iex> opts = [bind: :query, __app_state__: %{query: "abc"}, __rect__: %{width: 22}]
+      iex> props = Drafter.Widget.TextInput.from_component_opts(nil, opts)
+      iex> {props.text, props.width, is_function(props.on_change, 1)}
+      {"abc", 20, true}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     app_state = Keyword.get(opts, :__app_state__, %{})
     rect = Keyword.get(opts, :__rect__, %{width: 2})
@@ -655,6 +847,27 @@ defmodule Drafter.Widget.TextInput do
     }
   end
 
+  @doc """
+  Narrows a re-render to the props that may safely change after mount.
+
+  Always passes `:on_change`, `:on_submit`, `:classes`, `:validators`,
+  `:disabled`, `:readonly`, `:password`, `:restrict`, `:type` and
+  `:select_on_focus`. Adds `:width` and `:placeholder` only when they differ from
+  the mounted state, and `:text` only when `opts` carries `:bind` or `:value` and
+  the text differs — so an unbound field keeps whatever the user typed.
+
+      iex> props = Drafter.Widget.TextInput.from_component_opts(nil, placeholder: "Email")
+      iex> state = Drafter.Widget.TextInput.mount(props)
+      iex> Drafter.Widget.TextInput.update_props_from_mount(props, state, []) |> Map.has_key?(:text)
+      false
+
+      iex> opts = [bind: :query, __app_state__: %{query: "abc"}]
+      iex> props = Drafter.Widget.TextInput.from_component_opts(nil, opts)
+      iex> state = Drafter.Widget.TextInput.mount(%{text: "old", width: 0, placeholder: ""})
+      iex> Drafter.Widget.TextInput.update_props_from_mount(props, state, opts).text
+      "abc"
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, existing_state, opts) do
     base = %{
       on_change: mount_props.on_change,

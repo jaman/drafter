@@ -21,10 +21,46 @@ defmodule Drafter.Test.Harness do
     :test_pid
   ]
 
+  @typedoc """
+  The context returned by `start_app/3` and consumed by `Drafter.Test` and `stop_app/1`.
+  """
+  @type context :: %{
+          app_module: module(),
+          app_pid: pid(),
+          app_monitor: reference(),
+          props: map(),
+          test_pid: pid(),
+          session_pids: %{atom() => pid()}
+        }
+
+  @doc "Returns `{:ok, init_arg}` unchanged."
+  @impl GenServer
+  @spec init(term()) :: {:ok, term()}
   def init(init_arg) do
     {:ok, init_arg}
   end
 
+  @doc """
+  Start a headless app and every service it needs, returning a test context.
+
+  Starts an unnamed `Drafter.Event.Manager`, `Drafter.Compositor`,
+  `Drafter.ThemeManager`, `Drafter.EventHandler` and `Drafter.ScreenManager` plus the
+  named `Drafter.Test.HeadlessDriver`, links them to the caller, and spawns the app
+  loop with the session's pids copied into its process dictionary. `props` is passed
+  to the app's `mount/1` and defaults to `%{}`.
+
+  Returns `{:ok, context}`, `{:error, :already_started}` when a service of the same
+  name is already running (that service is linked to the caller first), or the first
+  service's own `{:error, reason}`.
+
+  ## Options
+
+    * `:test_pid` - process the headless driver reports output to. Default: the
+      calling process.
+    * `:size` - terminal size as `{columns, rows}`. Default: `{80, 24}`.
+
+  """
+  @spec start_app(module(), map(), keyword()) :: {:ok, context()} | {:error, term()}
   def start_app(app_module, props \\ %{}, opts \\ []) do
     test_pid = Keyword.get(opts, :test_pid, self())
     size = Keyword.get(opts, :size, {80, 24})
@@ -84,6 +120,13 @@ defmodule Drafter.Test.Harness do
     end
   end
 
+  @doc """
+  Shut down the app and every service `start_app/3` started.
+
+  Sends `:shutdown` to the app loop and waits up to 500 ms for it to exit, killing it
+  if it does not. Always returns `:ok`, including when a service has already stopped.
+  """
+  @spec stop_app(context()) :: :ok
   def stop_app(ctx) do
     if Process.alive?(ctx.app_pid) do
       monitor_ref = ctx.app_monitor

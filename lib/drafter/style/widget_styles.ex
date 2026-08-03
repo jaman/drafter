@@ -1,10 +1,43 @@
 defmodule Drafter.Style.WidgetStyles do
-  @moduledoc false
+  @moduledoc """
+  The built-in stylesheet every app starts from.
+
+  One rule set per widget kind, written against theme colour tokens such as
+  `:primary` and `:text_muted` rather than RGB values, so the same rules follow
+  whichever theme is current. `Drafter.Style.Computed` resolves the tokens at
+  render time.
+
+  Rules use the selector syntax of `Drafter.Style.Selector`: a bare widget type for
+  the widget's base style, `:pseudo_class` for state, and `::part` for a sub-region.
+  Because a stylesheet resolves by specificity and then by insertion order, an app's
+  own rules layered on top of these win a tie.
+
+  Widget kinds covered: `button`, `checkbox`, `text_input`, `label`, `collapsible`,
+  `switch`, `slider`, `progress_bar`, `option_list`, `data_table`, `tree`, `scrollbar`,
+  `radio_set`, `selection_list`, `tabbed_content`, `digits`, `placeholder`,
+  `markdown`, `text_area`, `command_palette`, `header` and `footer`.
+
+  The assembled stylesheet is built once and kept in `:persistent_term`.
+  """
 
   alias Drafter.Style.Stylesheet
 
   @persistent_term_key {__MODULE__, :default_stylesheet}
 
+  @doc """
+  The built-in stylesheet.
+
+  Built on the first call and then served from `:persistent_term`, so every caller
+  shares one copy. `clear_cache/0` forces the next call to rebuild it.
+
+  ## Examples
+
+      iex> Drafter.Style.WidgetStyles.default_stylesheet()
+      ...> |> Drafter.Style.Stylesheet.compute_style(%{widget_type: :label, classes: [:error]})
+      %{background: :background, color: :error}
+
+  """
+  @spec default_stylesheet() :: Stylesheet.t()
   def default_stylesheet do
     case :persistent_term.get(@persistent_term_key, nil) do
       nil ->
@@ -17,6 +50,12 @@ defmodule Drafter.Style.WidgetStyles do
     end
   end
 
+  @doc """
+  Discard the cached stylesheet so the next `default_stylesheet/0` rebuilds it.
+
+  Always returns `:ok`, whether or not anything was cached.
+  """
+  @spec clear_cache() :: :ok
   def clear_cache do
     :persistent_term.erase(@persistent_term_key)
     :ok
@@ -30,6 +69,7 @@ defmodule Drafter.Style.WidgetStyles do
     |> add_label_styles()
     |> add_collapsible_styles()
     |> add_switch_styles()
+    |> add_slider_styles()
     |> add_progress_bar_styles()
     |> add_option_list_styles()
     |> add_data_table_styles()
@@ -188,6 +228,33 @@ defmodule Drafter.Style.WidgetStyles do
       },
       "switch::thumb:checked" => %{
         background: :success
+      }
+    })
+  end
+
+  defp add_slider_styles(stylesheet) do
+    Stylesheet.add_rules(stylesheet, %{
+      "slider" => %{
+        color: :text_primary,
+        background: :background
+      },
+      "slider::track" => %{
+        color: :border
+      },
+      "slider::fill" => %{
+        color: :primary
+      },
+      "slider::thumb" => %{
+        color: :primary
+      },
+      "slider::thumb:focus" => %{
+        color: :accent
+      },
+      "slider::value" => %{
+        color: :text_muted
+      },
+      "slider:disabled" => %{
+        color: :text_disabled
       }
     })
   end

@@ -11,15 +11,72 @@ defmodule Drafter.Widget.TabbedContent do
   An optional `:title` string is rendered in the top border, aligned according
   to `:title_align`.
 
+  ## Component tag
+
+  Tag `:tabbed_content`, built by `Drafter.App` as `{:tabbed_content, tabs, opts}`:
+
+      tabbed_content(tabs, opts)
+
+  The positional `tabs` list is used when non-empty, falling back to
+  `opts[:tabs]`. `from_component_opts/2` wraps `:on_tab_change` with
+  `Drafter.Widget.Callback`, so it may be given as an atom event name. `:width`
+  defaults to the rect the parent allocated.
+
   ## Options
 
-    * `:tabs` - list of tab descriptors; each may be a string label, `{label, content}` tuple, or a map with `:id`, `:label`, and `:content` keys
-    * `:active_tab` - zero-based index of the initially active tab (default `0`)
-    * `:title` - string shown in the top border (optional)
-    * `:title_align` - title alignment: `:left`, `:center` (default), `:right`
-    * `:width` - explicit width in columns; defaults to the available rect width
-    * `:on_tab_change` - callback atom dispatched with the tab's `:id` when the active tab changes
-    * `:on_item_select` - callback atom dispatched with the selected item when `Enter` is pressed on a string-content tab
+    * `:tabs` - list of tab descriptors. Default `[]`. Each is normalised into
+      `%{id: id, label: label, content: list}`:
+        * `"label"` — a string used as both id and label, with empty content
+        * `{label, content}` — content that is a list is kept, a string or a tuple
+          is wrapped in a one-element list
+        * `%{id: id, label: label}` — content defaults to `[]`
+        * `%{id: id, label: label, content: content}` — a tuple content is wrapped
+          in a list
+      Anything else raises `FunctionClauseError`.
+    * `:active_tab` - `t:non_neg_integer/0` zero-based index of the initially
+      active tab. Default `0`. Not bounds-checked at mount.
+    * `:title` - `t:String.t/0` shown in the top border, or `nil`. Default `nil`.
+    * `:title_align` - `:left | :center | :right`. Default `:left`.
+    * `:width` - `t:pos_integer/0` explicit width in columns. Default `nil` when
+      mounting directly, which makes `render/2` use the rect width; through the
+      element it defaults to the width of `opts[:__rect__]`, itself defaulting to
+      `%{width: 80}`.
+    * `:on_tab_change` - the app callback name fired with the newly active tab's
+      `:id` when the tab changes. Default `nil`. Through the element it is set to
+      the one-argument function `Drafter.Widget.Callback.wrap_1/1` returns, which
+      the widget passes on as a callback name rather than calling.
+    * `:on_item_select` - one-arity function receiving the highlighted item when
+      `enter` is pressed on a tab whose content is a plain list. Default `nil`.
+      Read by `mount/1` only — the `tabbed_content/2` element does not forward it.
+    * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`.
+    * `:height` - `t:pos_integer/0` read only by `preferred_height/2`, never by
+      `mount/1`. Default `8`.
+
+  `update/2` accepts `:tabs`, `:active_tab`, `:on_tab_change`, `:on_item_select`,
+  `:title`, `:title_align` and `:width`, resetting the item highlight whenever the
+  active tab changes and remounting the embedded child widgets only when the number
+  of tabs changes. Through the component tree `update_props_from_mount/3` narrows
+  that to `:tabs`, `:title_align`, `:width` and `:classes` — so `:active_tab`,
+  `:title`, `:on_tab_change` and `:on_item_select` are mount-only and the tab the
+  user switched to survives a re-render.
+
+  ## Key bindings
+
+    * `left` / `right` - switch tabs, returning `{:noreply, state}` at either end
+    * `up` / `down` - move the highlight inside the active tab, or forward the key
+      to the tab's embedded widget
+    * `enter` - call `:on_item_select` with the highlighted item, or forward the
+      key to the tab's embedded widget
+    * `tab` - ignored, returning `{:noreply, state}`
+
+  A mouse up on row `0` or `1` selects a tab, on row `3` or below goes to the
+  content, and anywhere else just focuses the widget. A mouse move on row `0` or
+  `1` sets `:hovered_tab`, and clears it elsewhere.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns `:active_tab`, the zero-based index of the
+  active tab, not its id.
 
   ## Usage
 
@@ -56,6 +113,42 @@ defmodule Drafter.Widget.TabbedContent do
     :child_widgets
   ]
 
+  @type tab :: %{id: term(), label: String.t(), content: list()}
+
+  @type t :: %__MODULE__{
+          tabs: [tab()],
+          active_tab: non_neg_integer(),
+          hovered_tab: non_neg_integer() | nil,
+          highlighted_item: non_neg_integer(),
+          focused: boolean(),
+          on_tab_change: term(),
+          on_item_select: (term() -> term()) | nil,
+          title: String.t() | nil,
+          title_align: :left | :center | :right,
+          width: pos_integer() | nil,
+          child_widgets: [term() | nil]
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  Tabs are normalised into `%{id: _, label: _, content: _}` maps, and a tab whose
+  content is a single widget tuple has that widget mounted into `:child_widgets`
+  at the same index; every other tab gets `nil` there. `:hovered_tab` starts as
+  `nil` and `:highlighted_item` at `0`.
+
+      iex> state = Drafter.Widget.TabbedContent.mount(%{tabs: ["One", {"Two", ["a", "b"]}]})
+      iex> state.tabs
+      [%{id: "One", label: "One", content: []}, %{id: "Two", label: "Two", content: ["a", "b"]}]
+
+      iex> state = Drafter.Widget.TabbedContent.mount(%{tabs: ["One"]})
+      iex> {state.active_tab, state.highlighted_item, state.hovered_tab, state.title_align, state.width}
+      {0, 0, nil, :left, nil}
+
+      iex> Drafter.Widget.TabbedContent.mount(%{tabs: ["One"]}).child_widgets
+      [nil]
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
     tabs = Map.get(props, :tabs, [])
 
@@ -77,6 +170,14 @@ defmodule Drafter.Widget.TabbedContent do
     }
   end
 
+  @doc """
+  Draws the panel into `rect`.
+
+  The layout is a title row, the tab bar, a separator, then the active tab's
+  content and the bottom border. The panel is `state.width` columns wide, falling
+  back to `rect.width` when that is `nil`.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   def render(state, rect) do
     border_computed = Computed.for_part(:tabbed_content, %{}, :border)
     border_style = Computed.to_segment_style(border_computed)
@@ -139,6 +240,26 @@ defmodule Drafter.Widget.TabbedContent do
     Enum.take(strips, rect.height - 1) ++ [bottom_strip]
   end
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  New `:tabs` are normalised. `:highlighted_item` resets to `0` when
+  `:active_tab` changes and is otherwise kept. The embedded child widgets are
+  remounted only when the number of tabs changes, so replacing a tab's widget
+  content in place does not take effect.
+
+      iex> state = Drafter.Widget.TabbedContent.mount(%{tabs: ["One", "Two"]})
+      iex> state = %{state | highlighted_item: 3}
+      iex> updated = Drafter.Widget.TabbedContent.update(%{active_tab: 1}, state)
+      iex> {updated.active_tab, updated.highlighted_item}
+      {1, 0}
+
+      iex> state = Drafter.Widget.TabbedContent.mount(%{tabs: ["One"]})
+      iex> Drafter.Widget.TabbedContent.update(%{title: "Browser"}, state).title
+      "Browser"
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
     new_active = Map.get(props, :active_tab, state.active_tab)
     new_tabs = normalize_tabs(Map.get(props, :tabs, state.tabs))
@@ -171,6 +292,34 @@ defmodule Drafter.Widget.TabbedContent do
     }
   end
 
+  @doc """
+  Handles the panel's own events, replacing the dispatch `use Drafter.Widget`
+  would otherwise generate.
+
+  Recognised events are the key bindings and mouse handling listed in the module
+  doc, plus `{:focus}` and `{:blur}`; blurring also clears `:hovered_tab`. A tab
+  change resets `:highlighted_item` to `0` and notifies `:on_tab_change` with the
+  new tab's `:id`. Anything unrecognised returns `{:noreply, state}`.
+
+      iex> state = Drafter.Widget.TabbedContent.mount(%{tabs: ["One", "Two"]})
+      iex> {:ok, switched} = Drafter.Widget.TabbedContent.handle_event({:key, :right}, state)
+      iex> switched.active_tab
+      1
+
+      iex> state = Drafter.Widget.TabbedContent.mount(%{tabs: ["One", "Two"]})
+      iex> Drafter.Widget.TabbedContent.handle_event({:key, :left}, state) == {:noreply, state}
+      true
+
+      iex> state = Drafter.Widget.TabbedContent.mount(%{tabs: [{"One", ["a", "b"]}]})
+      iex> {:ok, moved} = Drafter.Widget.TabbedContent.handle_event({:key, :down}, state)
+      iex> moved.highlighted_item
+      1
+
+      iex> state = Drafter.Widget.TabbedContent.mount(%{tabs: ["One"]})
+      iex> Drafter.Widget.TabbedContent.handle_event({:key, :tab}, state) == {:noreply, state}
+      true
+  """
+  @spec handle_event(term(), t()) :: {:ok, t()} | {:ok, t(), list()} | {:noreply, t()}
   def handle_event({:key, :left}, state) when state.active_tab > 0,
     do: change_tab(state, state.active_tab - 1)
 
@@ -229,10 +378,46 @@ defmodule Drafter.Widget.TabbedContent do
 
   def handle_event(_event, state), do: {:noreply, state}
 
+  @doc """
+  The number of rows the element asks for: `opts[:height]`, default `8`.
+
+      iex> Drafter.Widget.TabbedContent.preferred_height(nil, [])
+      8
+
+      iex> Drafter.Widget.TabbedContent.preferred_height(nil, height: 20)
+      20
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 8)
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.TabbedContent.component_tag()
+      :tabbed_content
+  """
+  @spec component_tag() :: :tabbed_content
   def component_tag, do: :tabbed_content
 
+  @doc """
+  Builds the props map for a `{:tabbed_content, tabs, opts}` element.
+
+  `tabs` is used when it is a non-empty list, otherwise `opts[:tabs]`, defaulting
+  to `[]`; the descriptors are passed through as given and `mount/1` normalises
+  them. `:on_tab_change` goes through `Drafter.Widget.Callback.wrap_1/1`.
+  `:width` falls back to the width of `opts[:__rect__]`, itself defaulting to
+  `%{width: 80}`. `:on_item_select` is not forwarded and the emitted `:classes`
+  key is not read by `mount/1`.
+
+      iex> props = Drafter.Widget.TabbedContent.from_component_opts(["One"], title: "Browser")
+      iex> {props.tabs, props.active_tab, props.title, props.title_align, props.width}
+      {["One"], 0, "Browser", :left, 80}
+
+      iex> props = Drafter.Widget.TabbedContent.from_component_opts(nil, tabs: ["A"], on_tab_change: :switched)
+      iex> {props.tabs, is_function(props.on_tab_change, 1)}
+      {["A"], true}
+  """
+  @spec from_component_opts(list() | nil, keyword()) :: Drafter.Widget.props()
   def from_component_opts(tabs, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 80})
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
@@ -250,6 +435,19 @@ defmodule Drafter.Widget.TabbedContent do
     }
   end
 
+  @doc """
+  Narrows a re-render to `:tabs`, `:title_align`, `:width` and `:classes`.
+
+  `:active_tab`, `:title`, `:on_tab_change` and `:on_item_select` are dropped, so
+  they are mount-only through the component tree and the tab the user switched to
+  survives a re-render.
+
+      iex> props = Drafter.Widget.TabbedContent.from_component_opts(["One"], title: "Browser")
+      iex> Drafter.Widget.TabbedContent.update_props_from_mount(props, %{}, []) |> Map.keys() |> Enum.sort()
+      [:classes, :tabs, :title_align, :width]
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), term(), keyword()) ::
+          Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       tabs: mount_props.tabs,

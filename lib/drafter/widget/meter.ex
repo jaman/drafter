@@ -6,17 +6,39 @@ defmodule Drafter.Widget.Meter do
   meters and vertical block characters for vertical meters. Color zones are
   defined via configurable thresholds.
 
+  ## Component tag
+
+  Tag `:meter`, built by `Drafter.App` as `{:meter, opts}`:
+
+      meter(opts)
+
+  There is no positional argument; every prop comes from `opts`.
+
   ## Options
 
-    * `:value` - float in `0.0..1.0` (default `0.0`)
-    * `:label` - optional title string
-    * `:orientation` - `:horizontal` (default) or `:vertical`
-    * `:thresholds` - list of `{value, {r, g, b}}` tuples defining color zone
-      boundaries (default: green to 60%, yellow to 80%, red above)
-    * `:show_value` - display percentage text (default `true`)
-    * `:show_label` - display the label (default `true`)
-    * `:style` - map of style properties
-    * `:classes` - list of theme class atoms
+    * `:value` - `t:float/0` fill fraction, clamped into `0.0..1.0` when rendering.
+      Default `0.0`.
+    * `:label` - `t:String.t/0` title, or `nil`. Default `nil`. Truncated to the
+      rect width.
+    * `:orientation` - `:horizontal | :vertical`. Default `:horizontal`; any value
+      other than `:vertical` renders horizontally.
+    * `:thresholds` - `[{float(), {r, g, b}}]` upper bounds sorted ascending before
+      use; the first bound the value is `<=` supplies the colour, and the last entry
+      covers everything above it. Default
+      `[{0.6, {80, 200, 100}}, {0.8, {255, 200, 0}}, {1.0, {255, 60, 60}}]`.
+    * `:show_value` - `t:boolean/0`, draw the rounded percentage. Default `true`.
+    * `:show_label` - `t:boolean/0`, draw `:label`. Default `true`; a `nil` label
+      draws nothing either way.
+    * `:style` - `t:map/0`. Default `%{}`. Held on the state and never read by
+      `render/2`, which uses fixed track and text colours.
+    * `:class` - theme class atom or list of them, normalised by
+      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      Default `[]`. Held on the state and never read by `render/2`.
+
+  `update/2` accepts every key above plus `:app_module`. Through the component tree
+  only `:value`, `:label`, `:orientation`, `:thresholds`, `:show_value` and
+  `:show_label` are live-updatable — `update_props_from_mount/3` drops `:style`,
+  `:classes` and `:app_module`, making them mount-only.
 
   ## Usage
 
@@ -50,6 +72,38 @@ defmodule Drafter.Widget.Meter do
     :app_module
   ]
 
+  @type rgb :: {0..255, 0..255, 0..255}
+
+  @type threshold :: {float(), rgb()}
+
+  @type t :: %__MODULE__{
+          value: float(),
+          label: String.t() | nil,
+          orientation: :horizontal | :vertical,
+          thresholds: [threshold()],
+          show_value: boolean(),
+          show_label: boolean(),
+          style: map(),
+          classes: [atom()],
+          app_module: module() | nil
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  Every option listed in the module doc is read here with the default stated there.
+
+      iex> Drafter.Widget.Meter.mount(%{}).value
+      0.0
+
+      iex> state = Drafter.Widget.Meter.mount(%{value: 0.4, label: "CPU"})
+      iex> {state.label, state.orientation, state.show_value, state.show_label}
+      {"CPU", :horizontal, true, true}
+
+      iex> Drafter.Widget.Meter.mount(%{}).thresholds
+      [{0.6, {80, 200, 100}}, {0.8, {255, 200, 0}}, {1.0, {255, 60, 60}}]
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
@@ -65,6 +119,15 @@ defmodule Drafter.Widget.Meter do
     }
   end
 
+  @doc """
+  Draws the meter into `rect`.
+
+  `state` may be a plain props map, in which case it is passed through `mount/1`
+  first. A horizontal meter returns one strip, or two when a label is drawn. A
+  vertical meter returns an optional label row, `rect.height` minus the label and
+  value rows of bar rows, and an optional percentage row.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
@@ -75,9 +138,26 @@ defmodule Drafter.Widget.Meter do
     end
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`. The meter is not focusable.
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:noreply, t()}
   @impl Drafter.Widget
   def handle_event(_event, state), do: {:noreply, state}
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  Accepts `:value`, `:label`, `:orientation`, `:thresholds`, `:show_value`,
+  `:show_label`, `:style`, `:classes` and `:app_module`.
+
+      iex> state = Drafter.Widget.Meter.mount(%{value: 0.2, label: "CPU"})
+      iex> updated = Drafter.Widget.Meter.update(%{value: 0.9}, state)
+      iex> {updated.value, updated.label}
+      {0.9, "CPU"}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     %{
@@ -94,6 +174,26 @@ defmodule Drafter.Widget.Meter do
     }
   end
 
+  @doc """
+  The number of rows the element asks for.
+
+  A vertical meter asks for `opts[:height]`, default `8`. A horizontal meter asks
+  for `2` when a non-`nil` `:label` is given and `:show_label` is not `false`, and
+  `1` otherwise. `:height` is ignored for a horizontal meter.
+
+      iex> Drafter.Widget.Meter.preferred_height(nil, [])
+      1
+
+      iex> Drafter.Widget.Meter.preferred_height(nil, label: "CPU")
+      2
+
+      iex> Drafter.Widget.Meter.preferred_height(nil, label: "CPU", show_label: false)
+      1
+
+      iex> Drafter.Widget.Meter.preferred_height(nil, orientation: :vertical)
+      8
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts) do
     if Keyword.get(opts, :orientation, :horizontal) == :vertical do
       Keyword.get(opts, :height, 8)
@@ -103,8 +203,27 @@ defmodule Drafter.Widget.Meter do
     end
   end
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.Meter.component_tag()
+      :meter
+  """
+  @spec component_tag() :: :meter
   def component_tag, do: :meter
 
+  @doc """
+  Builds the props map for a `{:meter, opts}` element.
+
+  The positional argument is ignored. `:class` is normalised into the `:classes`
+  key and `:__app_module__` into `:app_module`; every other option keeps its name
+  and the default stated in the module doc.
+
+      iex> props = Drafter.Widget.Meter.from_component_opts(nil, value: 0.5, class: :danger)
+      iex> {props.value, props.classes, props.orientation}
+      {0.5, [:danger], :horizontal}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
@@ -121,6 +240,19 @@ defmodule Drafter.Widget.Meter do
     }
   end
 
+  @doc """
+  Narrows a re-render to the props that may change after mount.
+
+  Returns `:value`, `:label`, `:orientation`, `:thresholds`, `:show_value` and
+  `:show_label`. `:style`, `:classes` and `:app_module` are dropped, so they are
+  mount-only through the component tree.
+
+      iex> props = Drafter.Widget.Meter.from_component_opts(nil, value: 0.5, class: :danger)
+      iex> Drafter.Widget.Meter.update_props_from_mount(props, %{}, []) |> Map.keys() |> Enum.sort()
+      [:label, :orientation, :show_label, :show_value, :thresholds, :value]
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), term(), keyword()) ::
+          Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       value: mount_props.value,
@@ -132,6 +264,12 @@ defmodule Drafter.Widget.Meter do
     }
   end
 
+  @doc """
+  Sets `:value` from the newest entry of a `Drafter.RingBuffer`.
+
+  Returns `state` unchanged when the buffer is empty. The rect is ignored.
+  """
+  @spec apply_data_buffer(t(), Drafter.RingBuffer.t(), Drafter.Widget.rect()) :: t()
   @impl Drafter.Widget
   def apply_data_buffer(state, buffer, _rect) do
     case Drafter.RingBuffer.last(buffer) do

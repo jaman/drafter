@@ -10,13 +10,44 @@ defmodule Drafter.Widget.Footer do
   Each binding is clickable: hovering highlights the binding, and clicking dispatches
   the associated key event as if the user pressed that key.
 
+  ## Component tag
+
+  Tag `:footer`, built by `Drafter.App` as `{:footer, opts}`:
+
+      footer(opts)
+
+  There is no positional argument; every prop comes from `opts`. `:app_module`
+  is supplied by the renderer.
+
   ## Options
 
-    * `:bindings` - list of `{key, description}` tuples; falls back to the active screen's `keybindings/0` when `nil`
-    * `:separator` - string placed between binding pairs (default `" "`)
-    * `:style` - style map applied to description text
-    * `:key_style` - style map applied to key label text
-    * `:app_module` - app module used for theme resolution
+    * `:bindings` - list of `{key, description}` tuples. Default `nil`, in which
+      case the widget calls `keybindings/0` on the active screen module, falling
+      back to `:app_module`, and then to `[]` when neither exports it
+    * `:separator` - `t:String.t/0` placed between binding pairs. Default `" "`
+    * `:style` - style map applied to description text. Default `nil`, which uses
+      the computed `:footer` theme style
+    * `:key_style` - style map applied to key label text. Default `nil`, which uses
+      the computed `:footer` `:key` part style
+    * `:app_module` - module used for theme resolution and as the fallback source of
+      `keybindings/0`, passed by the renderer as `:__app_module__`. Default `nil`
+
+  `update/2` re-reads every option, and passing `bindings: nil` explicitly restores
+  the "ask the active screen" behaviour. All of them are live-updatable through the
+  component tree.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`.
+
+  ## Events
+
+  The footer is not focusable and handles no keys. A hover moves the highlight to
+  the binding under the pointer, and a mouse release on a binding sends the
+  corresponding key event through `Drafter.Event.Manager`. A label of one byte
+  becomes a `{:char, codepoint}` event, a label in the built-in table becomes its
+  `{:key, atom}` event, a label with `+` becomes `{:key, key, modifiers}`, and any
+  other label is downcased and converted to an atom.
 
   ## Usage
 
@@ -40,6 +71,25 @@ defmodule Drafter.Widget.Footer do
     :hovered_index
   ]
 
+  @type binding :: {String.t(), String.t()}
+
+  @type t :: %__MODULE__{
+          bindings: [binding()] | nil,
+          style: map() | nil,
+          key_style: map() | nil,
+          separator: String.t(),
+          app_module: module() | nil,
+          hovered_index: non_neg_integer() | nil
+        }
+
+  @doc """
+  Builds the footer state from `props`. `:hovered_index` always starts at `nil`.
+
+      iex> f = Drafter.Widget.Footer.mount(%{bindings: [{"q", "Quit"}]})
+      iex> {f.bindings, f.separator, f.style, f.key_style, f.hovered_index}
+      {[{"q", "Quit"}], " ", nil, nil, nil}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
@@ -52,6 +102,14 @@ defmodule Drafter.Widget.Footer do
     }
   end
 
+  @doc """
+  Draws the binding bar as a single strip padded or cropped to `rect.width`.
+
+  Each binding takes `" key "` followed by `" description"`, with `:separator`
+  between pairs and none after the last. The hovered binding is drawn with
+  `reverse: true`. `rect.height` is not consulted.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     bindings = resolve_bindings(state)
@@ -110,6 +168,18 @@ defmodule Drafter.Widget.Footer do
     [final_strip]
   end
 
+  @doc """
+  Folds fresh props into `state`, re-reading `:bindings`, `:style`, `:key_style`,
+  `:separator` and `:app_module`. `:hovered_index` is left alone.
+
+  `:bindings` is taken whenever the key is present, so `bindings: nil` restores the
+  active-screen lookup rather than being ignored.
+
+      iex> f = Drafter.Widget.Footer.mount(%{bindings: [{"q", "Quit"}]})
+      iex> Drafter.Widget.Footer.update(%{bindings: nil}, f).bindings
+      nil
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     bindings =
@@ -128,6 +198,15 @@ defmodule Drafter.Widget.Footer do
     }
   end
 
+  @doc """
+  Moves the highlight to the binding spanning column `x`, counted from the left edge
+  of the widget.
+
+  Returns `{:ok, state}` with the new `:hovered_index`, which is `nil` when `x`
+  falls on a separator or past the last binding, or `{:noreply, state}` when the
+  index has not changed.
+  """
+  @spec handle_hover(integer(), integer(), t()) :: {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_hover(x, _y, state) do
     bindings = resolve_bindings(state)
@@ -141,6 +220,14 @@ defmodule Drafter.Widget.Footer do
     end
   end
 
+  @doc """
+  Dispatches the key event for the binding under column `x`.
+
+  On a hit the event is sent through `Drafter.Event.Manager.send_event/1`, exactly
+  as if the key had been pressed, and `{:ok, state}` is returned. A release on a
+  separator or past the last binding returns `{:noreply, state}`.
+  """
+  @spec handle_mouse_up(integer(), integer(), t()) :: {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_mouse_up(x, _y, state) do
     bindings = resolve_bindings(state)
@@ -158,10 +245,28 @@ defmodule Drafter.Widget.Footer do
     end
   end
 
+  @doc "Always `1`: the footer occupies a single row."
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, _opts), do: 1
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.Footer.component_tag()
+      :footer
+  """
+  @spec component_tag() :: :footer
   def component_tag, do: :footer
 
+  @doc """
+  Turns the `{:footer, opts}` element into a props map for `mount/1`.
+
+  The positional argument is ignored. `:__app_module__` becomes `:app_module`.
+
+      iex> Drafter.Widget.Footer.from_component_opts(nil, bindings: [{"q", "Quit"}])
+      %{bindings: [{"q", "Quit"}], separator: " ", style: nil, key_style: nil, app_module: nil}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     %{
       bindings: Keyword.get(opts, :bindings),
@@ -172,6 +277,11 @@ defmodule Drafter.Widget.Footer do
     }
   end
 
+  @doc """
+  Returns `mount_props` unchanged, so a re-render passes every option through to
+  `update/2`.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
 
   defp resolve_bindings(%{bindings: bindings}) when bindings != nil, do: bindings

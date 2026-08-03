@@ -2,13 +2,35 @@ defmodule Drafter.Widget.Rule do
   @moduledoc """
   Renders a horizontal or vertical divider line, optionally with an embedded title.
 
+  ## Component tag
+
+  Tag `:rule`, built by `Drafter.App` as `{:rule, opts}`:
+
+      rule(opts)
+
+  There is no positional argument; every prop comes from `opts`.
+
   ## Options
 
-    * `:orientation` - `:horizontal` (default) or `:vertical`
-    * `:title` - optional string to embed in the centre of a horizontal rule
-    * `:title_align` - `:left`, `:center` (default), `:right`
-    * `:line_style` - `:solid` (default), `:double`, `:dashed`, `:thick`
-    * `:style` - map of style overrides
+    * `:orientation` - `:horizontal | :vertical`. Default `:horizontal`. Any other
+      value raises a `CaseClauseError` from `render/2`.
+    * `:title` - `t:String.t/0` embedded in a horizontal rule, or `nil`. Default
+      `nil`. Ignored when the orientation is `:vertical`. A title that is as wide
+      as the rect, once padded with a space on each side, is truncated and no line
+      characters are drawn.
+    * `:title_align` - `:left | :center | :right`. Default `:center`. Only read
+      when `:title` is set.
+    * `:line_style` - `:solid | :double | :dashed | :thick`. Default `:solid`.
+      Selects `─ ═ ╌ ━` horizontally and `│ ║ ╎ ┃` vertically. Any other value
+      raises a `KeyError` from `render/2`.
+    * `:style` - `t:map/0` of style overrides merged over the computed theme style.
+      Default `%{}`.
+    * `:height` - `t:pos_integer/0` read only by `preferred_height/2`, never by
+      `mount/1`. Default `1`.
+
+  Every option except `:height` is live-updatable: `update/2` folds each recognised
+  key into the state and `update_props_from_mount/3` passes the full mount props
+  through.
 
   ## Usage
 
@@ -41,6 +63,20 @@ defmodule Drafter.Widget.Rule do
           app_module: module() | nil
         }
 
+  @doc """
+  Builds the widget state from `props`.
+
+  Reads `:orientation` (default `:horizontal`), `:title` (default `nil`),
+  `:title_align` (default `:center`), `:style` (default `%{}`), `:line_style`
+  (default `:solid`) and `:app_module` (default `nil`).
+
+      iex> Drafter.Widget.Rule.mount(%{})
+      %Drafter.Widget.Rule{orientation: :horizontal, title: nil, title_align: :center, style: %{}, line_style: :solid, app_module: nil}
+
+      iex> Drafter.Widget.Rule.mount(%{title: "Section", line_style: :double}).line_style
+      :double
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
@@ -53,6 +89,18 @@ defmodule Drafter.Widget.Rule do
     }
   end
 
+  @doc """
+  Folds `props` into `state`, one key at a time.
+
+  Recognises `:orientation`, `:title`, `:title_align`, `:style`, `:line_style` and
+  `:app_module`; any other key is ignored and leaves the state untouched. `props`
+  may be a map or a keyword list.
+
+      iex> state = Drafter.Widget.Rule.mount(%{})
+      iex> Drafter.Widget.Rule.update(%{title: "New", unknown: 1}, state).title
+      "New"
+  """
+  @spec update(Drafter.Widget.props() | keyword(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     Enum.reduce(props, state, fn {key, value}, acc ->
@@ -68,6 +116,15 @@ defmodule Drafter.Widget.Rule do
     end)
   end
 
+  @doc """
+  Draws the rule into `rect`.
+
+  A horizontal rule returns `rect.height` strips with the line on row
+  `div(rect.height, 2)` and blanks elsewhere. A vertical rule returns
+  `rect.height` strips each holding the line character followed by
+  `rect.width - 1` spaces, or `[]` when `rect.width` is not positive.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     computed_opts = [style: state.style]
@@ -86,15 +143,49 @@ defmodule Drafter.Widget.Rule do
     end
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`. The rule is not focusable.
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:noreply, t()}
   @impl Drafter.Widget
   def handle_event(_event, state) do
     {:noreply, state}
   end
 
+  @doc """
+  The number of rows the element asks for: `opts[:height]`, default `1`.
+
+      iex> Drafter.Widget.Rule.preferred_height(nil, [])
+      1
+
+      iex> Drafter.Widget.Rule.preferred_height(nil, height: 3)
+      3
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 1)
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.Rule.component_tag()
+      :rule
+  """
+  @spec component_tag() :: :rule
   def component_tag, do: :rule
 
+  @doc """
+  Builds the props map for a `{:rule, opts}` element.
+
+  The positional argument is ignored. `:__app_module__` becomes `:app_module`;
+  every other option keeps its name and the default stated in the module doc.
+
+      iex> Drafter.Widget.Rule.from_component_opts(nil, [])
+      %{orientation: :horizontal, title: nil, title_align: :center, style: %{}, line_style: :solid, app_module: nil}
+
+      iex> Drafter.Widget.Rule.from_component_opts(nil, title: "Section", title_align: :left).title_align
+      :left
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     %{
       orientation: Keyword.get(opts, :orientation, :horizontal),
@@ -106,6 +197,16 @@ defmodule Drafter.Widget.Rule do
     }
   end
 
+  @doc """
+  Passes the mount props through unchanged, so every option is live-updatable
+  through the component tree.
+
+      iex> props = Drafter.Widget.Rule.from_component_opts(nil, title: "Section")
+      iex> Drafter.Widget.Rule.update_props_from_mount(props, %{}, []) == props
+      true
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), term(), keyword()) ::
+          Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
 
   defp render_horizontal(state, rect, segment_style) do

@@ -1,11 +1,12 @@
 defmodule Drafter.CellSession do
   @moduledoc """
-  Drives a Drafter app to an in-memory **cell grid** instead of a terminal.
+  Drives a Drafter app to an in-memory cell grid instead of a terminal.
 
-  This is the "run anywhere" seam: a `CellSession` runs the real app loop with a
-  null terminal driver and exposes the composited screen as rows of cells (`Strip`s)
-  plus row-level diffs. A host (Phoenix LiveView, Livebook, an e-ink device, a custom
-  byte transport) can render those cells however it likes and feed input back in.
+  A `CellSession` runs the ordinary app loop against a terminal driver that
+  discards its output, and exposes the composited screen as rows of cells —
+  `Drafter.Draw.Strip` structs, one per screen row — together with row-level
+  diffs. A host renders those rows however it likes and feeds input back in with
+  `feed_input/2`.
 
       session = Drafter.CellSession.start(MyApp, size: {80, 24})
       rows = Drafter.CellSession.take_cells(session)            # full grid
@@ -35,8 +36,16 @@ defmodule Drafter.CellSession do
   @doc """
   Start a cell-backed session for `app_module`.
 
-  Opts: `:size` (default `{80, 24}`), `:shared` (a `Drafter.Session.SharedState` pid to join
-  a shared multi-user session), and any remaining keys are passed as mount props.
+  Options:
+
+    * `:size` — `{columns, rows}` of the virtual surface, default `{80, 24}`
+    * `:shared` — a `Drafter.Session.SharedState` pid to join an existing
+      multi-user session; omit for a session with private state
+
+  Every other option is passed to the app's `mount/1` as a mount prop.
+
+  Returns the session struct, which the other functions in this module take. The
+  caller must call `close/1` to release the processes the session owns.
   """
   @spec start(module(), keyword()) :: t()
   def start(app_module, opts \\ []) do

@@ -9,13 +9,60 @@ defmodule Drafter.Layout do
   alias Drafter.CharacterSet
   alias Drafter.Widget.Registry
 
-  @type rect :: %{x: integer(), y: integer(), width: pos_integer(), height: pos_integer()}
+  @typedoc """
+  A rectangle in terminal cells.
+
+  `x`/`y` are the top-left corner and may be negative for a component scrolled out of
+  view. `width`/`height` may be `0` — `apply_margin/2` produces zero-sized rects when
+  the margin exceeds the space.
+  """
+  @type rect :: %{
+          x: integer(),
+          y: integer(),
+          width: non_neg_integer(),
+          height: non_neg_integer()
+        }
+
+  @typedoc "A component descriptor tuple, as an app's `render/1` returns."
   @type component :: tuple()
+
+  @typedoc "A widget hierarchy map, consulted for widgets that report their own size."
   @type hierarchy :: map()
 
-  @spec rect(non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()) :: rect()
+  @typedoc """
+  A size as written in a component's options.
+
+  A non-negative integer is a cell count, `{:percent, n}` a share of the container,
+  `{:fr, n}` a share of what is left after fixed siblings, and `:auto` defers to the
+  component's own preferred size.
+  """
+  @type dimension :: non_neg_integer() | {:percent, number()} | {:fr, number()} | :auto | nil
+
+  @typedoc "Edge insets as `{top, right, bottom, left}`."
+  @type sides :: {integer(), integer(), integer(), integer()}
+
+  @doc """
+  Build a rect map from its four components.
+
+  No clamping or validation is applied.
+
+  ## Examples
+
+      iex> Drafter.Layout.rect(1, 2, 30, 4)
+      %{x: 1, y: 2, width: 30, height: 4}
+
+  """
+  @spec rect(integer(), integer(), non_neg_integer(), non_neg_integer()) :: rect()
   def rect(x, y, width, height), do: %{x: x, y: y, width: width, height: height}
 
+  @doc """
+  How tall a component would like to be, in cells.
+
+  Container components sum their children plus their own chrome; a registered widget
+  is asked through `Drafter.Widget.Registry`. `hierarchy` supplies live widget state
+  where a widget's height depends on it, and defaults to `nil`. Anything unrecognised
+  is `1`.
+  """
   @spec get_preferred_height(component(), hierarchy() | nil) :: pos_integer() | :auto
   def get_preferred_height(component, hierarchy \\ nil)
 
@@ -87,6 +134,13 @@ defmodule Drafter.Layout do
 
   def get_preferred_height(_component, _hierarchy), do: 1
 
+  @doc """
+  A child's vertical sizing inputs, as `{preferred, weight, flexes?, max_height}`.
+
+  `weight` is the child's `:fr` count when it has one, otherwise its `:flex` value,
+  never less than `1`. `flexes?` says whether the child should absorb leftover space.
+  `max_height` is its `:max_height` option, or `nil`.
+  """
   @spec get_child_vertical_spec(component(), hierarchy() | nil) ::
           {pos_integer() | :auto, non_neg_integer(), boolean(), pos_integer() | nil}
   def get_child_vertical_spec({:layout, _direction, _children, opts} = child, hierarchy) do
@@ -168,6 +222,21 @@ defmodule Drafter.Layout do
   defp fr_units({:fr, n}) when is_number(n) and n > 0, do: round(n)
   defp fr_units(_other), do: nil
 
+  @doc """
+  Stack children down `rect`, returning a `%{y: y, height: height}` per child.
+
+  Fixed-height children keep their preferred height; the rest share what is left in
+  proportion to their flex weight, with a floor of one cell each. Every result is
+  clipped to the bottom of `rect`, so a child that does not fit gets height `0`.
+
+  ## Options
+
+    * `:gap` - blank rows between children. Default: `0`. Gaps are subtracted from
+      the space the flexing children share.
+
+  Each child's own `:height`, `:min_height`, `:max_height`, `:flex` and `:fr` options
+  are read from the child descriptor, not from `opts`.
+  """
   @spec calculate_vertical_layout(
           [component()],
           rect(),
@@ -239,6 +308,19 @@ defmodule Drafter.Layout do
     Enum.reverse(sizes)
   end
 
+  @doc """
+  Lay children out across `rect`, returning a `%{x: x, width: width}` per child.
+
+  ## Options
+
+    * `:children_opts` - list of per-child option keywords, positionally matched to
+      `children`. Default: `[]`. When no entry carries `:width` or `:flex`, the rect
+      is divided evenly and `:gap` applies; otherwise those per-child options drive
+      the widths and `:gap` is not used.
+    * `:gap` - blank columns between children. Default: `0`. Honoured only on the
+      even-division path described above.
+
+  """
   @spec calculate_horizontal_layout([component()], rect(), keyword()) ::
           [%{x: integer(), width: pos_integer()}]
   def calculate_horizontal_layout(children, rect, opts) do
@@ -340,6 +422,24 @@ defmodule Drafter.Layout do
     {origin, last_origin + last_size - origin}
   end
 
+  @doc """
+  How many widget slots a component descriptor occupies, counting nested children.
+
+  A layout contributes nothing of its own; a box, card, scrollable or collapsible
+  contributes one plus its children. Anything else is `1`.
+
+  ## Examples
+
+      iex> Drafter.Layout.count_component_slots({:label, [text: "hi"]})
+      1
+
+      iex> Drafter.Layout.count_component_slots({:layout, :vertical, [{:label, []}, {:label, []}], []})
+      2
+
+      iex> Drafter.Layout.count_component_slots({:box, [{:label, []}], []})
+      2
+
+  """
   @spec count_component_slots(component()) :: pos_integer()
   def count_component_slots({:layout, _dir, children, _opts}) do
     Enum.sum(Enum.map(children, &count_component_slots/1))
@@ -372,6 +472,21 @@ defmodule Drafter.Layout do
 
   Returns a cell count for integers and percentages. `nil`, `:auto`, `{:fr, n}`
   and any unrecognised value return `fallback`.
+
+  ## Examples
+
+      iex> Drafter.Layout.resolve_dimension(10, 100, :auto)
+      10
+
+      iex> Drafter.Layout.resolve_dimension({:percent, 25}, 80, :auto)
+      20
+
+      iex> Drafter.Layout.resolve_dimension(nil, 80, 7)
+      7
+
+      iex> Drafter.Layout.resolve_dimension({:fr, 2}, 80, 7)
+      7
+
   """
   @spec resolve_dimension(term(), non_neg_integer(), non_neg_integer() | :auto) ::
           non_neg_integer() | :auto
@@ -388,6 +503,21 @@ defmodule Drafter.Layout do
 
   @doc """
   Clamp a size to the `:min_height`/`:max_height` or `:min_width`/`:max_width` in `opts`.
+
+  A bound that is absent or not an integer is ignored. When both are present and
+  contradict each other, the maximum wins.
+
+  ## Examples
+
+      iex> Drafter.Layout.clamp_size(3, [min_height: 5], :height)
+      5
+
+      iex> Drafter.Layout.clamp_size(30, [max_width: 20], :width)
+      20
+
+      iex> Drafter.Layout.clamp_size(3, [], :height)
+      3
+
   """
   @spec clamp_size(non_neg_integer(), keyword(), :height | :width) :: non_neg_integer()
   def clamp_size(size, opts, :height) do
@@ -415,11 +545,44 @@ defmodule Drafter.Layout do
 
   Shares the shorthand forms of `get_padding/1`: a single value applies to all
   sides, a pair is vertical then horizontal.
+
+  Returns `{0, 0, 0, 0}` when `:margin` is absent or unrecognised.
+
+  ## Examples
+
+      iex> Drafter.Layout.get_margin(margin: 2)
+      {2, 2, 2, 2}
+
+      iex> Drafter.Layout.get_margin(margin: {1, 4})
+      {1, 4, 1, 4}
+
+      iex> Drafter.Layout.get_margin([])
+      {0, 0, 0, 0}
+
   """
-  @spec get_margin(keyword()) :: {integer(), integer(), integer(), integer()}
+  @spec get_margin(keyword()) :: sides()
   def get_margin(opts), do: sides(Keyword.get(opts, :margin))
 
-  @spec get_padding(keyword()) :: {integer(), integer(), integer(), integer()}
+  @doc """
+  Padding inside a component, as `{top, right, bottom, left}`.
+
+  A single integer applies to all four sides, a `{vertical, horizontal}` pair to two
+  each, and a full four-tuple is taken as written. Returns `{0, 0, 0, 0}` when
+  `:padding` is absent or unrecognised.
+
+  ## Examples
+
+      iex> Drafter.Layout.get_padding(padding: 1)
+      {1, 1, 1, 1}
+
+      iex> Drafter.Layout.get_padding(padding: {0, 2, 3, 4})
+      {0, 2, 3, 4}
+
+      iex> Drafter.Layout.get_padding([])
+      {0, 0, 0, 0}
+
+  """
+  @spec get_padding(keyword()) :: sides()
   def get_padding(opts), do: sides(Keyword.get(opts, :padding))
 
   defp sides(nil), do: {0, 0, 0, 0}
@@ -430,8 +593,19 @@ defmodule Drafter.Layout do
 
   @doc """
   Shrink a rect by a component's margin, leaving the space outside its box.
+
+  Width and height floor at `0`, so a margin larger than the rect collapses it.
+
+  ## Examples
+
+      iex> Drafter.Layout.apply_margin(%{x: 0, y: 0, width: 10, height: 6}, {1, 2, 1, 2})
+      %{x: 2, y: 1, width: 6, height: 4}
+
+      iex> Drafter.Layout.apply_margin(%{x: 0, y: 0, width: 2, height: 2}, {5, 5, 5, 5})
+      %{x: 5, y: 5, width: 0, height: 0}
+
   """
-  @spec apply_margin(rect(), {integer(), integer(), integer(), integer()}) :: rect()
+  @spec apply_margin(rect(), sides()) :: rect()
   def apply_margin(rect, {top, right, bottom, left}) do
     %{
       x: rect.x + left,
@@ -441,7 +615,22 @@ defmodule Drafter.Layout do
     }
   end
 
-  @spec apply_padding(rect(), {integer(), integer(), integer(), integer()}) :: rect()
+  @doc """
+  Shrink a rect by a component's padding, leaving the space inside its border.
+
+  Unlike `apply_margin/2`, width and height floor at `1`, so a padded component always
+  keeps a cell to draw in.
+
+  ## Examples
+
+      iex> Drafter.Layout.apply_padding(%{x: 0, y: 0, width: 10, height: 6}, {1, 2, 1, 2})
+      %{x: 2, y: 1, width: 6, height: 4}
+
+      iex> Drafter.Layout.apply_padding(%{x: 0, y: 0, width: 2, height: 2}, {5, 5, 5, 5})
+      %{x: 5, y: 5, width: 1, height: 1}
+
+  """
+  @spec apply_padding(rect(), sides()) :: rect()
   def apply_padding(rect, {top, right, bottom, left}) do
     %{
       x: rect.x + left,

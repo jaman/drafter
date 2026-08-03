@@ -4,6 +4,23 @@ defmodule Drafter.Transport.SSH do
   alias Drafter.{Compositor, Event, EventHandler, Logging, ScreenManager, Session, ThemeManager}
   alias Drafter.Transport.SSHDriver
 
+  @doc """
+  Start an `:ssh` daemon that runs `app_module` as each client's shell.
+
+  ## Options
+
+    * `:port` - TCP port. Default: `2222`.
+    * `:ip` - interface address tuple to bind. Default: `{127, 0, 0, 1}`.
+    * `:mode` - `:isolated` or `:shared`. Default: `:isolated`. `:shared` starts the
+      app's `Drafter.Session.SharedState` server before the daemon.
+    * `:auth` - `[{username, password}]` pairs, or `:anonymous` to accept anything.
+      Default: `[{"admin", "admin"}]`.
+    * `:system_dir` - host-key directory. Default: `drafter_ssh` under the system
+      temp directory, populated by `ssh-keygen` on first use.
+    * `:mount_props` - map handed to each session's `mount/1`. Default: `%{}`. The
+      connecting username is merged in under `:username` as a string.
+
+  """
   @spec start_link(module(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_link(app_module, opts \\ []) do
     port = Keyword.get(opts, :port, 2222)
@@ -47,6 +64,7 @@ defmodule Drafter.Transport.SSH do
 
     session_ctx = start_session_services(driver_pid)
     SSHDriver.setup(driver_pid, session_ctx.event_manager)
+    session_ctx = put_probed_protocol(session_ctx, SSHDriver.probe(driver_pid))
     Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
 
     session_opts = build_session_opts(app_module, mode, full_props)
@@ -68,6 +86,11 @@ defmodule Drafter.Transport.SSH do
   defp build_session_opts(_app_module, mode, mount_props) do
     [mode: mode, props: mount_props]
   end
+
+  defp put_probed_protocol(session_ctx, {:ok, protocol}),
+    do: Map.put(session_ctx, :terminal_protocol, protocol)
+
+  defp put_probed_protocol(session_ctx, :unprobed), do: session_ctx
 
   defp start_session_services(driver_pid) do
     {:ok, em} = Event.Manager.start_link(name: nil)

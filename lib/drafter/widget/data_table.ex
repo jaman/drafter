@@ -24,35 +24,94 @@ defmodule Drafter.Widget.DataTable do
 
   Shorthand forms are also accepted: `{:key, "Label"}` or just `:key`.
 
+  ## Component tag
+
+  Tag `:data_table`, built by `Drafter.App` as `{:data_table, opts}`:
+
+      data_table(opts)
+
+  There is no positional argument; columns and rows are passed as `columns:` and
+  `data:` in `opts`. `from_component_opts/2` wraps each callback with
+  `Drafter.Widget.Callback`, so every `on_*` option may be given as an atom event
+  name. `:width` and `:height` default to the rect the parent allocated, and a
+  `:height` of `:auto` becomes `8`.
+
+  Row styles are given through the element as a single `:styles` map holding any
+  of `:style`, `:header_style`, `:selected_style` and `:cursor_style`; each
+  unset entry falls back to the active theme. Mounting this module directly
+  takes those four as separate top-level props instead.
+
   ## Options
 
-    * `:columns` - list of column definitions (required)
-    * `:data` - list of row maps (default: `[]`)
-    * `:sort_by` - initial sort: an atom column key (ascending), or `{key, :asc | :desc}`
+    * `:columns` - list of column definitions. Default `[]`
+    * `:data` - list of row maps. Default `[]`
+    * `:sort_by` - initial sort: an atom column key (ascending), or
+      `{key, :asc | :desc}`. Default `nil`, leaving the rows in the given order
     * `:selection_mode` - `:none`, `:single` (default), or `:multiple`
-    * `:on_select` - `([row] -> term())` called with selected rows when a row is activated
-    * `:on_sort` - `(atom(), :asc | :desc -> term())` called after a column sort
-    * `:show_header` - render column headers (default: `true`)
-    * `:show_cursor` - highlight the current cell column in the header (default: `true`)
-    * `:zebra_stripes` - alternate row background colours (default: `true`)
-    * `:show_scrollbars` - render a vertical scrollbar when content overflows (default: `true`)
-    * `:column_fit_mode` - `:fit` (divide available width equally, default) or `:expand`
-      (compute optimal widths from content, allows horizontal overflow)
-    * `:mouse_scroll_moves_selection` - when `true`, scrolling moves the cursor row rather
-      than scrolling the viewport (default: `true`)
-    * `:width` - widget width in columns (default: `80`)
-    * `:height` - widget height in rows (default: `20`)
-    * `:fixed_columns` - number of left-most columns that do not scroll horizontally (default: `0`)
-    * `:sortable` - enable/disable column sorting and sort indicators for the entire table (default: `true`)
-    * `:locked` - when `true` (default), dragging a column header resizes it; when `false`, dragging reorders columns
-    * `:on_layout_change` - `(%{col_widths: [...], col_order: [...]}) -> term()` called after resize or reorder
-    * `:col_widths` - initial list of column widths in display order; used to restore a saved layout
-    * `:col_order` - initial list of original column indices in display order; used to restore a saved layout
-    * `:cursor_type` - `:row` (default, highlights entire row), `:cell` (highlights only the cell at cursor column),
-      `:column` (highlights entire column across all rows), or `:none` (no cursor highlight)
-    * `:cell_padding` - number of spaces to pad on each side of cell content (default: `0`)
-    * `:on_row_highlight` - `(row :: map() -> term())` called when the cursor moves to a new row
-    * `:on_header_select` - `(column_key :: atom() -> term())` called when a column header is clicked
+    * `:on_select` - `([row] -> term())` called with the selected rows when a row is
+      activated. Default `nil`
+    * `:on_sort` - `(atom(), :asc | :desc -> term())` called after a column sort.
+      Default `nil`
+    * `:show_header` - `t:boolean/0`, render column headers. Default `true`. The
+      header costs one row of data height
+    * `:show_cursor` - `t:boolean/0`, highlight the current cell column in the
+      header. Default `true`
+    * `:zebra_stripes` - `t:boolean/0`, alternate row background colours. Default
+      `true`
+    * `:show_scrollbars` - `t:boolean/0`, render a vertical scrollbar when the row
+      count exceeds the data height. Default `true`
+    * `:column_fit_mode` - `:fit` (divide available width equally, default) or
+      `:expand` (compute optimal widths from content, allowing horizontal overflow)
+    * `:mouse_scroll_moves_selection` - `t:boolean/0`. Default `true`, moving the
+      cursor row; `false` scrolls the viewport instead
+    * `:mouse_scroll_selects_item` - `t:boolean/0`. Default `false`. Carried on the
+      state but never read
+    * `:width` - widget width in columns. Default `80` when mounting directly, or
+      the allocated rect width through the element. `on_rect_change/2` overwrites it
+      with the real rect width
+    * `:height` - widget height in rows. Default `20` when mounting directly, or the
+      allocated rect height through the element, with `:auto` becoming `8`. A
+      non-positive or non-integer value falls back to `20`
+    * `:fixed_columns` - number of left-most columns that do not scroll
+      horizontally, clamped to the column count. Default `0`. Mount-only: `update/2`
+      ignores it
+    * `:sortable` - `t:boolean/0`, enable column sorting and sort indicators for the
+      whole table. Default `true`
+    * `:resizable` - `t:boolean/0`, allow header drags to resize columns. Default
+      `true`. Read by `mount/1` and `update/2` only; the `data_table/1` element does
+      not forward it
+    * `:locked` - `t:boolean/0`. Default `true`, so dragging a column header resizes
+      it; `false` makes the drag reorder columns instead
+    * `:on_layout_change` - `(%{col_widths: [...], col_order: [...]} -> term())`
+      called after a resize or reorder. Default `nil`
+    * `:col_widths` - initial list of column widths in display order, for restoring a
+      saved layout. Default `nil`
+    * `:col_order` - initial list of original column indices in display order, for
+      restoring a saved layout. Default `nil`
+    * `:cursor_type` - `:row` (default, highlights the whole row), `:cell`
+      (highlights only the cell at the cursor column), `:column` (highlights the
+      whole column), or `:none`
+    * `:cell_padding` - spaces padded on each side of cell content. Default `0`
+    * `:on_row_highlight` - `(row :: map() -> term())` called when the cursor moves
+      to a new row. Default `nil`
+    * `:on_header_select` - `(column_key :: atom() -> term())` called when a column
+      header is clicked. Default `nil`
+    * `:style`, `:header_style`, `:selected_style`, `:cursor_style` - style maps read
+      by `mount/1` and `update/2`. Through the element they are the entries of the
+      single `:styles` map instead. Each falls back to the active theme
+
+  Everything above is live through `update/2` except `:sort_by`, `:fixed_columns`,
+  `:mouse_scroll_moves_selection` and `:mouse_scroll_selects_item`, which are
+  mount-only. Through the component tree a re-render narrows the live set further,
+  to the five callbacks plus `:columns`, `:data`, `:selection_mode`, `:sortable`,
+  `:locked`, `:cursor_type`, `:cell_padding`, `:fixed_columns`, and `:width` and
+  `:height` when they changed.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns `nil` for this widget: the value extractor
+  has no clause matching a state carrying `:selected_indices` without `:options`.
+  Read the selection through `:on_select` instead.
 
   ## Key bindings
 
@@ -216,9 +275,35 @@ defmodule Drafter.Widget.DataTable do
           cell_padding: non_neg_integer()
         }
 
+  @doc """
+  The row at which data starts inside the widget: `1` with a header and `0` without.
+
+      iex> Drafter.Widget.DataTable.get_data_start_y(%{show_header: true})
+      1
+
+      iex> Drafter.Widget.DataTable.get_data_start_y(%{show_header: false})
+      0
+  """
+  @spec get_data_start_y(map()) :: 0 | 1
   def get_data_start_y(%{show_header: true}), do: 1
   def get_data_start_y(_state), do: 0
 
+  @doc """
+  The number of rows available for data.
+
+  Uses `:viewport_height` when it is a positive integer, falling back to `:height`,
+  and subtracts one row for the header when `:show_header` is set.
+
+      iex> Drafter.Widget.DataTable.get_data_height(%{show_header: true, viewport_height: 10})
+      9
+
+      iex> Drafter.Widget.DataTable.get_data_height(%{show_header: false, viewport_height: 10})
+      10
+
+      iex> Drafter.Widget.DataTable.get_data_height(%{show_header: true, viewport_height: 0, height: 6})
+      5
+  """
+  @spec get_data_height(map()) :: integer()
   def get_data_height(%{show_header: true, viewport_height: vh}) when is_integer(vh) and vh > 0,
     do: vh - 1
 
@@ -229,6 +314,32 @@ defmodule Drafter.Widget.DataTable do
   defp normalize_height(height) when is_integer(height) and height > 0, do: height
   defp normalize_height(_height), do: 20
 
+  @doc """
+  Builds the table state from `props`.
+
+  Columns are normalised from their shorthand forms, `:sort_by` is applied to the
+  data immediately, and the cursor starts on row `0` when there is any data and at
+  `nil` when there is none. Nothing is selected initially, whatever
+  `:selection_mode` is.
+
+      iex> t = Drafter.Widget.DataTable.mount(%{columns: [:name], data: [%{name: "a"}]})
+      iex> {t.highlighted_index, MapSet.to_list(t.selected_indices), t.selection_mode, t.cursor_col}
+      {0, [], :single, 0}
+
+      iex> t = Drafter.Widget.DataTable.mount(%{})
+      iex> {t.columns, t.data, t.highlighted_index, t.width, t.height, t.sort_column}
+      {[], [], nil, 80, 20, nil}
+
+      iex> data = [%{n: 3}, %{n: 1}, %{n: 2}]
+      iex> t = Drafter.Widget.DataTable.mount(%{columns: [:n], data: data, sort_by: :n})
+      iex> {Enum.map(t.data, & &1.n), t.sort_column, t.sort_direction}
+      {[1, 2, 3], :n, :asc}
+
+      iex> t = Drafter.Widget.DataTable.mount(%{height: :auto})
+      iex> t.height
+      20
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     columns = Map.get(props, :columns, [])
@@ -320,10 +431,21 @@ defmodule Drafter.Widget.DataTable do
   scroll and scrollbar calculations run against the geometry the widget was
   actually given rather than the values supplied at mount.
   """
+  @spec on_rect_change(Drafter.Widget.rect(), t()) :: t()
   def on_rect_change(rect, state) do
     %{state | viewport_height: rect.height, width: rect.width}
   end
 
+  @doc """
+  Draws the table into `rect`, returning exactly `rect.height` strips.
+
+  Theme styles are folded in first, then `:viewport_height` is set from `rect` so
+  the row window matches the space actually given. The table is drawn no wider than
+  `min(state.width, rect.width)`. The header takes the first row when `:show_header`
+  is set, and a vertical scrollbar is drawn in the rightmost column when
+  `:show_scrollbars` is set and the row count exceeds the data height.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Drafter.Draw.Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     st =
@@ -357,6 +479,13 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
+  @doc """
+  The key bindings a `Drafter.Widget.Footer` shows for this widget.
+
+      iex> Drafter.Widget.DataTable.keybindings()
+      [{"↑↓", "Scroll"}, {"Enter", "Select"}, {"+/-", "Resize col"}, {"⇧←→", "Reorder col"}]
+  """
+  @spec keybindings() :: [{String.t(), String.t()}]
   def keybindings do
     [
       {"↑↓", "Scroll"},
@@ -366,6 +495,18 @@ defmodule Drafter.Widget.DataTable do
     ]
   end
 
+  @doc """
+  Moves the cursor, activates a row, or resizes the cursor column.
+
+  `?+`/`:+` widen and `?-`/`:-` narrow the cursor column by two, firing
+  `:on_layout_change`. `:left` and `:right` move the cursor column, but only while
+  the widget is focused; unfocused they bubble. `:up`, `:down`, `:home`, `:end`,
+  `:page_up` and `:page_down` move the cursor row, `:enter` selects the highlighted
+  row and fires `:on_select`, and `:" "` toggles the row's selection in `:multiple`
+  mode. Every other key bubbles.
+  """
+  @spec handle_key(Drafter.Widget.key() | integer(), t()) ::
+          {:ok, t()} | {:ok, t(), [term()]} | {:bubble, t()}
   @impl Drafter.Widget
   def handle_key(?+, state),
     do: Columns.resize_cursor_col(state, 2, &Selection.trigger_layout_change/1)
@@ -405,6 +546,15 @@ defmodule Drafter.Widget.DataTable do
   def handle_key(:" ", state), do: Selection.action_toggle_selection(state)
   def handle_key(_key, state), do: {:bubble, state}
 
+  @doc """
+  Reorders columns with `Shift+←` and `Shift+→`, firing `:on_layout_change`.
+
+  Every other modified key combination bubbles, including the unmodified keys
+  `handle_key/2` would otherwise act on, because this clause takes precedence for
+  every `{:key, key, modifiers}` event.
+  """
+  @spec handle_key(Drafter.Widget.key(), Drafter.Widget.modifiers(), t()) ::
+          {:ok, t()} | {:ok, t(), [term()]} | {:bubble, t()}
   @impl Drafter.Widget
   def handle_key(:left, [:shift], state),
     do: Columns.reorder_column(state, state.cursor_col, :left, &Selection.trigger_layout_change/1)
@@ -415,6 +565,14 @@ defmodule Drafter.Widget.DataTable do
 
   def handle_key(_key, _mods, state), do: {:bubble, state}
 
+  @doc """
+  Handles the mouse wheel.
+
+  With `:mouse_scroll_moves_selection` set, which is the default, a notch moves the
+  cursor row exactly as `:up`/`:down` would. Otherwise it scrolls the viewport by one
+  row without moving the cursor.
+  """
+  @spec handle_scroll(:up | :down, t()) :: {:ok, t()} | {:ok, t(), [term()]}
   @impl Drafter.Widget
   def handle_scroll(direction, state) do
     if state.scroll.mouse_scroll_moves_selection do
@@ -430,11 +588,28 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
+  @doc """
+  Begins a gesture at widget-relative cell `{x, y}`.
+
+  A press on the scrollbar column starts a scrollbar drag or jumps the viewport; a
+  press elsewhere records the position so the matching release can act on it.
+  """
+  @spec handle_press(integer(), integer(), t()) :: {:ok, t()} | {:ok, t(), [term()]}
   @impl Drafter.Widget
   def handle_press(x, y, state) do
     Selection.handle_press(state, x, y)
   end
 
+  @doc """
+  Ends the current gesture at widget-relative cell `{x, y}`.
+
+  A release ending a scrollbar drag only clears the drag state. One ending a resize
+  or reorder fires `:on_layout_change`. Any other release is treated as a click: on
+  the header row it sorts that column, cycling ascending, descending, unsorted, and
+  fires `:on_header_select`; on a data row it selects that row and fires
+  `:on_select`.
+  """
+  @spec handle_mouse_up(integer(), integer(), t()) :: {:ok, t()} | {:ok, t(), [term()]}
   @impl Drafter.Widget
   def handle_mouse_up(x, y, state) do
     was_resizing = state.drag.resize_col != nil
@@ -465,6 +640,15 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
+  @doc """
+  Continues a gesture as the pointer moves with a button held.
+
+  A drag already in progress keeps scrolling, resizing or reordering. A drag that
+  starts on the header row (`y == 0`) begins a column resize when `:locked` and
+  `:resizable` are both set, or a column reorder when `:locked` is false. Any other
+  drag extends the row selection.
+  """
+  @spec handle_drag(integer(), integer(), t()) :: {:ok, t()} | {:ok, t(), [term()]}
   @impl Drafter.Widget
   def handle_drag(_x, y, state) when state.drag.dragging_scrollbar do
     Selection.drag_scrollbar_to(state, 0, y)
@@ -503,11 +687,21 @@ defmodule Drafter.Widget.DataTable do
 
   def handle_drag(x, y, state), do: Selection.handle_mouse_drag(state, x, y)
 
+  @doc """
+  Tracks the pointer with no button held, so the scrollbar can highlight itself as
+  the cursor passes over it.
+  """
+  @spec handle_hover(integer(), integer(), t()) :: {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_hover(x, y, state) do
     Selection.handle_mouse_move(state, x, y)
   end
 
+  @doc """
+  Handles a mouse release delivered outside the normal routing, ending a resize or
+  scrollbar drag or otherwise treating it as a click. Every other event bubbles.
+  """
+  @spec handle_custom_event(term(), t()) :: {:ok, t()} | {:ok, t(), [term()]} | {:bubble, t()}
   @impl Drafter.Widget
   def handle_custom_event({:mouse, %{type: :mouse_up, x: x, y: y}}, state) do
     cond do
@@ -555,6 +749,31 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
+  @doc """
+  Folds fresh props into `state`.
+
+  New `:data` is re-sorted by the column currently sorted on, if any, and the
+  highlighted row index is clamped to the new row count. `:sort_by`,
+  `:fixed_columns` and both `:mouse_scroll_*` flags are not re-read and keep their
+  mounted values. A change in the number of columns discards any saved
+  `:col_widths`.
+
+      iex> t = Drafter.Widget.DataTable.mount(%{columns: [:n], data: [%{n: 1}, %{n: 2}]})
+      iex> updated = Drafter.Widget.DataTable.update(%{data: [%{n: 9}]}, t)
+      iex> {updated.data, updated.highlighted_index}
+      {[%{n: 9}], 0}
+
+      iex> data = [%{n: 3}, %{n: 1}]
+      iex> t = Drafter.Widget.DataTable.mount(%{columns: [:n], data: data, sort_by: :n})
+      iex> updated = Drafter.Widget.DataTable.update(%{data: [%{n: 5}, %{n: 4}]}, t)
+      iex> Enum.map(updated.data, & &1.n)
+      [4, 5]
+
+      iex> t = Drafter.Widget.DataTable.mount(%{columns: [:n], fixed_columns: 1})
+      iex> Drafter.Widget.DataTable.update(%{fixed_columns: 0}, t).fixed_columns
+      1
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     new_data = Map.get(props, :data, state.data)
@@ -607,10 +826,49 @@ defmodule Drafter.Widget.DataTable do
     }
   end
 
+  @doc """
+  `opts[:height]`, or `:auto` when it is absent, letting the layout give the table
+  whatever space is left.
+
+      iex> Drafter.Widget.DataTable.preferred_height(nil, [])
+      :auto
+
+      iex> Drafter.Widget.DataTable.preferred_height(nil, height: 15)
+      15
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer() | :auto
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, :auto)
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.DataTable.component_tag()
+      :data_table
+  """
+  @spec component_tag() :: :data_table
   def component_tag, do: :data_table
 
+  @doc """
+  Turns the `{:data_table, opts}` element into a props map for `mount/1`.
+
+  The positional argument is ignored. `:width` and `:height` default to the parent
+  rect passed as `:__rect__`, itself defaulting to `%{width: 80, height: 20}`, and a
+  `:height` of `:auto` becomes `8`. Every `on_*` option is wrapped by
+  `Drafter.Widget.Callback`, `:on_sort` with `wrap_2/1` and the rest with `wrap_1/1`.
+  The entries of the `:styles` map are unpacked into the separate `:style`,
+  `:header_style`, `:selected_style` and `:cursor_style` props, filled in from
+  `:__theme__`; without a theme none of the four is emitted at all. `:resizable` is
+  not forwarded.
+
+      iex> props = Drafter.Widget.DataTable.from_component_opts(nil, columns: [:n], height: :auto)
+      iex> {props.columns, props.height, props.width, props.selection_mode, props.cursor_type}
+      {[:n], 8, 80, :single, :row}
+
+      iex> props = Drafter.Widget.DataTable.from_component_opts(nil, [])
+      iex> {props.data, props.sort_by, props.locked, props.cell_padding, Map.has_key?(props, :style)}
+      {[], nil, true, 0, false}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
     theme = Keyword.get(opts, :__theme__)
@@ -670,6 +928,16 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
+  @doc """
+  Narrows the props a re-render feeds to `update/2`.
+
+  Always passes the five callbacks, `:columns`, `:data`, `:selection_mode`,
+  `:sortable`, `:locked`, `:cursor_type`, `:cell_padding` and `:fixed_columns`, and
+  adds `:width` and `:height` only when they differ from the state's. The style maps
+  and `:show_header`, `:show_cursor`, `:zebra_stripes`, `:show_scrollbars` and
+  `:column_fit_mode` are left out, so they stay as mounted.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, existing_state, _opts) do
     base = %{
       on_select: mount_props.on_select,

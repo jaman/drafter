@@ -34,11 +34,34 @@ defmodule Drafter.RingBuffer do
           write_pos: non_neg_integer()
         }
 
+  @doc """
+  An empty buffer holding at most `max_size` items.
+
+  `max_size` must be a positive integer; anything else raises `FunctionClauseError`.
+
+  ## Examples
+
+      iex> buf = Drafter.RingBuffer.new(3)
+      iex> Drafter.RingBuffer.count(buf)
+      0
+      iex> Drafter.RingBuffer.max_size(buf)
+      3
+
+  """
   @spec new(pos_integer()) :: t()
   def new(max_size) when is_integer(max_size) and max_size > 0 do
     %__MODULE__{max_size: max_size}
   end
 
+  @doc """
+  Append `item`, dropping the oldest item once the buffer is full.
+
+  ## Examples
+
+      iex> Drafter.RingBuffer.new(2) |> Drafter.RingBuffer.push(:a) |> Drafter.RingBuffer.push(:b) |> Drafter.RingBuffer.push(:c) |> Drafter.RingBuffer.to_list()
+      [:b, :c]
+
+  """
   @spec push(t(), term()) :: t()
   def push(%__MODULE__{} = buf, item) do
     store = Map.put(buf.store, buf.write_pos, item)
@@ -47,21 +70,76 @@ defmodule Drafter.RingBuffer do
     %{buf | store: store, count: count, write_pos: write_pos}
   end
 
+  @doc """
+  Append every item in `items`, in order.
+
+  Pushing more than `max_size` items keeps only the last `max_size`.
+
+  ## Examples
+
+      iex> Drafter.RingBuffer.new(3) |> Drafter.RingBuffer.push_many([1, 2, 3, 4]) |> Drafter.RingBuffer.to_list()
+      [2, 3, 4]
+
+  """
   @spec push_many(t(), Enumerable.t()) :: t()
   def push_many(%__MODULE__{} = buf, items) do
     Enum.reduce(items, buf, &push(&2, &1))
   end
 
+  @doc """
+  How many items the buffer currently holds, never more than `max_size/1`.
+
+  ## Examples
+
+      iex> Drafter.RingBuffer.new(2) |> Drafter.RingBuffer.push_many([1, 2, 3]) |> Drafter.RingBuffer.count()
+      2
+
+  """
   @spec count(t()) :: non_neg_integer()
   def count(%__MODULE__{count: count}), do: count
 
+  @doc """
+  The buffer's capacity, as given to `new/1` or `resize/2`.
+
+  ## Examples
+
+      iex> Drafter.RingBuffer.new(5) |> Drafter.RingBuffer.max_size()
+      5
+
+  """
   @spec max_size(t()) :: pos_integer()
   def max_size(%__MODULE__{max_size: max_size}), do: max_size
 
+  @doc """
+  Whether the buffer holds no items.
+
+  ## Examples
+
+      iex> Drafter.RingBuffer.empty?(Drafter.RingBuffer.new(3))
+      true
+
+      iex> Drafter.RingBuffer.new(3) |> Drafter.RingBuffer.push(:a) |> Drafter.RingBuffer.empty?()
+      false
+
+  """
   @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{count: 0}), do: true
   def empty?(%__MODULE__{}), do: false
 
+  @doc """
+  The item at `index`, counting `0` as the oldest, or `nil` when out of range.
+
+  ## Examples
+
+      iex> buf = Drafter.RingBuffer.push_many(Drafter.RingBuffer.new(3), [1, 2, 3, 4])
+      iex> Drafter.RingBuffer.at(buf, 0)
+      2
+      iex> Drafter.RingBuffer.at(buf, 2)
+      4
+      iex> Drafter.RingBuffer.at(buf, 3)
+      nil
+
+  """
   @spec at(t(), non_neg_integer()) :: term() | nil
   def at(%__MODULE__{count: count}, index) when index >= count, do: nil
 
@@ -70,6 +148,18 @@ defmodule Drafter.RingBuffer do
     Map.get(buf.store, pos)
   end
 
+  @doc """
+  The most recently pushed item, or `nil` when the buffer is empty.
+
+  ## Examples
+
+      iex> Drafter.RingBuffer.new(3) |> Drafter.RingBuffer.push_many([1, 2]) |> Drafter.RingBuffer.last()
+      2
+
+      iex> Drafter.RingBuffer.last(Drafter.RingBuffer.new(3))
+      nil
+
+  """
   @spec last(t()) :: term() | nil
   def last(%__MODULE__{count: 0}), do: nil
 
@@ -78,6 +168,23 @@ defmodule Drafter.RingBuffer do
     Map.get(buf.store, pos)
   end
 
+  @doc """
+  `length` items starting at `offset`, oldest first.
+
+  A slice that runs past the end is truncated rather than padded. `offset` must be
+  non-negative; a negative one raises `FunctionClauseError`.
+
+  ## Examples
+
+      iex> buf = Drafter.RingBuffer.push_many(Drafter.RingBuffer.new(5), [1, 2, 3, 4, 5])
+      iex> Drafter.RingBuffer.slice(buf, 1, 3)
+      [2, 3, 4]
+      iex> Drafter.RingBuffer.slice(buf, 3, 10)
+      [4, 5]
+      iex> Drafter.RingBuffer.slice(buf, 0, 0)
+      []
+
+  """
   @spec slice(t(), non_neg_integer(), non_neg_integer()) :: [term()]
   def slice(%__MODULE__{}, _offset, 0), do: []
 
@@ -94,6 +201,20 @@ defmodule Drafter.RingBuffer do
     end
   end
 
+  @doc """
+  The newest `n` items, oldest first, or all of them when the buffer holds fewer.
+
+  ## Examples
+
+      iex> buf = Drafter.RingBuffer.push_many(Drafter.RingBuffer.new(5), [1, 2, 3, 4])
+      iex> Drafter.RingBuffer.last_n(buf, 2)
+      [3, 4]
+      iex> Drafter.RingBuffer.last_n(buf, 10)
+      [1, 2, 3, 4]
+      iex> Drafter.RingBuffer.last_n(buf, 0)
+      []
+
+  """
   @spec last_n(t(), non_neg_integer()) :: [term()]
   def last_n(%__MODULE__{}, 0), do: []
 
@@ -103,9 +224,34 @@ defmodule Drafter.RingBuffer do
     slice(buf, offset, take)
   end
 
+  @doc """
+  Every item, oldest first.
+
+  ## Examples
+
+      iex> Drafter.RingBuffer.new(3) |> Drafter.RingBuffer.push_many([1, 2, 3, 4]) |> Drafter.RingBuffer.to_list()
+      [2, 3, 4]
+
+  """
   @spec to_list(t()) :: [term()]
   def to_list(%__MODULE__{} = buf), do: slice(buf, 0, buf.count)
 
+  @doc """
+  A buffer with capacity `new_max`, keeping the newest items that still fit.
+
+  Shrinking discards the oldest items; growing keeps everything.
+
+  ## Examples
+
+      iex> buf = Drafter.RingBuffer.push_many(Drafter.RingBuffer.new(5), [1, 2, 3, 4, 5])
+      iex> Drafter.RingBuffer.resize(buf, 2) |> Drafter.RingBuffer.to_list()
+      [4, 5]
+
+      iex> buf = Drafter.RingBuffer.push_many(Drafter.RingBuffer.new(2), [1, 2])
+      iex> Drafter.RingBuffer.resize(buf, 4) |> Drafter.RingBuffer.to_list()
+      [1, 2]
+
+  """
   @spec resize(t(), pos_integer()) :: t()
   def resize(%__MODULE__{} = buf, new_max) when is_integer(new_max) and new_max > 0 do
     items = to_list(buf)

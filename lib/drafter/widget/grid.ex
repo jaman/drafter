@@ -7,13 +7,31 @@ defmodule Drafter.Widget.Grid do
   height is divided evenly across the number of rows required. Each child widget
   is mounted fresh on every render pass from its `{module, props}` tuple.
 
+  ## Component tag
+
+  This module has no `component_tag/0` and no `Drafter.App` helper. It is used by
+  placing it in a render tree as a `{module, props}` pair, or by the renderer's
+  `{:grid, children, opts}` element.
+
   ## Options
 
-    * `:children` - list of `{module, props}` tuples (default `[]`)
-    * `:grid_size` - number of columns (default `2`)
-    * `:grid_rows` - number of rows or `:auto` (default `:auto`)
-    * `:padding` - inner cell padding in columns (default `1`)
-    * `:style` - map of style properties
+    * `:children` - list of `{module, props}` tuples. Default `[]`. Each child is
+      re-mounted from its props on every render pass, so a child holding its own
+      state will lose it between frames
+    * `:grid_size` - number of columns. Default `2`
+    * `:grid_rows` - `t:pos_integer/0` or `:auto`. Default `:auto`. Carried on the
+      state but not consulted: the row count is always
+      `ceil(child_count / grid_size)`
+    * `:padding` - Default `1`. Carried on the state but not consulted while
+      rendering
+    * `:style` - `t:map/0` of style properties. Default `%{}`. Carried on the state
+      but not consulted while rendering
+
+  `update/2` merges the props map into the state, so every option is live.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`.
 
   ## Usage
 
@@ -29,6 +47,27 @@ defmodule Drafter.Widget.Grid do
 
   alias Drafter.Draw.{Segment, Strip}
 
+  @type child_spec :: {module(), Drafter.Widget.props()}
+
+  @type t :: %{
+          children: [child_spec()],
+          grid_size: pos_integer(),
+          grid_rows: pos_integer() | :auto,
+          style: map(),
+          padding: non_neg_integer()
+        }
+
+  @doc """
+  Builds the grid state from `props`. The state is a plain map, not a struct.
+
+      iex> Drafter.Widget.Grid.mount(%{})
+      %{children: [], grid_size: 2, grid_rows: :auto, style: %{}, padding: 1}
+
+      iex> g = Drafter.Widget.Grid.mount(%{grid_size: 3, children: [{Drafter.Widget.Label, %{}}]})
+      iex> {g.grid_size, length(g.children)}
+      {3, 1}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
     %{
       children: Map.get(props, :children, []),
@@ -39,6 +78,20 @@ defmodule Drafter.Widget.Grid do
     }
   end
 
+  @doc """
+  Renders every child into its cell and returns one strip per row of `rect.height`.
+
+  Returns `[]` when there are no children. Each cell is `div(rect.width, grid_size)`
+  columns wide and `div(rect.height, rows_needed)` rows tall, where `rows_needed` is
+  `ceil(child_count / grid_size)`; `rect.height` smaller than `rows_needed` gives a
+  cell height of `0` and raises `ArithmeticError`. A child strip's segments are
+  taken only up to the first one wider than the cell, so an over-wide segment ends
+  the row early rather than being cropped.
+
+      iex> Drafter.Widget.Grid.render(Drafter.Widget.Grid.mount(%{}), %{x: 0, y: 0, width: 10, height: 2})
+      []
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   def render(state, rect) do
     if Enum.empty?(state.children) do
       []
@@ -47,10 +100,23 @@ defmodule Drafter.Widget.Grid do
     end
   end
 
+  @doc """
+  Merges `props` into `state`, so every option is live-updatable.
+
+      iex> g = Drafter.Widget.Grid.mount(%{})
+      iex> Drafter.Widget.Grid.update(%{grid_size: 4}, g).grid_size
+      4
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
     Map.merge(state, props)
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`. The grid is not focusable and
+  does not forward events to its children.
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:noreply, t()}
   def handle_event(_event, state) do
     {:noreply, state}
   end

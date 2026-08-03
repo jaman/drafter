@@ -6,18 +6,43 @@ defmodule Drafter.Widget.Placeholder do
   a number embedded in its text label. Text is centered vertically and horizontally
   inside the block, and an optional border can be drawn around the content area.
 
+  ## Component tag
+
+  Tag `:placeholder`, built by `Drafter.App` as `{:placeholder, opts}`:
+
+      placeholder(opts)
+
+  `placeholder/1` takes a keyword list only — there is no positional argument, so
+  the label must be given as `text:` (or `label:`, which the element accepts as
+  an alias).
+
   ## Options
 
-    * `:text` - label text displayed in the center (default `"Placeholder"`); embedding a digit selects the colour
-    * `:padding` - horizontal padding in columns (default `2`)
-    * `:align` - text alignment: `:left`, `:center` (default), `:right`
-    * `:border` - draw a box border around the content: `true` / `false` (default)
-    * `:style` - explicit style map; overrides the auto-generated background and foreground
+    * `:text` - `t:String.t/0` label drawn in the middle row. Default
+      `"Placeholder"`. The first run of digits in the text picks the pastel colour:
+      `"Placeholder 3"` takes the third entry, text with no digits takes the first.
+    * `:label` - `t:String.t/0` alias for `:text`, read only by
+      `from_component_opts/2` and taking precedence over `:text`. Default: the value
+      of `:text`.
+    * `:padding` - `t:non_neg_integer/0` padding applied on all four sides when
+      computing the content area. Default `2`. Nothing is drawn once
+      `2 * padding` reaches the rect width or height.
+    * `:align` - `:left | :center | :right`. Default `:center`. Stored on the state
+      and returned by `mount/1`, but `render/2` always centres the text.
+    * `:border` - `t:boolean/0`, draw a box border around the content area. Default
+      `false`.
+    * `:style` - `t:map/0` of style attributes applied to every segment. Default
+      through `mount/1` is the auto-generated `%{fg: ..., bg: ...}` pastel pair;
+      default through the component tag is `%{}`, which discards the pastel colour.
+
+  Only `:text` is live-updatable through the component tree:
+  `update_props_from_mount/3` returns `:text` alone. `update/2` called directly
+  merges any key.
 
   ## Usage
 
-      placeholder("Placeholder 1")
-      placeholder("Placeholder 2", border: true, padding: 4)
+      placeholder(text: "Placeholder 1")
+      placeholder(text: "Placeholder 2", border: true, padding: 4)
   """
 
   @behaviour Drafter.Widget
@@ -43,6 +68,28 @@ defmodule Drafter.Widget.Placeholder do
     {85, 85, 34}
   ]
 
+  @type t :: %{
+          text: String.t(),
+          style: map(),
+          padding: non_neg_integer(),
+          align: :left | :center | :right,
+          border: boolean()
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  Reads `:text` (default `"Placeholder"`), `:style` (default: a pastel
+  `%{fg: rgb, bg: rgb}` pair chosen from the digits in the text), `:padding`
+  (default `2`), `:align` (default `:center`) and `:border` (default `false`).
+
+      iex> Drafter.Widget.Placeholder.mount(%{text: "Placeholder 1"})
+      %{align: :center, border: false, padding: 2, style: %{bg: {77, 17, 68}, fg: {230, 230, 230}}, text: "Placeholder 1"}
+
+      iex> Drafter.Widget.Placeholder.mount(%{text: "x", style: %{}, padding: 0, border: true})
+      %{align: :center, border: true, padding: 0, style: %{}, text: "x"}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
     placeholder_text = Map.get(props, :text, "Placeholder")
     color_index = extract_number_from_text(placeholder_text) - 1
@@ -59,22 +106,81 @@ defmodule Drafter.Widget.Placeholder do
     }
   end
 
+  @doc """
+  Draws the block into `rect`.
+
+  Returns `[]` when `2 * padding` leaves no content width or height. Without a
+  border the result has one strip per content row, with the text centred on the
+  middle row. With a border the result has `content_height + 2` strips: a top rule,
+  the bordered rows, and a bottom rule.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   def render(state, rect) do
     render_placeholder(state, rect)
   end
 
+  @doc """
+  Merges `props` into `state` and returns the result.
+
+  Every key in `props` replaces the one on the state, including `:style`, so the
+  pastel colour chosen at mount is only kept while `:style` stays absent.
+
+      iex> state = Drafter.Widget.Placeholder.mount(%{text: "x", style: %{}})
+      iex> Drafter.Widget.Placeholder.update(%{text: "y", border: true}, state)
+      %{align: :center, border: true, padding: 2, style: %{}, text: "y"}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
     Map.merge(state, props)
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`. The widget is not focusable
+  and never consumes input.
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:noreply, t()}
   def handle_event(_event, state) do
     {:noreply, state}
   end
 
+  @doc """
+  The number of rows the element asks for: `opts[:height]`, default `3`.
+
+      iex> Drafter.Widget.Placeholder.preferred_height(nil, [])
+      3
+
+      iex> Drafter.Widget.Placeholder.preferred_height(nil, height: 12)
+      12
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 3)
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.Placeholder.component_tag()
+      :placeholder
+  """
+  @spec component_tag() :: :placeholder
   def component_tag, do: :placeholder
 
+  @doc """
+  Builds the props map for a `{:placeholder, opts}` element.
+
+  The positional argument is ignored. Reads `:label` first and falls back to
+  `:text`, both defaulting to `"Placeholder"`; then `:padding` (default `2`),
+  `:align` (default `:center`), `:border` (default `false`) and `:style`
+  (default `%{}`). Because `:style` is always present in the result, a placeholder
+  built from the component tag never picks up the pastel colour `mount/1` would
+  otherwise generate.
+
+      iex> Drafter.Widget.Placeholder.from_component_opts(nil, [])
+      %{align: :center, border: false, padding: 2, style: %{}, text: "Placeholder"}
+
+      iex> Drafter.Widget.Placeholder.from_component_opts(nil, label: "Left", text: "Right")
+      %{align: :center, border: false, padding: 2, style: %{}, text: "Left"}
+  """
+  @spec from_component_opts(term(), keyword()) :: t()
   def from_component_opts(_args, opts) do
     %{
       text: Keyword.get(opts, :label, Keyword.get(opts, :text, "Placeholder")),
@@ -85,6 +191,15 @@ defmodule Drafter.Widget.Placeholder do
     }
   end
 
+  @doc """
+  Narrows a re-render to `:text`, the only prop that reaches an already-mounted
+  placeholder through the component tree.
+
+      iex> props = Drafter.Widget.Placeholder.from_component_opts(nil, text: "New", border: true)
+      iex> Drafter.Widget.Placeholder.update_props_from_mount(props, %{}, [])
+      %{text: "New"}
+  """
+  @spec update_props_from_mount(t(), term(), keyword()) :: %{text: String.t()}
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{text: mount_props.text}
   end

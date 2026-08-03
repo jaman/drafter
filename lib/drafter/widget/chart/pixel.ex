@@ -15,8 +15,8 @@ defmodule Drafter.Widget.Chart.Pixel do
   """
 
   alias Drafter.Draw.{Segment, Strip}
-  alias FrenchCurve.Backend.Kitty
-  alias FrenchCurve.{Chart, Draw, Raster}
+  alias Drafter.Session.Context
+  alias FrenchCurve.{Capability, Chart, Draw, Raster}
 
   @pixel_protocols [:iterm2, :kitty, :sixel]
   @modes [:auto, :pixel, :kitty, :iterm2, :sixel, :braille, :text]
@@ -72,6 +72,21 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   defp to_mode(proto, _type) when proto in @pixel_protocols, do: :pixel
 
+  @doc """
+  The graphics protocol to draw with, or `nil` when the terminal has none.
+
+  A `renderer` naming a protocol (`:kitty`, `:iterm2`, `:sixel`) is used as given;
+  any mode that is not `:auto` or `:pixel` has no protocol and returns `nil`.
+
+  `:auto` and `:pixel` take what the terminal answered when it was probed at
+  startup — see `Drafter.Terminal.Probe`. A terminal that was never probed is
+  guessed at from its environment instead, through
+  `FrenchCurve.Capability.detect/1`.
+
+  Either way the terminal in question is the one this session is attached to, which
+  for a session served over ssh or telnet is the connecting client's rather than
+  the host's.
+  """
   @spec protocol(atom() | nil) :: atom() | nil
   def protocol(renderer), do: protocol_for(resolve(renderer))
 
@@ -122,16 +137,18 @@ defmodule Drafter.Widget.Chart.Pixel do
   end
 
   defp detect do
-    cond do
-      env?("KITTY_WINDOW_ID") -> :kitty
-      env?("WEZTERM_PANE") -> :kitty
-      System.get_env("LC_TERMINAL") == "iTerm2" -> :iterm2
-      System.get_env("TERM_PROGRAM") == "iTerm.app" -> :iterm2
-      true -> nil
+    case Context.terminal_protocol() do
+      {:ok, protocol} -> protocol
+      :unprobed -> detect_from_env()
     end
   end
 
-  defp env?(name), do: System.get_env(name) not in [nil, ""]
+  defp detect_from_env do
+    case Capability.detect(Context.terminal_env()) do
+      :braille -> nil
+      protocol -> protocol
+    end
+  end
 
   @default_image_scale 4
 
@@ -148,23 +165,16 @@ defmodule Drafter.Widget.Chart.Pixel do
     _ -> nil
   end
 
-  defp encode(raster, :kitty, {cols, rows}, id) do
-    kid = kitty_id(id)
-    clear = Kitty.delete(id: kid, placement: 1)
-
-    paint =
-      clear <>
-        Kitty.transmit(raster, kid) <>
-        Kitty.place(kid, placement: 1, fit: {cols, rows})
-
-    {paint, clear}
+  # FrenchCurve.frame/3 rather than the kitty pieces by hand: a terminal detected as :kitty
+  # does not necessarily keep images under an id, and one that does not draws nothing at all
+  # when sent a store and then a placement. `detect/0` above never calls iTerm :kitty, so this
+  # widget was never bitten by it — but the choice belongs in one place, not five.
+  defp encode(raster, protocol, {cols, rows}, id) do
+    case FrenchCurve.frame(raster, id, fit: {cols, rows}, protocol: protocol) do
+      nil -> nil
+      {paint, clear, _place} -> {paint, clear}
+    end
   end
-
-  defp encode(raster, protocol, {cols, rows}, _id) do
-    {FrenchCurve.to_terminal(raster, protocol, fit: {cols, rows}), ""}
-  end
-
-  defp kitty_id(id), do: :erlang.phash2(id, 4_000_000_000) + 1
 
   @spec braille_strips(map(), {pos_integer(), pos_integer()}) :: [Strip.t()] | nil
   def braille_strips(spec, {cols, rows}) do

@@ -7,6 +7,18 @@ defmodule Drafter.Widget.Scrollbar do
   @doc """
   The inclusive range of viewport rows the thumb occupies, or `nil` when the content
   fits and no scrollbar is needed.
+
+  The thumb is `viewport_height²/total` rows, rounded, with a floor of one row, and
+  slides over a track of `viewport_height - thumb_size` rows.
+
+      iex> Drafter.Widget.Scrollbar.thumb_rows(0, 20, 10)
+      0..4
+
+      iex> Drafter.Widget.Scrollbar.thumb_rows(10, 20, 10)
+      5..9
+
+      iex> Drafter.Widget.Scrollbar.thumb_rows(0, 10, 10)
+      nil
   """
   @spec thumb_rows(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: Range.t() | nil
   def thumb_rows(scroll_offset, total, viewport_height)
@@ -26,6 +38,18 @@ defmodule Drafter.Widget.Scrollbar do
 
   The inverse of `thumb_rows/3`. The row is clamped to the track, and the result
   is clamped to `0..(total - viewport_height)`. Returns `0` when the content fits.
+
+      iex> Drafter.Widget.Scrollbar.offset_from_row(0, 20, 10)
+      0
+
+      iex> Drafter.Widget.Scrollbar.offset_from_row(5, 20, 10)
+      10
+
+      iex> Drafter.Widget.Scrollbar.offset_from_row(99, 20, 10)
+      10
+
+      iex> Drafter.Widget.Scrollbar.offset_from_row(3, 10, 10)
+      0
   """
   @spec offset_from_row(integer(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   def offset_from_row(row, total, viewport_height)
@@ -53,6 +77,12 @@ defmodule Drafter.Widget.Scrollbar do
 
   Returns `0` when the press lands on the track rather than the thumb, or when
   no scrollbar is drawn. Pass the result to `offset_from_drag/4`.
+
+      iex> Drafter.Widget.Scrollbar.grab_offset(2, 0, 20, 10)
+      2
+
+      iex> Drafter.Widget.Scrollbar.grab_offset(8, 0, 20, 10)
+      0
   """
   @spec grab_offset(integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
@@ -65,6 +95,14 @@ defmodule Drafter.Widget.Scrollbar do
 
   @doc """
   The scroll offset for a drag, holding the grabbed point under the pointer.
+
+  Equivalent to `offset_from_row(row - grab_offset, total, viewport_height)`.
+
+      iex> Drafter.Widget.Scrollbar.offset_from_drag(7, 2, 20, 10)
+      10
+
+      iex> Drafter.Widget.Scrollbar.offset_from_drag(2, 2, 20, 10)
+      0
   """
   @spec offset_from_drag(integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
@@ -74,7 +112,14 @@ defmodule Drafter.Widget.Scrollbar do
 
   defp clamp(value, low, high), do: value |> max(low) |> min(high)
 
-  @doc "Thumb/track styles matching `ScrollableContainer`, derived from the theme."
+  @doc """
+  Thumb/track styles matching `ScrollableContainer`, derived from the theme.
+
+  Reads `:primary`, `:text_muted` and `:surface` from `theme`.
+
+      iex> Drafter.Widget.Scrollbar.styles(%{primary: {1, 2, 3}, text_muted: {4, 5, 6}, surface: {7, 8, 9}})
+      %{thumb: %{fg: {1, 2, 3}, bg: {1, 2, 3}}, track: %{fg: {4, 5, 6}, bg: {7, 8, 9}}}
+  """
   @spec styles(map()) :: %{thumb: Segment.style(), track: Segment.style()}
   def styles(theme) do
     %{

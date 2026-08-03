@@ -3,7 +3,17 @@ defmodule Drafter.BuiltinActionHandler do
 
   @behaviour Drafter.ActionHandler
 
+  @doc """
+  Handle the standard action tuples.
+
+  `{:ok, state}` and `{:noreply, state}` replace the accumulated state.
+  `{:show_modal, screen, props, opts}`, `{:show_toast, message, opts}`,
+  `{:push, screen, props, opts}`, `{:pop, result}` and
+  `{:replace, screen, props, opts}` drive `Drafter.ScreenManager` and leave the state
+  alone. Everything else is `:unhandled`.
+  """
   @impl true
+  @spec handle_action(term(), term()) :: {:ok, term()} | :unhandled
   def handle_action({:ok, new_state}, _acc_state), do: {:ok, new_state}
 
   def handle_action({:noreply, new_state}, _acc_state), do: {:ok, new_state}

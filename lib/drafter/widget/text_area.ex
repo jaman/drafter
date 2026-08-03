@@ -7,23 +7,83 @@ defmodule Drafter.Widget.TextArea do
   `:language` option. Placeholder text is shown when the content is empty and the widget
   is not focused.
 
+  ## Component tag
+
+  Tag `:text_area`, built by `Drafter.App` as `{:text_area, opts}`:
+
+      text_area(opts)
+
+  There is no positional argument. The text goes through `Drafter.Binding`:
+  passing `bind: :some_key` seeds the content from that app-state key and writes
+  every edit back to it, and `:on_change` is built from the same binding.
+  `:width` and `:height` are always taken from the rect the parent allocated.
+
   ## Options
 
-    * `:text` - initial text content (default: `""`)
-    * `:placeholder` - hint text shown when empty and unfocused (default: `""`)
-    * `:on_change` - `(String.t() -> term())` called on every edit
-    * `:max_lines` - maximum number of lines permitted
-    * `:width` - widget width in columns (default: `40`)
-    * `:height` - widget height in rows including borders (default: `6`)
-    * `:show_line_numbers` - render a line-number gutter (default: `false`)
-    * `:language` - atom for syntax highlighting: `:elixir`, `:python`, `:javascript`, `:js`
-    * `:style` - map of style overrides for the text content area
-    * `:line_number_style` - map of style overrides for the gutter
-    * `:read_only` - boolean, disables editing when `true` (default: `false`)
-    * `:tab_behavior` - `:focus` (default) or `:indent`
-    * `:tab_size` - number of spaces for tab indentation (default: `2`)
-    * `:max_checkpoints` - undo/redo history depth (default: `50`)
-    * `:highlight_cursor_line` - apply background tint to cursor line (default: `false`)
+    * `:text` - `t:String.t/0` initial content. Default `""`. Split on `"\\n"` into
+      `:lines`. Through the element the content comes from `:bind` instead.
+    * `:bind` - app-state key atom for two-way binding of the text. Default: none.
+    * `:placeholder` - `t:String.t/0` hint shown while the content is empty and the
+      widget unfocused. Default `""`.
+    * `:on_change` - `(String.t() -> term())` called with the full text after every
+      edit. Default `nil`. Through the element it comes from
+      `Drafter.Binding.create_bound_callback/2`. An exception it raises is
+      swallowed.
+    * `:max_lines` - `t:pos_integer/0` cap on the number of lines. Default `nil`,
+      unlimited.
+    * `:width` - `t:pos_integer/0` widget width in columns. Default `40` when
+      mounting directly, and the allocated rect width through the element.
+    * `:height` - `t:pos_integer/0` widget height in rows including both borders.
+      Default `6` when mounting directly, and the allocated rect height through the
+      element. Only `handle_scroll/2` reads it; `render/2` uses the rect.
+    * `:show_line_numbers` - `t:boolean/0`, draw a line-number gutter. Default
+      `false`. The gutter is as wide as the digit count of the line total, at least
+      three, plus one.
+    * `:language` - `:elixir | :python | :javascript | :js` for syntax
+      highlighting. Default `nil`, no highlighting.
+    * `:style` - `t:map/0` of style overrides for the content area. Default
+      `%{fg: {200, 200, 200}, bg: {40, 40, 40}}` when mounting directly, and `%{}`
+      through the element.
+    * `:read_only` - `t:boolean/0`. Default `false`. Blocks cut, paste and
+      character input; cursor movement and copy still work.
+    * `:trap_focus` - `true | :arrows | false`. Default `false`. When `true` or
+      `:arrows`, `escape` blurs the editor.
+    * `:tab_behavior` - `:focus | :indent`. Default `:focus`, which lets `tab`
+      fall through to focus movement; `:indent` inserts `:tab_size` spaces.
+    * `:tab_size` - `t:pos_integer/0` spaces inserted for a tab. Default `2`.
+    * `:highlight_cursor_line` - `t:boolean/0`, tint the cursor's row. Default
+      `false`.
+    * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`. Every editing
+      binding requires it.
+
+  These are read by `mount/1` only; the `text_area/1` element does not forward
+  them:
+
+    * `:placeholder_style` - style map for the placeholder text. Default
+      `%{fg: {100, 100, 100}, bg: {40, 40, 40}}`.
+    * `:focused_style` - style map applied while the widget has focus. Default
+      `%{fg: {255, 255, 255}, bg: {50, 100, 200}}`.
+    * `:selection_style` - style map for the selected range. Default
+      `%{fg: {255, 255, 255}, bg: {0, 100, 200}}`. `update/2` does not accept it
+      either, so it is fixed at mount.
+    * `:line_number_style` - style map for the gutter. Default
+      `%{fg: {100, 150, 255}, bg: {35, 35, 35}}`.
+    * `:max_checkpoints` - undo/redo history depth. Default `50`.
+
+  `mount/1` always starts the cursor at line `0`, column `0`, with no selection,
+  no scroll and empty undo and redo stacks; those cannot be seeded from props.
+  `update/2` accepts every option above except `:selection_style`, and re-clamps
+  the cursor and clears the selection whenever `:text` actually changes. Through
+  the component tree `update_props_from_mount/3` always passes `:on_change`,
+  `:max_lines`, `:show_line_numbers`, `:language`, `:read_only`, `:trap_focus`,
+  `:tab_behavior`, `:tab_size` and `:highlight_cursor_line`; `:width`, `:height`
+  and `:placeholder` only when they changed, and `:text` only when `opts` carries
+  `:bind` or `:value` and the text differs.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns the current text, and
+  `Drafter.set_widget_value/2` replaces it.
 
   ## Key bindings
 
@@ -40,6 +100,11 @@ defmodule Drafter.Widget.TextArea do
     * `Page Up` / `Page Down` - move cursor by viewport height
     * `Backspace` / `Delete` - delete character; joins lines at line boundaries
     * `Enter` - insert a new line at the cursor position
+    * `Escape` - blur the editor, when `:trap_focus` is `true` or `:arrows`
+    * `Tab` - insert `:tab_size` spaces, only when `:tab_behavior` is `:indent`
+
+  All of these require the widget to be focused; unfocused, every event other than
+  `{:focus}`, `{:blur}` and the mouse wheel returns `{:noreply, state}`.
 
   ## Usage
 
@@ -123,6 +188,27 @@ defmodule Drafter.Widget.TextArea do
           redo_stack: list()
         }
 
+  @doc """
+  Builds the widget state from `props`.
+
+  Every option listed in the module doc is read here with the default stated there.
+  `:text` is split into `:lines`, `:gutter_width` is derived from
+  `:show_line_numbers` and the line count, and the cursor, scroll, selection and
+  history all start empty.
+
+      iex> state = Drafter.Widget.TextArea.mount(%{text: "a\\nb"})
+      iex> {state.lines, state.cursor_line, state.cursor_col, state.gutter_width}
+      {["a", "b"], 0, 0, 0}
+
+      iex> state = Drafter.Widget.TextArea.mount(%{show_line_numbers: true})
+      iex> state.gutter_width
+      4
+
+      iex> state = Drafter.Widget.TextArea.mount(%{})
+      iex> {state.width, state.height, state.tab_behavior, state.tab_size, state.max_checkpoints}
+      {40, 6, :focus, 2, 50}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     text = Map.get(props, :text, "")
@@ -174,6 +260,16 @@ defmodule Drafter.Widget.TextArea do
     }
   end
 
+  @doc """
+  Draws the bordered editor into `rect`.
+
+  `state` may be a plain props map, in which case it is passed through `mount/1`
+  first. Returns the top border, `rect.height - 2` content rows and the bottom
+  border, so the result is `rect.height` strips. The content area is
+  `rect.width - 2 - gutter_width` columns, one narrower again when a scrollbar is
+  needed, which happens as soon as the line count exceeds the content height.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     normalized_state = normalize_state(state)
@@ -281,6 +377,24 @@ defmodule Drafter.Widget.TextArea do
     strips
   end
 
+  @doc """
+  Scrolls the viewport by three lines per wheel step, without moving the cursor.
+
+  Always returns `{:ok, new_state}`. Scrolling up stops at `0`; scrolling down
+  stops at `line_count - (height - 2)`, using the state's `:height`, not the rect.
+  Works whether or not the widget is focused.
+
+      iex> state = Drafter.Widget.TextArea.mount(%{text: Enum.join(1..20, "\\n")})
+      iex> {:ok, down} = Drafter.Widget.TextArea.handle_scroll(:down, state)
+      iex> down.scroll_offset
+      3
+
+      iex> state = Drafter.Widget.TextArea.mount(%{text: "a\\nb"})
+      iex> {:ok, down} = Drafter.Widget.TextArea.handle_scroll(:down, state)
+      iex> down.scroll_offset
+      0
+  """
+  @spec handle_scroll(:up | :down, t()) :: {:ok, t()}
   @impl Drafter.Widget
   def handle_scroll(:up, state) do
     new_offset = max(0, state.scroll_offset - 3)
@@ -294,6 +408,39 @@ defmodule Drafter.Widget.TextArea do
     {:ok, %{state | scroll_offset: new_offset}}
   end
 
+  @doc """
+  Handles the editor's own events, replacing the dispatch `use Drafter.Widget`
+  would otherwise generate.
+
+  `{:focus}`, `{:blur}` and `{:mouse, %{type: :scroll}}` are handled in any state.
+  Every binding listed in the module doc, along with `{:char, code}` and
+  `{:bracketed_paste, text}`, requires `:focused`; anything else returns
+  `{:noreply, state}`.
+
+  Cursor moves, selection changes, undo, redo and copy return `{:ok, new_state}`.
+  Edits return whatever the editing helper reports, `{:ok, state}` or
+  `{:noreply, state}`, and call `:on_change` with the full text. A cut, paste or
+  character input on a `:read_only` editor returns `{:noreply, state}`.
+
+      iex> state = Drafter.Widget.TextArea.mount(%{focused: true})
+      iex> {:ok, typed} = Drafter.Widget.TextArea.handle_event({:char, ?a}, state)
+      iex> {typed.text, typed.cursor_col}
+      {"a", 1}
+
+      iex> state = Drafter.Widget.TextArea.mount(%{text: "hi", focused: true, read_only: true})
+      iex> Drafter.Widget.TextArea.handle_event({:char, ?a}, state) == {:noreply, state}
+      true
+
+      iex> state = Drafter.Widget.TextArea.mount(%{text: "hi"})
+      iex> Drafter.Widget.TextArea.handle_event({:char, ?a}, state) == {:noreply, state}
+      true
+
+      iex> state = Drafter.Widget.TextArea.mount(%{text: "ab\\ncd", focused: true})
+      iex> {:ok, moved} = Drafter.Widget.TextArea.handle_event({:key, :down}, state)
+      iex> moved.cursor_line
+      1
+  """
+  @spec handle_event(term(), t()) :: {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_event({:focus}, state), do: {:ok, %{state | focused: true}}
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
@@ -456,6 +603,27 @@ defmodule Drafter.Widget.TextArea do
 
   defp clipboard_action(nil, state), do: {:noreply, state}
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  Accepts every option except `:selection_style`, and never touches the cursor,
+  scroll offsets, selection or history directly. A `:text` that differs from the
+  current one re-splits `:lines`, re-clamps the cursor into the new content, clears
+  the selection and re-adjusts the scroll offset; identical text leaves all of that
+  alone. `:gutter_width` is recomputed on every call.
+
+      iex> state = Drafter.Widget.TextArea.mount(%{text: "one\\ntwo\\nthree"})
+      iex> state = %{state | cursor_line: 2, cursor_col: 3}
+      iex> updated = Drafter.Widget.TextArea.update(%{text: "a"}, state)
+      iex> {updated.lines, updated.cursor_line, updated.cursor_col}
+      {["a"], 0, 1}
+
+      iex> state = Drafter.Widget.TextArea.mount(%{text: "a"})
+      iex> Drafter.Widget.TextArea.update(%{show_line_numbers: true}, state).gutter_width
+      4
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     text = Map.get(props, :text, state.text)
@@ -515,10 +683,50 @@ defmodule Drafter.Widget.TextArea do
     |> Cursor.adjust_scroll()
   end
 
+  @doc """
+  The number of rows the element asks for: `opts[:height]`, default `6`, borders
+  included.
+
+      iex> Drafter.Widget.TextArea.preferred_height(nil, [])
+      6
+
+      iex> Drafter.Widget.TextArea.preferred_height(nil, height: 12)
+      12
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 6)
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.TextArea.component_tag()
+      :text_area
+  """
+  @spec component_tag() :: :text_area
   def component_tag, do: :text_area
 
+  @doc """
+  Builds the props map for a `{:text_area, opts}` element.
+
+  The positional argument is ignored. `:text` comes from
+  `Drafter.Binding.get_bound_value/3`, so `bind: :key` seeds it from
+  `opts[:__app_state__]` and plain `value:` is used otherwise, defaulting to `""`.
+  `:on_change` is the binding's writer. `:width` and `:height` always come from
+  `opts[:__rect__]`, itself defaulting to `%{width: 40, height: 6}`, and a
+  `:width` or `:height` in `opts` is ignored. `:style` defaults to `%{}` here
+  rather than to the palette `mount/1` would supply, and the four other style maps
+  and `:max_checkpoints` are not forwarded at all.
+
+      iex> props = Drafter.Widget.TextArea.from_component_opts(nil, placeholder: "Notes")
+      iex> {props.text, props.placeholder, props.width, props.height, props.style}
+      {"", "Notes", 40, 6, %{}}
+
+      iex> opts = [bind: :body, __app_state__: %{body: "hello"}, __rect__: %{width: 20, height: 4}]
+      iex> props = Drafter.Widget.TextArea.from_component_opts(nil, opts)
+      iex> {props.text, props.width, props.height, is_function(props.on_change, 1)}
+      {"hello", 20, 4, true}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     app_state = Keyword.get(opts, :__app_state__, %{})
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 6})
@@ -542,6 +750,28 @@ defmodule Drafter.Widget.TextArea do
     }
   end
 
+  @doc """
+  Narrows a re-render to the props that may safely change after mount.
+
+  Always passes `:on_change`, `:max_lines`, `:show_line_numbers`, `:language`,
+  `:read_only`, `:trap_focus`, `:tab_behavior`, `:tab_size` and
+  `:highlight_cursor_line`. Adds `:width`, `:height` and `:placeholder` only when
+  they differ from the mounted state, and `:text` only when `opts` carries `:bind`
+  or `:value` and the text differs — so an unbound editor keeps what the user
+  typed.
+
+      iex> props = Drafter.Widget.TextArea.from_component_opts(nil, [])
+      iex> state = Drafter.Widget.TextArea.mount(props)
+      iex> Drafter.Widget.TextArea.update_props_from_mount(props, state, []) |> Map.has_key?(:text)
+      false
+
+      iex> opts = [bind: :body, __app_state__: %{body: "hello"}]
+      iex> props = Drafter.Widget.TextArea.from_component_opts(nil, opts)
+      iex> state = Drafter.Widget.TextArea.mount(%{text: "old", width: 40, height: 6})
+      iex> Drafter.Widget.TextArea.update_props_from_mount(props, state, opts).text
+      "hello"
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, existing_state, opts) do
     base = %{
       on_change: mount_props.on_change,

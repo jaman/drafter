@@ -1,10 +1,41 @@
 defmodule Drafter.Terminal.Driver do
-  @moduledoc false
+  @moduledoc """
+  Owns the local terminal: raw mode, alternate screen, mouse reporting, input decoding.
+
+  A singleton registered under this module's name. `setup/1` puts the terminal into
+  raw mode, switches to the alternate screen, hides the cursor and enables mouse and
+  bracketed-paste reporting. `cleanup/0` undoes all of it and restores the saved
+  terminal mode; it also runs from `terminate/2`.
+
+  Input is not read until `start_input/0` is called, so a caller can drain whatever
+  the terminal echoed during startup first:
+
+      Drafter.Terminal.Driver.setup()
+      Drafter.Terminal.Driver.drain_pending_input()
+      Drafter.Terminal.Driver.start_input()
+
+  Decoded input is cast to the event manager as `{:event, event}`; the manager then
+  delivers `{:tui_event, event}` to its subscribers. Event shapes are the ones
+  `Drafter.Terminal.ANSI` produces, plus `{:resize, {cols, rows}}` emitted on
+  `SIGWINCH`.
+
+  The event manager is chosen at `init/1` by the `:event_manager` option, defaulting
+  to `Drafter.Event.Manager`.
+
+  Raw mode is entered through the termios NIF where it loads, and through `stty`
+  otherwise. On a non-unix system neither runs and the terminal mode is left alone,
+  while the rest of `setup/1` still happens.
+
+  Terminal size is read by `TIOCGWINSZ`, falling back to Erlang's IO dimensions and
+  then to `tput`; `80` by `24` if all of them fail. Setting `DRAFTER_TPUT_SIZE` to a
+  non-empty value forces the `tput` path. On Windows the size comes from PowerShell,
+  and `80` by `24` if that fails.
+  """
 
   use GenServer
 
   alias Drafter.Event
-  alias Drafter.Terminal.{ANSI, InputBuffer, TermiosNif}
+  alias Drafter.Terminal.{ANSI, InputBuffer, Probe, TermiosNif}
 
   defstruct [
     :shell_pid,
@@ -14,11 +45,23 @@ defmodule Drafter.Terminal.Driver do
     mouse_enabled: false,
     alt_screen: false,
     raw_mode: false,
-    size: {80, 24}
+    size: {80, 24},
+    probing: false,
+    probe_replies: "",
+    probe_result: :unprobed,
+    probe_waiters: []
   ]
 
+  @default_probe_timeout 250
+
+  @typedoc """
+  The driver's own state.
+
+  `shell_pid` holds whatever `:shell.start_interactive/1` returned, which is `:ok`
+  or an error tuple rather than a pid.
+  """
   @type state :: %__MODULE__{
-          shell_pid: pid() | nil,
+          shell_pid: :ok | {:error, term()} | nil,
           stdin_reader_pid: pid() | nil,
           terminal_mode: terminal_mode(),
           buffer: InputBuffer.t(),
@@ -28,62 +71,157 @@ defmodule Drafter.Terminal.Driver do
           size: {pos_integer(), pos_integer()}
         }
 
+  @typedoc """
+  How raw mode was entered, and so how it is undone.
+
+  `:nif` means the termios NIF holds the saved settings, `{:stty, saved}` means
+  `stty` does and `saved` is the `stty -g` string, and `nil` means raw mode is not
+  in force.
+  """
   @type terminal_mode :: :nif | {:stty, binary()} | nil
 
-  @doc "Start the terminal driver"
+  @doc """
+  Start the driver and register it under this module's name.
+
+  The name is fixed, so only one driver runs per node and every function in this
+  module addresses it without being told which.
+
+  Options:
+
+    * `:event_manager` — process name or pid decoded events are cast to, default
+      `Drafter.Event.Manager`
+
+  The terminal is measured here but not altered; `setup/1` does that.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @doc "Setup terminal for TUI mode"
-  @spec setup() :: :ok | {:error, term()}
+  @doc """
+  Put the terminal into TUI mode.
+
+  Enters raw mode, switches to the alternate screen, hides the cursor, clears it,
+  and enables mouse and bracketed-paste reporting. `mouse_opts` defaults to `[]`
+  and is passed to `Drafter.Terminal.ANSI.enable_mouse/1`, whose only key is
+  `:hover`.
+
+  Terminal size is measured again on success, and `SIGWINCH` starts being watched.
+  On a system where the signal cannot be watched, size is polled instead and a
+  change is reported the same way.
+
+  Returns `{:error, reason}` if raw mode could not be entered, leaving the terminal
+  untouched. Input reading does not begin here; call `start_input/0`.
+  """
+  @spec setup(keyword()) :: :ok | {:error, term()}
   def setup(mouse_opts \\ []) do
     GenServer.call(__MODULE__, {:setup, mouse_opts})
   end
 
-  @doc "Cleanup and restore terminal"
+  @doc """
+  Restore the terminal to the state it was in before `setup/1`.
+
+  Disables bracketed paste and mouse reporting, shows the cursor, leaves the
+  alternate screen, restores the saved terminal mode and stops the stdin reader.
+  Safe to call when `setup/1` was never called or already undone.
+
+  Mouse reporting is turned off as `Drafter.Terminal.ANSI.disable_mouse/1` does
+  with its defaults, so it clears the any-motion mode that `setup/1` enables when
+  `:hover` is left at `true`. Everything except the stdin reader is skipped when
+  raw mode is not in force. The sequences are written straight to `/dev/tty` by
+  `write_synchronously/1`, so they land even while the driver is shutting down.
+
+  Also runs from `terminate/2`.
+  """
   @spec cleanup() :: :ok
   def cleanup do
     GenServer.call(__MODULE__, :cleanup)
   end
 
-  @doc "Write output to terminal"
+  @doc """
+  Write bytes to the terminal.
+
+  Asynchronous. Bytes are discarded unless the terminal is in raw mode.
+  """
   @spec write(iodata()) :: :ok
   def write(data) do
     GenServer.cast(__MODULE__, {:write, data})
   end
 
-  @doc "Get current terminal size"
+  @doc "The last known terminal size as `{cols, rows}`, without re-measuring."
   @spec get_size() :: {pos_integer(), pos_integer()}
   def get_size do
     GenServer.call(__MODULE__, :get_size)
   end
 
+  @doc "Measure the terminal again and return the new `{cols, rows}`."
   @spec refresh_size() :: {pos_integer(), pos_integer()}
   def refresh_size do
     GenServer.call(__MODULE__, :refresh_size)
   end
 
-  @doc "Discard any pending stdin input not yet processed"
+  @doc """
+  Discard stdin that has arrived but not been turned into events.
+
+  Drops queued `{:stdin, _}` messages, flushes the operating system's input queue
+  and empties the partial-sequence buffer. Nothing is emitted to the event manager.
+  """
   @spec drain_pending_input() :: :ok
   def drain_pending_input do
     GenServer.call(__MODULE__, :drain_pending_input)
   end
 
-  @doc "Begin reading stdin — call once after startup drain sequence"
+  @doc """
+  Start reading stdin and emitting events.
+
+  Idempotent: a second call while a reader is running does nothing.
+  """
   @spec start_input() :: :ok
   def start_input do
     GenServer.call(__MODULE__, :start_input)
   end
 
-  @doc "Enable mouse events"
+  @doc """
+  The graphics protocol this terminal answered the startup probe with.
+
+  Returns `{:ok, protocol}` where `protocol` is `:kitty`, `:iterm2`, `:sixel`, or
+  `nil` for a terminal that answered naming none. Returns `:unprobed` when there
+  was no terminal to ask, which is the caller's cue to fall back to guessing from
+  the environment.
+
+  Asking writes to the terminal and reads its answer, so call this after
+  `start_input/0` and after any `drain_pending_input/0`, which would otherwise
+  discard the answer. Blocks until the terminal answers or `timeout` passes, and
+  never longer: a driver with no terminal replies at once, and one that fails to
+  reply at all is reported as `:unprobed` rather than taking the caller down.
+  """
+  @spec probe(timeout()) :: {:ok, atom() | nil} | :unprobed
+  def probe(timeout \\ @default_probe_timeout) do
+    GenServer.call(__MODULE__, {:probe, timeout}, timeout + 5_000)
+  catch
+    :exit, _reason -> :unprobed
+  end
+
+  @doc """
+  Turn mouse reporting on, if the terminal is in raw mode and it is currently off.
+
+  `opts` defaults to `[]` and is passed to `Drafter.Terminal.ANSI.enable_mouse/1`,
+  whose only key is `:hover`. Asynchronous, and silently does nothing when raw mode
+  is not in force or reporting is already on.
+  """
   @spec enable_mouse(keyword()) :: :ok
   def enable_mouse(opts \\ []) do
     GenServer.cast(__MODULE__, {:enable_mouse, opts})
   end
 
-  @doc "Disable mouse events"
+  @doc """
+  Turn mouse reporting off, if the terminal is in raw mode and it is currently on.
+
+  `opts` defaults to `[]` and is passed to `Drafter.Terminal.ANSI.disable_mouse/1`,
+  whose only key is `:hover`; it must match what `enable_mouse/1` was given, or the
+  mode that was set is not the mode that is cleared. Asynchronous, and silently does
+  nothing when raw mode is not in force or reporting is already off.
+  """
   @spec disable_mouse(keyword()) :: :ok
   def disable_mouse(opts \\ []) do
     GenServer.cast(__MODULE__, {:disable_mouse, opts})
@@ -148,6 +286,22 @@ defmodule Drafter.Terminal.Driver do
     end
   end
 
+  def handle_call({:probe, _timeout}, _from, %__MODULE__{probe_result: {:ok, _} = done} = state) do
+    {:reply, done, state}
+  end
+
+  def handle_call({:probe, _timeout}, _from, %__MODULE__{raw_mode: false} = state) do
+    {:reply, :unprobed, state}
+  end
+
+  def handle_call({:probe, timeout}, from, state) do
+    write_synchronously(Probe.query())
+    Process.send_after(self(), :probe_deadline, timeout)
+
+    {:noreply,
+     %{state | probing: true, probe_replies: "", probe_waiters: [from | state.probe_waiters]}}
+  end
+
   @impl GenServer
   def handle_cast({:write, data}, state) do
     if state.raw_mode do
@@ -176,6 +330,22 @@ defmodule Drafter.Terminal.Driver do
   end
 
   @impl GenServer
+  def handle_info({:stdin, data}, %__MODULE__{probing: true} = state) do
+    replies = state.probe_replies <> data
+
+    if Probe.settled?(replies) do
+      {:noreply, finish_probe(%{state | probe_replies: replies})}
+    else
+      {:noreply, %{state | probe_replies: replies}}
+    end
+  end
+
+  def handle_info(:probe_deadline, %__MODULE__{probing: true} = state) do
+    {:noreply, finish_probe(state)}
+  end
+
+  def handle_info(:probe_deadline, state), do: {:noreply, state}
+
   def handle_info({:stdin, data}, state) do
     if Drafter.Trace.enabled?(),
       do: Drafter.Trace.log(["S ", Drafter.Trace.ts(), " ", Base.encode16(data), "\n"])
@@ -275,7 +445,13 @@ defmodule Drafter.Terminal.Driver do
     Process.flag(:trap_exit, true)
   end
 
-  @doc false
+  @doc """
+  Write bytes to the controlling terminal and return once they have been handed over.
+
+  Opens `/dev/tty` directly, bypassing the driver process and the Erlang IO server,
+  so the bytes land even while the driver is shutting down. Falls back to `IO.write/1`
+  when `/dev/tty` cannot be opened. An empty list writes nothing.
+  """
   @spec write_synchronously(iodata()) :: :ok
   def write_synchronously([]), do: :ok
 
@@ -396,6 +572,23 @@ defmodule Drafter.Terminal.Driver do
   defp emit_events(events) do
     event_manager = Process.get(:event_manager)
     Enum.each(events, &GenServer.cast(event_manager, {:event, &1}))
+  end
+
+  defp finish_probe(state) do
+    {protocol, leftover} = Probe.resolve(state.probe_replies)
+    Enum.each(state.probe_waiters, &GenServer.reply(&1, {:ok, protocol}))
+
+    {events, buffer} = InputBuffer.feed(state.buffer, leftover)
+    emit_events(events)
+
+    %{
+      state
+      | probing: false,
+        probe_replies: "",
+        probe_result: {:ok, protocol},
+        probe_waiters: [],
+        buffer: buffer
+    }
   end
 
   defp drain_stdin_messages do

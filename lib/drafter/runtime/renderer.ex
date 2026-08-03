@@ -19,7 +19,22 @@ defmodule Drafter.Runtime.Renderer do
   alias Drafter.WidgetServer
   alias Drafter.WidgetStripCache
 
-  @spec render_app(module(), term(), map(), map() | nil) :: {:ok, map() | nil} | {:error, nil}
+  @typedoc "A rectangle in terminal cells, as carried through the render pipeline."
+  @type rect :: %{x: integer(), y: integer(), width: non_neg_integer(), height: non_neg_integer()}
+
+  @doc """
+  Render one frame for `app_module` and return the hierarchy to reuse next frame.
+
+  With screens pushed on `Drafter.ScreenManager`, the screens are rendered and
+  `existing_hierarchy` is returned untouched. With toasts but no screens, the app's
+  hierarchy is rebuilt first so the toast composites over it. Otherwise the app is
+  rendered directly, reusing `existing_hierarchy` when the app state hash and layout
+  are both unchanged.
+
+  Returns `{:ok, hierarchy}`, `{:ok, nil}` when the app's `render/1` returned strips
+  rather than a component tree, or `{:error, nil}` when it returned `{:error, reason}`.
+  """
+  @spec render_app(module(), term(), rect(), map() | nil) :: {:ok, map() | nil} | {:error, nil}
   def render_app(app_module, app_state, screen_rect, existing_hierarchy \\ nil) do
     screens = ScreenManager.get_all_screens()
     toasts = ScreenManager.get_toasts()
@@ -213,7 +228,13 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
-  @spec render_hierarchy(map(), map()) :: :ok
+  @doc """
+  Composite an already-built hierarchy and push the result to the compositor.
+
+  Used on the fast path, when the app state and layout are unchanged and no widget
+  tree needs rebuilding. Any pushed screens and toasts are composited on top.
+  """
+  @spec render_hierarchy(map(), rect()) :: :ok
   def render_hierarchy(hierarchy, screen_rect) do
     screens = ScreenManager.get_all_screens()
     toasts = ScreenManager.get_toasts()
@@ -260,7 +281,14 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
-  @spec render_screens_from_manager(map(), module(), term(), map() | nil) :: :ok
+  @doc """
+  Composite the app, every screen on the screen stack, and any toasts, in that order.
+
+  `existing_hierarchy` supplies the app's base layers when it is not `nil`; otherwise
+  the app is re-rendered to produce them. Note the argument order: `screen_rect` comes
+  first here, unlike `render_app/4`.
+  """
+  @spec render_screens_from_manager(rect(), module(), term(), map() | nil) :: :ok
   def render_screens_from_manager(screen_rect, app_module, app_state, existing_hierarchy) do
     screens = ScreenManager.get_all_screens()
     toasts = ScreenManager.get_toasts()
@@ -439,7 +467,15 @@ defmodule Drafter.Runtime.Renderer do
     }
   end
 
-  @spec create_widget_layers_from_hierarchy(map(), map(), non_neg_integer()) :: [map()]
+  @doc """
+  One compositor layer per visible widget in `hierarchy`.
+
+  Widgets listed in the hierarchy's `:hidden_widgets` set are skipped. `z_base` is
+  added to each layer's z-index, so a screen's layers can be lifted above the app's.
+  Default: `0`. The `rect` argument is accepted for call-site symmetry and ignored;
+  each layer is bounded by its own widget rect.
+  """
+  @spec create_widget_layers_from_hierarchy(map(), rect(), non_neg_integer()) :: [map()]
   def create_widget_layers_from_hierarchy(hierarchy, _rect, z_base \\ 0) do
     hidden = Map.get(hierarchy, :hidden_widgets, MapSet.new())
 
@@ -635,8 +671,8 @@ defmodule Drafter.Runtime.Renderer do
 
   defp ensure_image_cleared(hierarchy, widget_id) do
     case Map.get(hierarchy.widgets, widget_id) do
-      %{module: module} ->
-        if function_exported?(module, :image, 3) do
+      %{module: module, state: state} ->
+        if Drafter.Widget.image_active?(module, state) do
           WidgetStripCache.mark_visible(widget_id, false)
           Drafter.Compositor.clear_image(widget_id)
         end
@@ -734,8 +770,8 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
-  defp overlay_image(widget_id, %{module: module} = widget_info, rect, region) do
-    if function_exported?(module, :image, 3) do
+  defp overlay_image(widget_id, %{module: module, state: state} = widget_info, rect, region) do
+    if Drafter.Widget.image_active?(module, state) do
       WidgetStripCache.mark_visible(widget_id, region)
       do_overlay_image(widget_id, widget_info, rect, region)
     else
@@ -779,6 +815,12 @@ defmodule Drafter.Runtime.Renderer do
     {widget_rect, strips}
   end
 
+  @doc """
+  Refresh each widget's cached state from its server and recompute preferred sizes.
+
+  Widgets whose entry carries no live pid are left alone, as is a widget whose server
+  fails to answer — its previously cached state is kept.
+  """
   @spec update_hierarchy_preferred_sizes(map()) :: map()
   def update_hierarchy_preferred_sizes(hierarchy) do
     Enum.reduce(hierarchy.widgets, hierarchy, fn {widget_id, widget_info}, acc ->

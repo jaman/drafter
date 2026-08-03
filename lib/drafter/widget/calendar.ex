@@ -6,20 +6,51 @@ defmodule Drafter.Widget.Calendar do
   a weekday header row (Su Mo Tu We Th Fr Sa), and up to six week rows. Today's date
   is highlighted automatically, and the selected date receives a distinct visual treatment.
 
+  ## Component tag
+
+  Tag `:calendar`, built by `Drafter.App` as `{:calendar, opts}`:
+
+      calendar(opts)
+
+  There is no positional argument; every prop comes from `opts`.
+  `from_component_opts/2` wraps `:on_select` with `Drafter.Widget.Callback`, so
+  it may be given as an atom event name.
+
   ## Options
 
-    * `:selected_date` - a `Date.t()` or `nil` to highlight (default: `nil`)
-    * `:on_select` - callback fired when the user confirms a date; receives the `Date.t()`
-    * `:min_date` - earliest navigable date (default: `nil`, no constraint)
-    * `:max_date` - latest navigable date (default: `nil`, no constraint)
-    * `:style` - map of inline style overrides
-    * `:classes` - list of theme class atoms
+    * `:selected_date` - `t:Date.t/0` to highlight. Default `nil`. The cursor starts
+      on this date, or on `Date.utc_today/0` when it is `nil`
+    * `:on_select` - atom event name or one-arity function receiving the confirmed
+      `t:Date.t/0`. Default `nil`. Its return value is discarded, so it cannot emit
+      an action; use it for its side effect
+    * `:min_date` - earliest navigable `t:Date.t/0`. Default `nil`, no constraint
+    * `:max_date` - latest navigable `t:Date.t/0`. Default `nil`, no constraint
+    * `:style` - `t:map/0` of inline style overrides. Default `%{}`
+    * `:class` - theme class atom or list of them, reaching `mount/1` as
+      `:classes`. Default `[]`
+
+  `update/2` re-reads `:selected_date`, `:min_date`, `:max_date`, `:on_select`,
+  `:style` and `:classes`. `:cursor_date` and `:view_date` are owned by the widget
+  and survive a re-render, so changing `:selected_date` after mount moves the
+  highlight but not the cursor or the displayed month.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget; the chosen date
+  is reported through `:on_select`.
 
   ## Key bindings
 
     * `←` / `→` — move cursor one day backward/forward
     * `↑` / `↓` — move cursor one week backward/forward
     * `Enter` / `Space` — select the highlighted date and fire `:on_select`
+
+  A move that would leave the `:min_date`..`:max_date` range is ignored. Crossing a
+  month boundary scrolls the view to the new month. Every other key bubbles.
+
+  ## Usage
+
+      calendar(selected_date: ~D[2026-08-02], on_select: :date_chosen)
   """
 
   use Drafter.Widget,
@@ -56,6 +87,21 @@ defmodule Drafter.Widget.Calendar do
           on_select: (Date.t() -> term()) | nil
         }
 
+  @doc """
+  Builds the calendar state from `props`.
+
+  The cursor starts on `:selected_date`, or on `Date.utc_today/0` when that is
+  `nil`, and the view opens on the first day of the cursor's month.
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{selected_date: ~D[2026-08-02]})
+      iex> {cal.cursor_date, cal.view_date, cal.selected_date}
+      {~D[2026-08-02], ~D[2026-08-01], ~D[2026-08-02]}
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{})
+      iex> {cal.selected_date, cal.min_date, cal.max_date, cal.classes, cal.style}
+      {nil, nil, nil, [], %{}}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     today = Date.utc_today()
@@ -74,6 +120,14 @@ defmodule Drafter.Widget.Calendar do
     }
   end
 
+  @doc """
+  Draws the month into `rect`.
+
+  Always returns nine strips: a title row, a weekday header row, up to six week
+  rows, and blank rows making up the difference. `rect.height` is not consulted, and
+  `rect.width` is widened to at least 28 columns, four per weekday column.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     theme = ThemeManager.get_current_theme()
@@ -92,6 +146,44 @@ defmodule Drafter.Widget.Calendar do
     [title_strip, header_strip] ++ week_strips ++ padding
   end
 
+  @doc """
+  Moves the cursor or confirms the date under it.
+
+  Arrow keys return `{:ok, state}`, with the state unchanged when the target date
+  falls outside `:min_date`..`:max_date`. `:enter` and `:" "` set `:selected_date`
+  to the cursor date, call `:on_select`, and return `{:ok, state}`. Every other key
+  returns `{:bubble, state}`.
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{selected_date: ~D[2026-08-02]})
+      iex> {:ok, moved} = Drafter.Widget.Calendar.handle_key(:down, cal)
+      iex> moved.cursor_date
+      ~D[2026-08-09]
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{selected_date: ~D[2026-08-02]})
+      iex> {:ok, moved} = Drafter.Widget.Calendar.handle_key(:left, cal)
+      iex> {moved.cursor_date, moved.view_date}
+      {~D[2026-08-01], ~D[2026-08-01]}
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{selected_date: ~D[2026-08-02], min_date: ~D[2026-08-02]})
+      iex> {:ok, blocked} = Drafter.Widget.Calendar.handle_key(:left, cal)
+      iex> blocked.cursor_date
+      ~D[2026-08-02]
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{selected_date: ~D[2026-08-31]})
+      iex> {:ok, next} = Drafter.Widget.Calendar.handle_key(:right, cal)
+      iex> {next.cursor_date, next.view_date}
+      {~D[2026-09-01], ~D[2026-09-01]}
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{selected_date: ~D[2026-08-02]})
+      iex> {:ok, chosen} = Drafter.Widget.Calendar.handle_key(:enter, cal)
+      iex> chosen.selected_date
+      ~D[2026-08-02]
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{selected_date: ~D[2026-08-02]})
+      iex> Drafter.Widget.Calendar.handle_key(:escape, cal) |> elem(0)
+      :bubble
+  """
+  @spec handle_key(Drafter.Widget.key(), t()) :: {:ok, t()} | {:bubble, t()}
   @impl Drafter.Widget
   def handle_key(:left, state), do: move_cursor(state, -1)
   def handle_key(:right, state), do: move_cursor(state, 1)
@@ -101,6 +193,16 @@ defmodule Drafter.Widget.Calendar do
   def handle_key(:" ", state), do: select_cursor(state)
   def handle_key(_key, state), do: {:bubble, state}
 
+  @doc """
+  Selects the date under the pressed cell.
+
+  Rows `2` through `7` are the week rows and every four columns are one weekday
+  column, so the cell is `{div(x, 4), y - 2}`. A press on the title or header row,
+  or beyond the seventh column, returns `{:ok, state}` unchanged. A hit moves the
+  cursor to that date, sets `:selected_date`, and calls `:on_select`; the
+  `:min_date`/`:max_date` range is not applied on this path.
+  """
+  @spec handle_press(integer(), integer(), t()) :: {:ok, t()}
   @impl Drafter.Widget
   def handle_press(x, y, state) do
     case date_at_position(state, x, y) do
@@ -109,6 +211,19 @@ defmodule Drafter.Widget.Calendar do
     end
   end
 
+  @doc """
+  Folds fresh props into `state`.
+
+  Re-reads `:selected_date`, `:min_date`, `:max_date`, `:on_select`, `:style` and
+  `:classes`. `:cursor_date` and `:view_date` are left untouched, so the displayed
+  month does not follow a new `:selected_date`.
+
+      iex> cal = Drafter.Widget.Calendar.mount(%{selected_date: ~D[2026-08-02]})
+      iex> updated = Drafter.Widget.Calendar.update(%{selected_date: ~D[2026-12-25]}, cal)
+      iex> {updated.selected_date, updated.view_date}
+      {~D[2026-12-25], ~D[2026-08-01]}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     %{
@@ -122,13 +237,36 @@ defmodule Drafter.Widget.Calendar do
     }
   end
 
+  @doc """
+  Always `9`: a title row, a weekday header row and six week rows.
+
+      iex> Drafter.Widget.Calendar.preferred_height(nil, [])
+      9
+  """
   @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, _opts), do: 9
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.Calendar.component_tag()
+      :calendar
+  """
   @spec component_tag() :: :calendar
   def component_tag, do: :calendar
 
-  @spec from_component_opts(term(), keyword()) :: map()
+  @doc """
+  Turns the `{:calendar, opts}` element into a props map for `mount/1`.
+
+  The positional argument is ignored; every prop comes from `opts`. `:class` is
+  normalised into `:classes` and `:on_select` is wrapped by
+  `Drafter.Widget.Callback.wrap_1/1`.
+
+      iex> props = Drafter.Widget.Calendar.from_component_opts(nil, selected_date: ~D[2026-08-02])
+      iex> {props.selected_date, props.on_select, props.min_date, props.style, props.classes}
+      {~D[2026-08-02], nil, nil, %{}, []}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
@@ -142,7 +280,11 @@ defmodule Drafter.Widget.Calendar do
     }
   end
 
-  @spec update_props_from_mount(map(), t(), keyword()) :: map()
+  @doc """
+  Returns `mount_props` unchanged, so a re-render passes every option through to
+  `update/2`.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
 
   defp render_title(state, theme, width) do

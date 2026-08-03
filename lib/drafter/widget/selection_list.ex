@@ -6,22 +6,60 @@ defmodule Drafter.Widget.SelectionList do
   as `(●)` radio indicators. The `:on_change` callback receives a list of currently selected
   IDs after every selection change.
 
+  ## Component tag
+
+  Tag `:selection_list`, built by `Drafter.App` as `{:selection_list, options, opts}`:
+
+      selection_list(options, opts)
+
+  The positional `options` list is used when non-empty, falling back to
+  `opts[:options]`. `from_component_opts/2` wraps `:on_change` and
+  `:on_item_toggle` with `Drafter.Widget.Callback`, so both may be given as atom
+  event names. `:visible_height` defaults to the rect the parent allocated.
+
   ## Options
 
-    * `:options` - list of options in any of these formats:
+    * `:options` - list of options in any of these formats. Default `[]`. Anything
+      else raises `FunctionClauseError` from `mount/1`.
         * `"label"` — string used as both ID and label
         * `{"label", id}` — tuple with a display label and an identifier
         * `%{id: id, label: label}` — map with explicit fields
-    * `:selected` - list of IDs that are initially selected (default: `[]`)
-    * `:selection_mode` - `:multiple` (default) or `:single`
-    * `:on_change` - `([id] -> term())` called with the full list of selected IDs on change
-    * `:visible_height` - number of rows allocated for the list (default: number of options)
+    * `:selected` - list of IDs that are initially selected. Default `[]`. Read by
+      `mount/1` only; an ID that matches no option is ignored.
+    * `:selection_mode` - `:multiple | :single`. Default `:multiple`. Any other
+      value behaves like `:single` when toggling and like `:multiple` when
+      drawing.
+    * `:on_change` - atom event name or `([id] -> term())` called with the full
+      list of selected IDs after every change. Default `nil`. An exception it
+      raises is swallowed.
+    * `:on_item_toggle` - atom event name or `((index, selected?) -> term())`
+      called with the zero-based row index and its new boolean state each time one
+      item is toggled. Default `nil`. Not called by the select-all binding. An
+      exception it raises is swallowed.
+    * `:visible_height` - `t:non_neg_integer/0` rows the scroll logic assumes.
+      Default: the number of options when mounting directly, and the height of
+      `opts[:__rect__]` through the element. `render/2` uses the rect it is given
+      instead.
+    * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`.
+
+  Through the component tree `update_props_from_mount/3` narrows a re-render to
+  `:on_change`, `:on_item_toggle`, `:selection_mode` and `:classes`, so
+  `:options`, `:selected` and `:visible_height` are mount-only.
 
   ## Key bindings
 
-    * `↑` / `↓` — move the cursor
-    * `Space` / `Enter` — toggle selection of the highlighted item
-    * Mouse click — moves cursor and toggles the clicked item
+    * `up` / `down` — move the cursor, clamped at the ends, scrolling to keep it
+      inside `:visible_height`
+    * `home` / `end` — jump to the first or last item
+    * `space` / `enter` — toggle selection of the highlighted item
+    * `ctrl+a` — in `:multiple` mode, select every item, or clear the selection
+      when everything is already selected
+    * mouse up — move the cursor to the clicked row and toggle it
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns the list of selected option IDs, in option
+  order.
 
   ## Usage
 
@@ -53,6 +91,41 @@ defmodule Drafter.Widget.SelectionList do
     :selection_mode
   ]
 
+  @type option :: %{id: term(), label: String.t()}
+
+  @type t :: %__MODULE__{
+          options: [option()],
+          selected_indices: MapSet.t(non_neg_integer()),
+          highlighted_index: non_neg_integer(),
+          focused: boolean(),
+          on_change: ([term()] -> term()) | nil,
+          on_item_toggle: (non_neg_integer(), boolean() -> term()) | nil,
+          visible_height: non_neg_integer(),
+          scroll_offset: non_neg_integer(),
+          selection_mode: :multiple | :single
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  Options are normalised into `%{id: id, label: label}` maps and `:selected` is
+  turned into the matching set of indices. `:highlighted_index` and
+  `:scroll_offset` always start at `0`.
+
+      iex> state = Drafter.Widget.SelectionList.mount(%{options: ["a", "b"]})
+      iex> {state.options, MapSet.to_list(state.selected_indices), state.selection_mode}
+      {[%{id: "a", label: "a"}, %{id: "b", label: "b"}], [], :multiple}
+
+      iex> options = [{"Elixir", :ex}, {"Erlang", :erl}]
+      iex> state = Drafter.Widget.SelectionList.mount(%{options: options, selected: [:erl]})
+      iex> MapSet.to_list(state.selected_indices)
+      [1]
+
+      iex> state = Drafter.Widget.SelectionList.mount(%{options: ["a", "b"], selected: [:missing]})
+      iex> {MapSet.to_list(state.selected_indices), state.visible_height}
+      {[], 2}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
     options = Map.get(props, :options, [])
     selected = Map.get(props, :selected, [])
@@ -80,6 +153,16 @@ defmodule Drafter.Widget.SelectionList do
     }
   end
 
+  @doc """
+  Draws the visible slice of the list into `rect`, always returning exactly
+  `rect.height` strips.
+
+  Rows start at `:scroll_offset` and run for `min(rect.height, option_count)`
+  rows; the rest of the rect is blank. `:single` mode draws `(●)` and `( )`, every
+  other mode draws `[X]` and `[ ]`. The highlight is only drawn while the widget is
+  focused.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   def render(state, rect) do
     computed = Computed.for_widget(:selection_list, state)
     bg_style = Computed.to_segment_style(computed)
@@ -111,6 +194,23 @@ defmodule Drafter.Widget.SelectionList do
     end
   end
 
+  @doc """
+  Merges `props` into `state` verbatim.
+
+  Every key in `props` lands on the state as given, including keys the struct does
+  not declare, and `:options` is stored without being normalised — so a re-render
+  that goes through this must already supply `%{id: _, label: _}` maps.
+  `:selection_mode` and `:on_item_toggle` keep their current value when absent.
+
+      iex> state = Drafter.Widget.SelectionList.mount(%{options: ["a", "b"]})
+      iex> Drafter.Widget.SelectionList.update(%{selection_mode: :single}, state).selection_mode
+      :single
+
+      iex> state = Drafter.Widget.SelectionList.mount(%{options: ["a", "b"]})
+      iex> Drafter.Widget.SelectionList.update(%{highlighted_index: 1}, state).highlighted_index
+      1
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
     new_state = Map.merge(state, props)
 
@@ -125,6 +225,45 @@ defmodule Drafter.Widget.SelectionList do
     end)
   end
 
+  @doc """
+  Handles the list's own events, replacing the dispatch `use Drafter.Widget` would
+  otherwise generate.
+
+  Recognised events, each returning `{:ok, new_state}`:
+
+    * `{:key, :up}` / `{:key, :down}` - move `:highlighted_index`, clamped at both
+      ends, adjusting `:scroll_offset` to keep it within `:visible_height`
+    * `{:key, :home}` - first item, scrolled to the top
+    * `{:key, :end}` - last item
+    * `{:key, :enter}` / `{:key, :" "}` - toggle the highlighted item
+    * `{:char, 1}` - in `:multiple` mode only, select every item or clear the
+      selection when everything is already selected
+    * `{:mouse, %{type: :mouse_up, y: y}}` - toggle the row at `y`, or
+      `{:noreply, state}` when it falls outside the list
+    * `{:focus}` / `{:blur}` - set or clear `:focused`
+
+  Every other event returns `{:noreply, state}`. Toggling calls `:on_change` with
+  the full list of selected IDs and `:on_item_toggle` with the index and its new
+  state; the select-all binding calls `:on_change` only.
+
+      iex> state = Drafter.Widget.SelectionList.mount(%{options: ["a", "b"]})
+      iex> {:ok, toggled} = Drafter.Widget.SelectionList.handle_event({:key, :enter}, state)
+      iex> MapSet.to_list(toggled.selected_indices)
+      [0]
+
+      iex> state = Drafter.Widget.SelectionList.mount(%{options: ["a", "b"]})
+      iex> {:ok, moved} = Drafter.Widget.SelectionList.handle_event({:key, :down}, state)
+      iex> {:ok, back} = Drafter.Widget.SelectionList.handle_event({:key, :up}, moved)
+      iex> {moved.highlighted_index, back.highlighted_index}
+      {1, 0}
+
+      iex> state = Drafter.Widget.SelectionList.mount(%{options: ["a", "b", "c"]})
+      iex> {:ok, all} = Drafter.Widget.SelectionList.handle_event({:char, 1}, state)
+      iex> {:ok, none} = Drafter.Widget.SelectionList.handle_event({:char, 1}, all)
+      iex> {MapSet.to_list(all.selected_indices), MapSet.to_list(none.selected_indices)}
+      {[0, 1, 2], []}
+  """
+  @spec handle_event(term(), t()) :: {:ok, t()} | {:noreply, t()}
   def handle_event({:key, :up}, state) do
     {:ok, %{state | highlighted_index: max(0, state.highlighted_index - 1)} |> ensure_visible()}
   end
@@ -170,10 +309,53 @@ defmodule Drafter.Widget.SelectionList do
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
   def handle_event(_, state), do: {:noreply, state}
 
+  @doc """
+  The number of rows the element asks for.
+
+  Returns `opts[:height]` when given, otherwise the length of the positional
+  options list capped at `5` — which is `0` when the options were passed under
+  `opts[:options]` instead.
+
+      iex> Drafter.Widget.SelectionList.preferred_height(["a", "b"], [])
+      2
+
+      iex> Drafter.Widget.SelectionList.preferred_height(Enum.to_list(1..20), [])
+      5
+
+      iex> Drafter.Widget.SelectionList.preferred_height(nil, options: ["a"])
+      0
+  """
+  @spec preferred_height(list() | nil, keyword()) :: non_neg_integer()
   def preferred_height(args, opts), do: Keyword.get(opts, :height, min(length(args || []), 5))
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.SelectionList.component_tag()
+      :selection_list
+  """
+  @spec component_tag() :: :selection_list
   def component_tag, do: :selection_list
 
+  @doc """
+  Builds the props map for a `{:selection_list, options, opts}` element.
+
+  `options` is used when it is a non-empty list, otherwise `opts[:options]`,
+  defaulting to `[]`. `:on_change` and `:on_item_toggle` go through
+  `Drafter.Widget.Callback.wrap_1/1` and `wrap_2/1`, so an atom becomes a closure
+  that dispatches an app event. `:visible_height` falls back to the height of
+  `opts[:__rect__]`, itself defaulting to `%{width: 40, height: 10}`. The emitted
+  `:classes` key is not read by `mount/1`.
+
+      iex> props = Drafter.Widget.SelectionList.from_component_opts([{"a", :a}], selected: [:a])
+      iex> {props.options, props.selected, props.selection_mode, props.visible_height}
+      {[{"a", :a}], [:a], :multiple, 10}
+
+      iex> props = Drafter.Widget.SelectionList.from_component_opts(["a"], on_change: :picked)
+      iex> is_function(props.on_change, 1)
+      true
+  """
+  @spec from_component_opts(list() | nil, keyword()) :: Drafter.Widget.props()
   def from_component_opts(options, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
@@ -192,6 +374,20 @@ defmodule Drafter.Widget.SelectionList do
     }
   end
 
+  @doc """
+  Narrows a re-render to `:on_change`, `:on_item_toggle`, `:selection_mode` and
+  `:classes`.
+
+  `:options`, `:selected` and `:visible_height` are dropped, so they are
+  mount-only through the component tree and the user's selection survives a
+  re-render.
+
+      iex> props = Drafter.Widget.SelectionList.from_component_opts(["a"], [])
+      iex> Drafter.Widget.SelectionList.update_props_from_mount(props, %{}, []) |> Map.keys() |> Enum.sort()
+      [:classes, :on_change, :on_item_toggle, :selection_mode]
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), term(), keyword()) ::
+          Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       on_change: mount_props.on_change,

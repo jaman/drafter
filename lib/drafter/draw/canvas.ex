@@ -8,6 +8,15 @@ defmodule Drafter.Draw.Canvas do
   updated canvas. Call `to_strips/1` to convert the canvas to a list of
   `Drafter.Draw.Strip` structs for rendering, or `merge/4` to composite one
   canvas onto another at an offset.
+
+      iex> alias Drafter.Draw.{Canvas, Strip}
+      iex> Canvas.new(5, 3)
+      ...> |> Canvas.draw_rect(0, 0, 5, 3)
+      ...> |> Canvas.draw_text(1, 1, "hi")
+      ...> |> Canvas.to_strips()
+      ...> |> Enum.map(&Strip.to_plain_text/1)
+      ["┌───┐", "│hi │", "└───┘"]
+
   """
 
   alias Drafter.Draw.{BoxDrawing, Segment, Strip}
@@ -28,7 +37,17 @@ defmodule Drafter.Draw.Canvas do
 
   defstruct [:width, :height, cells: %{}]
 
-  @doc "Create a new canvas with specified dimensions"
+  @doc """
+  A canvas `width` columns by `height` rows, with no cells set.
+
+  Both must be greater than zero; anything else raises `FunctionClauseError`.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(3, 2)
+      %Drafter.Draw.Canvas{width: 3, height: 2, cells: %{}}
+
+  """
   @spec new(pos_integer(), pos_integer()) :: t()
   def new(width, height) when width > 0 and height > 0 do
     %__MODULE__{
@@ -38,7 +57,22 @@ defmodule Drafter.Draw.Canvas do
     }
   end
 
-  @doc "Set character at specific position"
+  @doc """
+  Put `char` with `style` in the cell at `x`, `y`.
+
+  Coordinates are zero-based. A position at or past `width` or `height` leaves the
+  canvas unchanged. `style` is a `t:Drafter.Draw.Segment.style/0` map, `%{}` by
+  default.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(2, 2) |> Drafter.Draw.Canvas.set_char(0, 1, "x")
+      %Drafter.Draw.Canvas{width: 2, height: 2, cells: %{{0, 1} => %{char: "x", style: %{}}}}
+
+      iex> Drafter.Draw.Canvas.new(2, 2) |> Drafter.Draw.Canvas.set_char(5, 5, "x")
+      %Drafter.Draw.Canvas{width: 2, height: 2, cells: %{}}
+
+  """
   @spec set_char(t(), non_neg_integer(), non_neg_integer(), String.t(), style()) :: t()
   def set_char(%__MODULE__{width: width, height: height} = canvas, x, y, char, style \\ %{}) do
     if x < width and y < height do
@@ -50,7 +84,18 @@ defmodule Drafter.Draw.Canvas do
     end
   end
 
-  @doc "Get character at specific position"
+  @doc """
+  The character at `x`, `y`, or a single space if that cell is unset.
+
+  A coordinate outside the canvas is also unset, so it too gives a space.
+
+  ## Examples
+
+      iex> canvas = Drafter.Draw.Canvas.new(3, 1) |> Drafter.Draw.Canvas.draw_text(0, 0, "hi")
+      iex> {Drafter.Draw.Canvas.get_char(canvas, 0, 0), Drafter.Draw.Canvas.get_char(canvas, 2, 0)}
+      {"h", " "}
+
+  """
   @spec get_char(t(), non_neg_integer(), non_neg_integer()) :: String.t()
   def get_char(%__MODULE__{cells: cells}, x, y) do
     case Map.get(cells, {x, y}) do
@@ -59,7 +104,21 @@ defmodule Drafter.Draw.Canvas do
     end
   end
 
-  @doc "Draw horizontal line"
+  @doc """
+  Draw `length` horizontal line characters rightwards from `x`, `y`.
+
+  `line_style` defaults to `:light` and `style` to `%{}`. A `length` of zero or
+  less draws nothing.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(3, 1)
+      ...> |> Drafter.Draw.Canvas.draw_hline(0, 0, 3, :heavy)
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      ["━━━"]
+
+  """
   @spec draw_hline(
           t(),
           non_neg_integer(),
@@ -73,7 +132,21 @@ defmodule Drafter.Draw.Canvas do
     draw_line_chars(canvas, x, y, length, 1, char, style)
   end
 
-  @doc "Draw vertical line"
+  @doc """
+  Draw `length` vertical line characters downwards from `x`, `y`.
+
+  `line_style` defaults to `:light` and `style` to `%{}`. A `length` of zero or
+  less draws nothing.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(1, 3)
+      ...> |> Drafter.Draw.Canvas.draw_vline(0, 0, 3)
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      ["│", "│", "│"]
+
+  """
   @spec draw_vline(
           t(),
           non_neg_integer(),
@@ -87,7 +160,21 @@ defmodule Drafter.Draw.Canvas do
     draw_line_chars(canvas, x, y, 1, length, char, style)
   end
 
-  @doc "Draw a line from point A to point B"
+  @doc """
+  Draw a straight line of `█` from `x1`, `y1` to `x2`, `y2` inclusive.
+
+  Cells are chosen by Bresenham's algorithm, so a diagonal line is one cell per
+  step along its longer axis. `style` defaults to `%{}`.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(3, 3)
+      ...> |> Drafter.Draw.Canvas.draw_line(0, 0, 2, 2)
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      ["█  ", " █ ", "  █"]
+
+  """
   @spec draw_line(
           t(),
           non_neg_integer(),
@@ -104,7 +191,24 @@ defmodule Drafter.Draw.Canvas do
     end)
   end
 
-  @doc "Draw a rectangle outline"
+  @doc """
+  Draw the outline of a `width` by `height` rectangle with its top-left at `x`, `y`.
+
+  The interior is left untouched. `line_style` defaults to `:light` and `style` to
+  `%{}`. Returns the canvas unchanged when `width` or `height` is below 2.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(3, 3)
+      ...> |> Drafter.Draw.Canvas.draw_rect(0, 0, 3, 3)
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      ["┌─┐", "│ │", "└─┘"]
+
+      iex> Drafter.Draw.Canvas.new(2, 2) |> Drafter.Draw.Canvas.draw_rect(0, 0, 1, 1)
+      %Drafter.Draw.Canvas{width: 2, height: 2, cells: %{}}
+
+  """
   @spec draw_rect(
           t(),
           non_neg_integer(),
@@ -132,7 +236,21 @@ defmodule Drafter.Draw.Canvas do
     end
   end
 
-  @doc "Fill a rectangle with character"
+  @doc """
+  Fill every cell of the `width` by `height` rectangle at `x`, `y` with `char`.
+
+  `char` defaults to a single space and `style` to `%{}`. A `width` or `height` of
+  zero or less fills nothing.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(3, 2)
+      ...> |> Drafter.Draw.Canvas.fill_rect(0, 0, 2, 2, "#")
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      ["## ", "## "]
+
+  """
   @spec fill_rect(
           t(),
           non_neg_integer(),
@@ -150,7 +268,21 @@ defmodule Drafter.Draw.Canvas do
     end)
   end
 
-  @doc "Draw text at position"
+  @doc """
+  Draw `text` rightwards from `x`, `y`, one grapheme per cell.
+
+  Double-width graphemes still occupy a single cell, so text containing them
+  renders wider than the cells it was written into. `style` defaults to `%{}`.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(4, 1)
+      ...> |> Drafter.Draw.Canvas.draw_text(1, 0, "hi")
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      [" hi "]
+
+  """
   @spec draw_text(t(), non_neg_integer(), non_neg_integer(), String.t(), style()) :: t()
   def draw_text(canvas, x, y, text, style \\ %{}) do
     text
@@ -161,13 +293,35 @@ defmodule Drafter.Draw.Canvas do
     end)
   end
 
-  @doc "Clear entire canvas"
+  @doc """
+  Unset every cell, keeping the canvas dimensions.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(3, 1)
+      ...> |> Drafter.Draw.Canvas.draw_text(0, 0, "abc")
+      ...> |> Drafter.Draw.Canvas.clear()
+      %Drafter.Draw.Canvas{width: 3, height: 1, cells: %{}}
+
+  """
   @spec clear(t()) :: t()
   def clear(canvas) do
     %{canvas | cells: %{}}
   end
 
-  @doc "Clear rectangular area"
+  @doc """
+  Unset every cell in the `width` by `height` rectangle at `x`, `y`.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(3, 1)
+      ...> |> Drafter.Draw.Canvas.draw_text(0, 0, "abc")
+      ...> |> Drafter.Draw.Canvas.clear_rect(1, 0, 1, 1)
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      ["a c"]
+
+  """
   @spec clear_rect(
           t(),
           non_neg_integer(),
@@ -186,7 +340,21 @@ defmodule Drafter.Draw.Canvas do
     %{canvas | cells: cells}
   end
 
-  @doc "Convert canvas to strips for rendering"
+  @doc """
+  The canvas as one `Drafter.Draw.Strip` per row, `height` strips in all.
+
+  Every row is `width` cells wide, unset cells becoming spaces, and adjacent
+  cells sharing a style are merged into one segment.
+
+  ## Examples
+
+      iex> Drafter.Draw.Canvas.new(3, 2)
+      ...> |> Drafter.Draw.Canvas.draw_text(0, 0, "hi")
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      ["hi ", "   "]
+
+  """
   @spec to_strips(t()) :: [Strip.t()]
   def to_strips(%__MODULE__{width: width, height: height, cells: cells}) do
     Enum.map(0..(height - 1)//1, fn y ->
@@ -195,7 +363,23 @@ defmodule Drafter.Draw.Canvas do
     end)
   end
 
-  @doc "Merge another canvas onto this one"
+  @doc """
+  Copy the set cells of `overlay_canvas` onto `base_canvas`, offset by `offset_x`, `offset_y`.
+
+  Overlay cells replace base cells; unset overlay cells leave the base showing.
+  Cells falling at or past the base canvas's `width` or `height` are dropped. Both
+  offsets default to `0`.
+
+  ## Examples
+
+      iex> base = Drafter.Draw.Canvas.new(3, 1) |> Drafter.Draw.Canvas.draw_text(0, 0, "abc")
+      iex> overlay = Drafter.Draw.Canvas.new(1, 1) |> Drafter.Draw.Canvas.draw_text(0, 0, "X")
+      iex> Drafter.Draw.Canvas.merge(base, overlay, 1, 0)
+      ...> |> Drafter.Draw.Canvas.to_strips()
+      ...> |> Enum.map(&Drafter.Draw.Strip.to_plain_text/1)
+      ["aXc"]
+
+  """
   @spec merge(t(), t(), non_neg_integer(), non_neg_integer()) :: t()
   def merge(base_canvas, overlay_canvas, offset_x \\ 0, offset_y \\ 0) do
     Enum.reduce(overlay_canvas.cells, base_canvas, fn {{x, y}, cell}, acc ->

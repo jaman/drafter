@@ -2,17 +2,42 @@ defmodule Drafter.Widget.Header do
   @moduledoc """
   Renders a single-row application header bar with a centred title and optional live clock.
 
-  When `:show_clock` is `true` (default), a recurring 1-second timer is started
-  during `mount/1` and the current local time is rendered at the right edge. The
-  title is centred in the remaining space. Clock format can be either `:time`
-  (`HH:MM:SS`, default) or `:datetime` (`YYYY-MM-DD HH:MM:SS`).
+  With `:show_clock` set, a recurring 1-second timer is started during `mount/1`
+  and the current local time is rendered at the right edge. The title is centred
+  in the remaining space. Clock format can be either `:time` (`HH:MM:SS`, default)
+  or `:datetime` (`YYYY-MM-DD HH:MM:SS`). The clock is off unless asked for, so a
+  header starts no timer of its own.
+
+  ## Component tag
+
+  Tag `:header`, built by `Drafter.App` as `{:header, title, opts}`:
+
+      header(title, opts)
+
+  The positional argument becomes `:title`, falling back to `opts[:title]` when
+  `nil`. `:app_module` is supplied by the renderer.
 
   ## Options
 
-    * `:title` - string displayed in the centre of the header (default `""`)
-    * `:show_clock` - show a live clock at the right edge: `true` (default) / `false`
-    * `:clock_format` - clock display format: `:time` (default) or `:datetime`
-    * `:app_module` - app module used for theme resolution
+    * `:title` - `t:String.t/0` displayed in the centre of the header. Default `""`.
+      Supplied positionally through the `header/2` element, falling back to
+      `opts[:title]` when the positional value is `nil`
+    * `:show_clock` - `t:boolean/0`. Default `false`. When true, `mount/1` schedules a
+      `:clock_tick` message one second out, which `handle_event/2` reschedules on
+      every tick. No timer is started when no app is registered
+    * `:clock_format` - `:time` (default, `HH:MM:SS`) or `:datetime`
+      (`YYYY-MM-DD HH:MM:SS`). Any other value falls back to `:time`
+    * `:app_module` - module used for theme resolution, passed by the renderer as
+      `:__app_module__`. Default `nil`
+
+  `update/2` re-reads all four options and starts or cancels the clock timer as
+  `:show_clock` changes. Through the component tree, however, only `:title` and
+  `:app_module` are re-applied on a re-render, making `:show_clock` and
+  `:clock_format` effectively mount-only there.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`.
 
   ## Usage
 
@@ -33,8 +58,25 @@ defmodule Drafter.Widget.Header do
     :app_module
   ]
 
+  @type t :: %__MODULE__{
+          title: String.t(),
+          show_clock: boolean(),
+          clock_format: :time | :datetime,
+          timer_ref: reference() | nil,
+          app_module: module() | nil
+        }
+
+  @doc """
+  Builds the header state from `props` and starts the clock timer when
+  `:show_clock` is true and an app is registered.
+
+      iex> h = Drafter.Widget.Header.mount(%{title: "My App", show_clock: false})
+      iex> {h.title, h.show_clock, h.clock_format, h.timer_ref}
+      {"My App", false, :time, nil}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
-    show_clock = Map.get(props, :show_clock, true)
+    show_clock = Map.get(props, :show_clock, false)
     timer_ref = if show_clock, do: start_clock_timer(), else: nil
 
     %__MODULE__{
@@ -46,6 +88,14 @@ defmodule Drafter.Widget.Header do
     }
   end
 
+  @doc """
+  Draws the header bar into `rect`, returning exactly `rect.height` strips of which
+  only the first carries content.
+
+  The clock sits at the right edge and the title is centred in the columns left over
+  after one space of margin on each side. A title longer than that space is cut.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   def render(state, rect) do
     computed_opts = if state.app_module, do: [app_module: state.app_module], else: []
     computed = Computed.for_widget(:header, state, computed_opts)
@@ -86,6 +136,18 @@ defmodule Drafter.Widget.Header do
     end
   end
 
+  @doc """
+  Folds fresh props into `state`, re-reading `:title`, `:show_clock`,
+  `:clock_format` and `:app_module`.
+
+  Turning `:show_clock` on with no timer running starts one; turning it off cancels
+  the running timer.
+
+      iex> h = Drafter.Widget.Header.mount(%{title: "One", show_clock: false})
+      iex> Drafter.Widget.Header.update(%{title: "Two"}, h).title
+      "Two"
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
     new_show_clock = Map.get(props, :show_clock, state.show_clock)
 
@@ -112,6 +174,16 @@ defmodule Drafter.Widget.Header do
     }
   end
 
+  @doc """
+  Reschedules the clock on `:clock_tick`, returning `{:ok, state}` with the new
+  timer reference, or with `nil` when `:show_clock` is off. Every other event
+  returns `{:noreply, state}`.
+
+      iex> h = Drafter.Widget.Header.mount(%{show_clock: false})
+      iex> Drafter.Widget.Header.handle_event(:anything_else, h) |> elem(0)
+      :noreply
+  """
+  @spec handle_event(Drafter.Event.t() | :clock_tick, t()) :: {:ok, t()} | {:noreply, t()}
   def handle_event(:clock_tick, state) do
     new_timer_ref = if state.show_clock, do: start_clock_timer(), else: nil
     {:ok, %{state | timer_ref: new_timer_ref}}
@@ -121,19 +193,43 @@ defmodule Drafter.Widget.Header do
     {:noreply, state}
   end
 
+  @doc "Always `1`: the header occupies a single row."
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, _opts), do: 1
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.Header.component_tag()
+      :header
+  """
+  @spec component_tag() :: :header
   def component_tag, do: :header
 
+  @doc """
+  Turns the `{:header, title, opts}` element into a props map for `mount/1`.
+
+  A `nil` positional `title` falls back to `opts[:title]` and then to `""`.
+  `:__app_module__` becomes `:app_module`.
+
+      iex> Drafter.Widget.Header.from_component_opts(nil, title: "Dashboard")
+      %{title: "Dashboard", show_clock: false, clock_format: :time, app_module: nil}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(title, opts) do
     %{
       title: title || Keyword.get(opts, :title, ""),
-      show_clock: Keyword.get(opts, :show_clock, true),
+      show_clock: Keyword.get(opts, :show_clock, false),
       clock_format: Keyword.get(opts, :clock_format, :time),
       app_module: Keyword.get(opts, :__app_module__)
     }
   end
 
+  @doc """
+  Narrows the props a re-render feeds to `update/2` to `:title` and `:app_module`,
+  so a re-render never restarts or stops the clock.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       title: mount_props.title,

@@ -4,11 +4,18 @@ defmodule Drafter.Color do
 
   Accepts hex (`"#RGB"`, `"#RRGGBB"`), RGB (`"rgb(r,g,b)"`, `"rgba(r,g,b,a)"`),
   and HSL (`"hsl(h,s%,l%)"`, `"hsla(h,s%,l%,a)"`) strings, as well as
-  `{r, g, b}` and `{r, g, b, a}` tuples and named-color atoms.
+  `{r, g, b}` and `{r, g, b, a}` tuples.
 
-  `parse/1` returns `{:ok, t()}` or `{:error, reason}`. `normalize/1` converts
-  any supported format to a plain `{r, g, b}` tuple for segment styles, falling
-  back to white on anything it does not recognise.
+  `parse/1` returns `{:ok, t()}` or `{:error, reason}` and handles strings and
+  tuples only. `normalize/1` covers the same inputs plus the named-colour atoms
+  listed below, converting any of them to a plain `{r, g, b}` tuple for segment
+  styles and falling back to white on anything it does not recognise.
+
+  ## Named colours
+
+  `:black`, `:red`, `:green`, `:yellow`, `:blue`, `:magenta`, `:cyan`, `:white`,
+  and a `:bright_`-prefixed variant of each. These are the palette values, not the
+  terminal's own ANSI colours.
 
   ## Examples
 
@@ -38,10 +45,52 @@ defmodule Drafter.Color do
           a: float()
         }
 
+  @typedoc "A plain RGB triple, as carried on segment styles."
+  @type rgb :: {0..255, 0..255, 0..255}
+
+  @typedoc "Anything `normalize/1` accepts: a colour string, a tuple, a struct, or a named atom."
+  @type input :: String.t() | rgb() | {0..255, 0..255, 0..255, number()} | atom()
+
+  @doc """
+  Build a colour from channel values.
+
+  Each of `r`, `g` and `b` must be in `0..255`; anything else raises
+  `FunctionClauseError`. `a` is clamped into `0.0..1.0` rather than rejected.
+  Default: `1.0`.
+
+  ## Examples
+
+      iex> Drafter.Color.new(10, 20, 30)
+      %Drafter.Color{r: 10, g: 20, b: 30, a: 1.0}
+
+      iex> Drafter.Color.new(10, 20, 30, 2.5)
+      %Drafter.Color{r: 10, g: 20, b: 30, a: 1.0}
+
+  """
+  @spec new(0..255, 0..255, 0..255, number()) :: t()
   def new(r, g, b, a \\ 1.0) when r in 0..255 and g in 0..255 and b in 0..255 do
     %__MODULE__{r: r, g: g, b: b, a: clamp(a, 0.0, 1.0)}
   end
 
+  @doc """
+  Build a colour from hue in degrees, saturation and lightness in percent.
+
+  Hue wraps, so `-60` and `300` are the same. Saturation and lightness are clamped
+  to `0..100`. `a` defaults to `1.0` and is clamped into `0.0..1.0`.
+
+  ## Examples
+
+      iex> Drafter.Color.from_hsl(0, 100, 50)
+      %Drafter.Color{r: 255, g: 0, b: 0, a: 1.0}
+
+      iex> Drafter.Color.from_hsl(240, 100, 50)
+      %Drafter.Color{r: 0, g: 0, b: 255, a: 1.0}
+
+      iex> Drafter.Color.from_hsl(-240, 100, 50) == Drafter.Color.from_hsl(120, 100, 50)
+      true
+
+  """
+  @spec from_hsl(number(), number(), number(), number()) :: t()
   def from_hsl(h, s, l, a \\ 1.0) do
     h = normalize_hue(h)
     s = clamp(s / 100, 0.0, 1.0)
@@ -51,14 +100,92 @@ defmodule Drafter.Color do
     new(r, g, b, a)
   end
 
+  @doc """
+  Hue in degrees, saturation and lightness in percent, for a colour.
+
+  Alpha is dropped. For a fully desaturated colour hue and saturation come back as
+  the integer `0`, so compare numerically rather than by pattern match.
+
+  ## Examples
+
+      iex> Drafter.Color.to_hsl(Drafter.Color.new(255, 0, 0))
+      {0.0, 100.0, 50.0}
+
+      iex> Drafter.Color.to_hsl(Drafter.Color.new(0, 0, 0))
+      {0, 0, 0.0}
+
+  """
+  @spec to_hsl(t()) :: {number(), number(), number()}
   def to_hsl(%__MODULE__{r: r, g: g, b: b}) do
     rgb_to_hsl(r, g, b)
   end
 
+  @doc """
+  The colour's `{r, g, b}` triple, dropping alpha.
+
+  ## Examples
+
+      iex> Drafter.Color.to_tuple(Drafter.Color.new(1, 2, 3, 0.5))
+      {1, 2, 3}
+
+  """
+  @spec to_tuple(t()) :: rgb()
   def to_tuple(%__MODULE__{r: r, g: g, b: b}), do: {r, g, b}
 
+  @doc """
+  The colour's `{r, g, b, a}` tuple, keeping alpha.
+
+  ## Examples
+
+      iex> Drafter.Color.to_tuple_with_alpha(Drafter.Color.new(1, 2, 3, 0.5))
+      {1, 2, 3, 0.5}
+
+  """
+  @spec to_tuple_with_alpha(t()) :: {0..255, 0..255, 0..255, float()}
   def to_tuple_with_alpha(%__MODULE__{r: r, g: g, b: b, a: a}), do: {r, g, b, a}
 
+  @doc """
+  Parse a colour string or tuple into a `t:t/0`.
+
+  Named-colour atoms are *not* accepted here — use `normalize/1` for those.
+
+  Error reasons are `:invalid_hex`, `:invalid_hex_length`, `:invalid_rgb`,
+  `:invalid_hsl`, `:invalid_tuple` (a tuple that is not a valid RGB/RGBA tuple),
+  and `:invalid_format` for everything else.
+
+  ## Examples
+
+      iex> Drafter.Color.parse("#abc")
+      {:ok, %Drafter.Color{r: 170, g: 187, b: 204, a: 1.0}}
+
+      iex> Drafter.Color.parse("rgba(1,2,3,0.5)")
+      {:ok, %Drafter.Color{r: 1, g: 2, b: 3, a: 0.5}}
+
+      iex> Drafter.Color.parse({1, 2, 3})
+      {:ok, %Drafter.Color{r: 1, g: 2, b: 3, a: 1.0}}
+
+      iex> Drafter.Color.parse("#gg00zz")
+      {:error, :invalid_hex}
+
+      iex> Drafter.Color.parse("#12345")
+      {:error, :invalid_hex_length}
+
+      iex> Drafter.Color.parse({1, 2})
+      {:error, :invalid_tuple}
+
+      iex> Drafter.Color.parse(:black)
+      {:error, :invalid_format}
+
+  """
+  @spec parse(term()) ::
+          {:ok, t()}
+          | {:error,
+             :invalid_hex
+             | :invalid_hex_length
+             | :invalid_rgb
+             | :invalid_hsl
+             | :invalid_tuple
+             | :invalid_format}
   def parse("#" <> _ = color), do: parse_hex(color)
   def parse("rgb" <> _ = color), do: parse_rgb(color)
   def parse("hsl" <> _ = color), do: parse_hsl(color)
@@ -77,6 +204,29 @@ defmodule Drafter.Color do
   def parse(t) when is_tuple(t), do: {:error, :invalid_tuple}
   def parse(_), do: {:error, :invalid_format}
 
+  @doc """
+  Convert any supported colour input to a plain `{r, g, b}` triple.
+
+  Alpha is dropped. Unrecognised strings, unknown atoms and anything else fall back
+  to white, `{255, 255, 255}` — this function never raises and never returns an error
+  tuple. Use `parse/1` when a bad colour should be reported rather than substituted.
+
+  ## Examples
+
+      iex> Drafter.Color.normalize("#00ff00")
+      {0, 255, 0}
+
+      iex> Drafter.Color.normalize({1, 2, 3, 0.5})
+      {1, 2, 3}
+
+      iex> Drafter.Color.normalize(:bright_white)
+      {255, 255, 255}
+
+      iex> Drafter.Color.normalize(:no_such_colour)
+      {255, 255, 255}
+
+  """
+  @spec normalize(input() | term()) :: rgb()
   def normalize(color) when is_binary(color) do
     case parse(color) do
       {:ok, c} -> to_tuple(c)
@@ -120,12 +270,27 @@ defmodule Drafter.Color do
   @doc """
   Normalize a colour to `{{r, g, b}, alpha}`, keeping the alpha channel.
 
-  `normalize/1` flattens to the RGB triple every style, segment and SGR encoder in
-  the tree expects. This keeps the alpha alongside it so the compositor can blend the
-  colour against whatever is beneath before that flattening happens. Colours with no
-  alpha channel come back as `1.0`.
+  Accepts the same inputs as `normalize/1`. `alpha` is a float in `0.0..1.0`;
+  a colour with no alpha channel comes back as `1.0`. Use this where the alpha
+  is still needed — the compositor blends against the cell beneath — and
+  `normalize/1` where a plain RGB triple is wanted.
+
+  ## Examples
+
+      iex> Drafter.Color.normalize_with_alpha("rgba(1,2,3,0.5)")
+      {{1, 2, 3}, 0.5}
+
+      iex> Drafter.Color.normalize_with_alpha("#f00")
+      {{255, 0, 0}, 1.0}
+
+      iex> Drafter.Color.normalize_with_alpha(:black)
+      {{0, 0, 0}, 1.0}
+
+      iex> Drafter.Color.normalize_with_alpha("not a color")
+      {{255, 255, 255}, 1.0}
+
   """
-  @spec normalize_with_alpha(term()) :: {{0..255, 0..255, 0..255}, float()}
+  @spec normalize_with_alpha(term()) :: {rgb(), float()}
   def normalize_with_alpha(color) when is_binary(color) do
     case parse(color) do
       {:ok, parsed} -> {to_tuple(parsed), parsed.a}

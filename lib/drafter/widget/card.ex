@@ -7,27 +7,71 @@ defmodule Drafter.Widget.Card do
   left-aligned with one padding character on either side. Content lines are
   padded and truncated to fit the inner width.
 
+  ## Component tag
+
+  This module has no `component_tag/0` and is not reached through the widget
+  registry. `Drafter.App` builds it as the element `{:card, children, opts}`:
+
+      card(children, opts)
+
+  `children` is the content: the renderer wraps it in a list and calls
+  `to_string/1` on each entry, so every entry must implement `String.Chars`.
+  Pass strings. The remaining props come from `opts`.
+
   ## Options
 
-    * `:title` - string shown in the top border (optional)
-    * `:content` - list of strings, one per inner line (default `[]`)
-    * `:border` - border style atom: `:rounded` (default), `:single`, `:double`, `:heavy`
-    * `:border_color` - `{r, g, b}` tuple for border characters
-    * `:color` - `{r, g, b}` tuple for content text
-    * `:background` - `{r, g, b}` tuple for the card background
-    * `:style` - map of style properties
-    * `:classes` - list of theme class atoms
+    * `:title` - `t:String.t/0` shown in the top border. Default `nil`. A title
+      whose padded length reaches the inner width is dropped and a plain border is
+      drawn instead
+    * `:content` - list of strings, one per inner line. Default `[]`. A single
+      non-list value is wrapped in a list at render time
+    * `:border` - border style atom: `:rounded` (default), `:single`, `:double`,
+      `:heavy`. An unknown value falls back to `:rounded` at render time
+    * `:border_color` - `{r, g, b}` tuple for border characters. Default `nil`,
+      which falls back to the theme's border colour and then to `:color`
+    * `:color` - `{r, g, b}` tuple for content text. Default `nil`, which falls back
+      to the theme and then to `{200, 200, 200}`
+    * `:background` - `{r, g, b}` tuple for the card background. Default `nil`,
+      which falls back to the theme and then to `{40, 44, 52}`
+    * `:style` - `t:map/0` of style properties. Default `%{}`
+    * `:class` - theme class atom or list of them, reaching `mount/1` as
+      `:classes`. Default `[]`
+    * `:app_module` - module supplying a per-app theme. Default `nil`
+
+  `update/2` re-reads every option except `:border` and `:app_module`, which are
+  mount-only.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget; the card is
+  display-only and never focusable.
 
   ## Usage
 
-      card(title: "Summary", content: ["Line 1", "Line 2"], border: :rounded)
-      card(title: "Alert", content: ["Disk full"], border_color: {255, 80, 80})
+      card(["Line 1", "Line 2"], title: "Summary", border: :rounded)
+      card(["Disk full"], title: "Alert", border_color: {255, 80, 80})
   """
 
   use Drafter.Widget
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+
+  @type border :: :single | :double | :rounded | :heavy
+
+  @type rgb :: {0..255, 0..255, 0..255}
+
+  @type t :: %__MODULE__{
+          title: String.t() | nil,
+          content: [String.t()] | String.t() | nil,
+          border: border(),
+          style: map(),
+          border_color: rgb() | nil,
+          background: rgb() | nil,
+          color: rgb() | nil,
+          classes: [atom()],
+          app_module: module() | nil
+        }
 
   @border_chars %{
     single: %{tl: "┌", tr: "┐", bl: "└", br: "┘", h: "─", v: "│"},
@@ -48,6 +92,18 @@ defmodule Drafter.Widget.Card do
     :app_module
   ]
 
+  @doc """
+  Builds the card state from `props`.
+
+      iex> c = Drafter.Widget.Card.mount(%{title: "Summary", content: ["a", "b"]})
+      iex> {c.title, c.content, c.border}
+      {"Summary", ["a", "b"], :rounded}
+
+      iex> c = Drafter.Widget.Card.mount(%{})
+      iex> {c.title, c.content, c.border, c.color, c.background, c.classes}
+      {nil, [], :rounded, nil, nil, []}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
@@ -63,6 +119,16 @@ defmodule Drafter.Widget.Card do
     }
   end
 
+  @doc """
+  Draws the card into `rect`.
+
+  Accepts either a `t:t/0` or a raw props map, which is mounted first. Returns `[]`
+  when `rect.width` is under 2. Otherwise returns `2 + length(content)` strips —
+  a top border, one row per content line padded and truncated to the inner width,
+  and a bottom border. `rect.height` is not consulted, so a card with more content
+  lines than rows overflows.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
@@ -93,6 +159,19 @@ defmodule Drafter.Widget.Card do
       [render_bottom_border(chars, inner_width, border_style)]
   end
 
+  @doc """
+  Folds fresh props into `state`.
+
+  Re-reads `:title`, `:content`, `:style`, `:border_color`, `:background`, `:color`
+  and `:classes`. `:border` and `:app_module` are ignored here and keep their
+  mounted values.
+
+      iex> c = Drafter.Widget.Card.mount(%{border: :single, content: ["a"]})
+      iex> updated = Drafter.Widget.Card.update(%{content: ["b"], border: :heavy}, c)
+      iex> {updated.content, updated.border}
+      {["b"], :single}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     %{
@@ -107,6 +186,11 @@ defmodule Drafter.Widget.Card do
     }
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`. The card is not focusable and
+  never consumes input.
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:noreply, t()}
   @impl Drafter.Widget
   def handle_event(_event, state), do: {:noreply, state}
 

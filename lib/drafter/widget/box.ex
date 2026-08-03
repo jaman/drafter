@@ -1,9 +1,48 @@
 defmodule Drafter.Widget.Box do
   @moduledoc """
-  A container widget that draws a titled border around its children.
+  Draws a titled border around a region; children render inside the border.
 
-  Supports single, double, rounded, and thick border styles. The title is
-  rendered in the top border. Use the `box/2` helper in `Drafter.App`.
+  The box itself renders only the frame and the title. Children are laid out by
+  the component renderer into the rect remaining after the border and padding
+  are subtracted, so a box one row tall has no room for content.
+
+  A `:title` is embedded in the top border. Border style `:none` still occupies
+  no rows, meaning the content rect is inset by padding only.
+
+  ## Component tag
+
+  This module has no `component_tag/0` and is not reached through the widget
+  registry. `Drafter.App` builds it as the element `{:box, children, opts}`:
+
+      box(children, opts)
+
+  `children` is a list of child element tuples. `opts` is a keyword list read
+  by the renderer, which passes `:title`, `:border`, `:padding` and `:style`
+  through to `mount/1`.
+
+  ## Options
+
+    * `:title` — string embedded in the top border; `nil` for none (default `nil`)
+    * `:border` — border style atom, one of `:none`, `:single`, `:double`,
+      `:rounded`, `:heavy`, `:dashed`, `:ascii`. Defaults to the current
+      character set's border style, falling back to `:rounded`
+    * `:padding` — inner padding in columns and rows (default `0` when mounting
+      this module directly; the `box/2` element defaults it to the character
+      set's padding, falling back to `1`)
+    * `:style` — map of style overrides for the widget as a whole
+    * `:border_style` — map of style overrides for the border characters
+    * `:title_style` — map of style overrides for the title text
+    * `:content_style` — map of style overrides for the interior fill
+    * `:classes` — list of theme class atoms
+
+  `:border_style`, `:title_style`, `:content_style` and `:classes` are read by
+  `mount/1` only; the `{:box, children, opts}` element does not forward them.
+
+  Every option is live-updatable: `update/2` merges the props map into the state.
+
+  ## Usage
+
+      box([label("Ready")], title: "Status", border: :double, padding: 1)
   """
 
   @behaviour Drafter.Widget
@@ -11,6 +50,20 @@ defmodule Drafter.Widget.Box do
   alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+
+  @type border :: :none | :single | :double | :rounded | :heavy | :dashed | :ascii
+
+  @type t :: %__MODULE__{
+          title: String.t() | nil,
+          border: border(),
+          padding: non_neg_integer(),
+          style: map(),
+          border_style: map(),
+          title_style: map(),
+          content_style: map(),
+          classes: [atom()],
+          app_module: module() | nil
+        }
 
   @border_chars %{
     none: %{tl: " ", tr: " ", bl: " ", br: " ", h: " ", v: " "},
@@ -34,6 +87,21 @@ defmodule Drafter.Widget.Box do
     :app_module
   ]
 
+  @doc """
+  Builds the box state from `props`.
+
+  An unknown `:border` value is kept on the state as given and falls back to the
+  `:rounded` characters at render time.
+
+      iex> box = Drafter.Widget.Box.mount(%{title: "Status", border: :double, padding: 2})
+      iex> {box.title, box.border, box.padding}
+      {"Status", :double, 2}
+
+      iex> box = Drafter.Widget.Box.mount(%{})
+      iex> {box.title, box.padding, box.classes, box.style}
+      {nil, 0, [], %{}}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
     %__MODULE__{
       title: Map.get(props, :title),
@@ -48,6 +116,16 @@ defmodule Drafter.Widget.Box do
     }
   end
 
+  @doc """
+  Draws the frame, the title and the blank interior of the box into `rect`.
+
+  Accepts either a `t:t/0` or a raw props map, which is mounted first. Emits, in
+  order, the top border row (when `:border` is not `:none`), `:padding` blank rows,
+  the interior rows, `:padding` blank rows again, and the bottom border row. At
+  least one interior row is always emitted, so a box shorter than its own chrome
+  returns more strips than `rect.height`.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
     render_box(state, rect)
@@ -104,10 +182,25 @@ defmodule Drafter.Widget.Box do
     top ++ pad_top ++ content ++ pad_bot ++ bot
   end
 
+  @doc """
+  Merges `props` into `state`, so every option is live-updatable.
+
+  Keys absent from `props` keep their current value.
+
+      iex> state = Drafter.Widget.Box.mount(%{title: "One"})
+      iex> Drafter.Widget.Box.update(%{title: "Two", padding: 3}, state).title
+      "Two"
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
     Map.merge(state, props)
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`. The box is not focusable and
+  never consumes input; children handle their own events.
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:noreply, t()}
   def handle_event(_event, state) do
     {:noreply, state}
   end

@@ -5,27 +5,59 @@ defmodule Drafter.Widget.Container do
   In `:vertical` layout children share height equally; in `:horizontal` they share
   width equally. `:stack` overlays all children at the same position, rendering only
   the last child's output. Events are forwarded to every child on each dispatch.
-  The DSL exposes this widget as `vertical/2` and `horizontal/2`.
+
+  Children are widget modules, not element tuples. Each is mounted during
+  `mount/1` and its state is retained across renders.
+
+  ## Component tag
+
+  This module has no `component_tag/0` and no `Drafter.App` helper. It is used by
+  placing it in a render tree as a `{module, props}` pair:
+
+      {Drafter.Widget.Container,
+       %{
+         layout: :vertical,
+         children: [
+           {Drafter.Widget.Label, %{text: "Top section"}},
+           {Drafter.Widget.Label, %{text: "Bottom section"}}
+         ]
+       }}
+
+  The `vertical/2` and `horizontal/2` helpers in `Drafter.App` do not build this
+  widget — they produce `{:layout, direction, children, opts}` elements that the
+  component renderer lays out itself.
 
   ## Options
 
-    * `:children` - list of `{module, props}` or `{module, props, state}` tuples
+    * `:children` - list of `{module, props}` or `{module, props, state}` tuples.
+      Default `[]`. A two-element pair is mounted; a three-element one is taken as
+      already mounted
     * `:layout` - arrangement: `:vertical` (default), `:horizontal`, `:stack`
-    * `:padding` - inner padding in columns/rows (default `0`)
-    * `:border_style` - border drawn around the content: `:none` (default) or any atom
-    * `:style` - map of style properties
+    * `:padding` - inner padding in columns and rows. Default `0`
+    * `:border_style` - `:none` (default) or any other atom. Any value other than
+      `:none` insets the content rect by one cell on every side; no border
+      characters are drawn
+    * `:style` - `t:map/0` of style properties. Default `%{}`. Carried on the state
+      and not consulted while rendering
+
+  `update/2` re-reads every option. Supplying `:children` re-mounts each entry given
+  as a `{module, props}` pair, discarding whatever state that child had accumulated;
+  pass `{module, props, state}` triples to keep it.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`.
 
   ## Usage
 
-      vertical([
-        label("Top section"),
-        label("Bottom section")
-      ])
-
-      horizontal([
-        label("Left"),
-        label("Right")
-      ], padding: 1)
+      Drafter.Widget.Container.mount(%{
+        layout: :horizontal,
+        padding: 1,
+        children: [
+          {Drafter.Widget.Label, %{text: "Left"}},
+          {Drafter.Widget.Label, %{text: "Right"}}
+        ]
+      })
   """
 
   use Drafter.Widget
@@ -50,7 +82,20 @@ defmodule Drafter.Widget.Container do
           style: map()
         }
 
-  @doc "Create a new container"
+  @doc """
+  Builds a container struct directly from `children` and `opts`.
+
+  Unlike `mount/1` this stores `children` exactly as given, so a `{module, props}`
+  pair is *not* mounted and `render/2` will fail on it. Use `mount/1` unless the
+  children are already `{module, props, state}` triples.
+
+  Options: `:layout` (default `:vertical`), `:padding` (default `0`),
+  `:border_style` (default `:none`), `:style` (default `%{}`).
+
+      iex> c = Drafter.Widget.Container.new([], layout: :horizontal, padding: 2)
+      iex> {c.children, c.layout, c.padding, c.border_style, c.style}
+      {[], :horizontal, 2, :none, %{}}
+  """
   @spec new([child_spec()], keyword()) :: t()
   def new(children, opts \\ []) do
     %__MODULE__{
@@ -62,6 +107,20 @@ defmodule Drafter.Widget.Container do
     }
   end
 
+  @doc """
+  Builds the container state from `props`, mounting every `{module, props}` child
+  and leaving `{module, props, state}` triples alone.
+
+      iex> c = Drafter.Widget.Container.mount(%{children: [{Drafter.Widget.Label, %{text: "Hi"}}]})
+      iex> [{module, _props, child_state}] = c.children
+      iex> {module, child_state.text, c.layout}
+      {Drafter.Widget.Label, "Hi", :vertical}
+
+      iex> c = Drafter.Widget.Container.mount(%{})
+      iex> {c.children, c.layout, c.padding, c.border_style, c.style}
+      {[], :vertical, 0, :none, %{}}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     children = Map.get(props, :children, [])
@@ -85,6 +144,18 @@ defmodule Drafter.Widget.Container do
     }
   end
 
+  @doc """
+  Renders every child into its share of `rect` and stacks the results.
+
+  The content rect is inset by `:padding`, plus one further cell on each side when
+  `:border_style` is not `:none`. `:vertical` gives each child
+  `div(height, child_count)` rows, `:horizontal` gives each
+  `div(width, child_count)` columns, and `:stack` gives every child the full rect
+  but returns only the last child's strips. Returns exactly `rect.height` strips,
+  each padded to `rect.width`. A child returning `{:error, reason}` contributes no
+  rows.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     content_rect = calculate_content_rect(rect, state.padding, state.border_style)
@@ -100,13 +171,18 @@ defmodule Drafter.Widget.Container do
     final_strips
   end
 
-  @impl Drafter.Widget
   @doc """
   Offers the event to every child in order.
 
-  Returns `{:ok, state}` if any child handled the event, otherwise
-  `{:bubble, state}`. Child states are updated either way.
+  Every child sees the event, even after an earlier one handled it. A child
+  returning `{:ok, _}` or `{:ok, _, _}` marks the event handled; `{:bubble, _}` and
+  `{:noreply, _}` keep the child's new state without marking it handled, and any
+  other return leaves that child's state alone. Returns `{:ok, state}` if any child
+  handled the event and `{:bubble, state}` otherwise; child states are updated
+  either way. Actions returned by children are discarded.
   """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:ok, t()} | {:bubble, t()}
+  @impl Drafter.Widget
   def handle_event(event, state) do
     {children, handled?} =
       Enum.map_reduce(state.children, false, fn {module, props, child_state}, taken ->
@@ -128,6 +204,18 @@ defmodule Drafter.Widget.Container do
     end
   end
 
+  @doc """
+  Folds fresh props into `state`.
+
+  Re-reads `:layout`, `:padding`, `:border_style` and `:style`. When `:children` is
+  present the whole child list is rebuilt, mounting each `{module, props}` pair
+  afresh, so any state those children held is lost.
+
+      iex> c = Drafter.Widget.Container.mount(%{layout: :vertical})
+      iex> Drafter.Widget.Container.update(%{layout: :stack, padding: 1}, c).layout
+      :stack
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     new_state = %{
@@ -157,6 +245,10 @@ defmodule Drafter.Widget.Container do
     end
   end
 
+  @doc """
+  Calls `unmount/1` on every child that exports it and returns `:ok`.
+  """
+  @spec unmount(t()) :: :ok
   @impl Drafter.Widget
   def unmount(state) do
     Enum.each(state.children, fn {module, _props, child_state} ->

@@ -3,8 +3,10 @@ defmodule Drafter.ActionHandler do
   Behaviour for handling application action return values.
 
   Implement this behaviour to intercept action tuples returned from `handle_event/3`
-  and translate them into state changes. Handlers are registered globally and checked
-  in registration order, stopping at the first that returns `{:ok, new_state}`.
+  and translate them into state changes. Handlers live in the registering process's
+  dictionary and are checked most-recently-registered first, stopping at the first
+  that returns `{:ok, new_state}`. See `Drafter.ActionRegistry` for registration and
+  dispatch. An action no handler claims leaves the accumulated state unchanged.
 
   ## Example
 
@@ -28,9 +30,21 @@ defmodule Drafter.ActionHandler do
   registered handler will receive it automatically.
   """
 
+  @typedoc "The action tuple an application or widget returned."
   @type action :: term()
+
+  @typedoc "The state accumulated so far while folding this event's actions."
   @type app_state :: map()
+
+  @typedoc """
+  What a handler returns.
+
+  `{:ok, new_state}` claims the action and stops dispatch; `:unhandled` passes it to
+  the next handler. Any other return raises `CaseClauseError` in
+  `Drafter.ActionRegistry.dispatch/2`.
+  """
   @type result :: {:ok, app_state()} | :unhandled
 
+  @doc "Handle one action, returning `{:ok, new_state}` to claim it or `:unhandled` to pass."
   @callback handle_action(action(), app_state()) :: result()
 end

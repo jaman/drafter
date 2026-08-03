@@ -7,16 +7,44 @@ defmodule Drafter.Widget.Gauge do
   thresholds, and red above the high threshold. The unfilled track is rendered
   in dim grey. The numeric percentage is displayed centred below the arc.
 
+  ## Component tag
+
+  Tag `:gauge`, built by `Drafter.App` as `{:gauge, opts}`:
+
+      gauge(opts)
+
+  There is no positional argument; every prop comes from `opts`.
+
   ## Options
 
-    * `:value` - float in `0.0..1.0` (default `0.0`)
-    * `:label` - optional title string displayed at the top
-    * `:low_threshold` - fraction where colour changes to orange (default `0.8`)
-    * `:high_threshold` - fraction where colour changes to red (default `0.9`)
-    * `:low_color` - `{r, g, b}` for the low range (default green)
-    * `:mid_color` - `{r, g, b}` for the mid range (default orange)
-    * `:high_color` - `{r, g, b}` for the high range (default red)
-    * `:track_color` - `{r, g, b}` for the unfilled arc (default dim grey)
+    * `:value` - float in `0.0..1.0`. Default `0.0`. Shown as `round(value * 100)%`
+    * `:label` - `t:String.t/0` title displayed on a row above the arc. Default
+      `nil`, which reclaims that row for the arc
+    * `:low_threshold` - fraction where the colour changes to `:mid_color`. Default
+      `0.8`
+    * `:high_threshold` - fraction where the colour changes to `:high_color`.
+      Default `0.9`
+    * `:low_color` - `{r, g, b}` for the low range. Default `{80, 200, 80}`
+    * `:mid_color` - `{r, g, b}` for the mid range. Default `{220, 140, 0}`
+    * `:high_color` - `{r, g, b}` for the high range. Default `{220, 60, 60}`
+    * `:track_color` - `{r, g, b}` for the unfilled arc. Default `{55, 55, 55}`
+    * `:renderer` - `:text` (default) draws braille cells; any terminal graphics
+      protocol atom transmits the arc as an image, falling back to cells when
+      that protocol is unavailable
+    * `:height` - read only by `preferred_height/2`, never by `mount/1`. Default `5`
+
+  `update/2` re-reads only `:value`, `:label` and `:renderer`; the thresholds and
+  every colour are mount-only. Through the component tree a re-render narrows that
+  further to `:value` and `:label`, so `:renderer` is mount-only there too.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`.
+
+  ## Data channel
+
+  When the widget is declared with a data buffer, `apply_data_buffer/3` sets
+  `:value` to the last item in the buffer and ignores everything before it.
 
   ## Usage
 
@@ -58,6 +86,32 @@ defmodule Drafter.Widget.Gauge do
     renderer: :text
   ]
 
+  @type rgb :: {0..255, 0..255, 0..255}
+
+  @type t :: %__MODULE__{
+          value: float(),
+          label: String.t() | nil,
+          low_threshold: float(),
+          high_threshold: float(),
+          low_color: rgb(),
+          mid_color: rgb(),
+          high_color: rgb(),
+          track_color: rgb(),
+          renderer: atom()
+        }
+
+  @doc """
+  Builds the gauge state from `props`.
+
+      iex> g = Drafter.Widget.Gauge.mount(%{value: 0.72, label: "CPU"})
+      iex> {g.value, g.label, g.low_threshold, g.high_threshold, g.renderer}
+      {0.72, "CPU", 0.8, 0.9, :text}
+
+      iex> g = Drafter.Widget.Gauge.mount(%{})
+      iex> {g.value, g.label, g.low_color, g.mid_color, g.high_color, g.track_color}
+      {0.0, nil, {80, 200, 80}, {220, 140, 0}, {220, 60, 60}, {55, 55, 55}}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
@@ -73,6 +127,16 @@ defmodule Drafter.Widget.Gauge do
     }
   end
 
+  @doc """
+  Draws the gauge into `rect`, returning exactly `rect.height` strips.
+
+  With `renderer: :text`, or with a graphics protocol the terminal does not support,
+  the arc is drawn as braille cells and the percentage is overlaid on the row that
+  falls just below the arc's centre. Otherwise blank rows are emitted for the image
+  the widget server transmits separately, with the percentage on the last row. A
+  `:label` takes the first row in either case.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     if gauge_pixel?(state), do: render_pixel_base(state, rect), else: render_text(state, rect)
@@ -90,6 +154,11 @@ defmodule Drafter.Widget.Gauge do
       nil
     end
   end
+
+  @doc "Whether this gauge is drawing a transmitted image rather than braille cells."
+  @spec image_active?(t()) :: boolean()
+  @impl Drafter.Widget
+  def image_active?(state), do: gauge_pixel?(state)
 
   defp gauge_pixel?(state) do
     state.renderer != :text and Pixel.protocol(state.renderer) != nil
@@ -172,9 +241,30 @@ defmodule Drafter.Widget.Gauge do
     label_strips ++ arc_strips
   end
 
+  @doc """
+  Bubbles every event; the gauge is not focusable and consumes no input.
+
+      iex> g = Drafter.Widget.Gauge.mount(%{})
+      iex> Drafter.Widget.Gauge.handle_event({:key, :enter}, g) |> elem(0)
+      :bubble
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:bubble, t()}
   @impl Drafter.Widget
   def handle_event(_event, state), do: {:bubble, state}
 
+  @doc """
+  Folds fresh props into `state`, re-reading only `:value`, `:label` and
+  `:renderer`.
+
+  The thresholds and every colour keep the values they were mounted with, whatever
+  `props` contains.
+
+      iex> g = Drafter.Widget.Gauge.mount(%{value: 0.1})
+      iex> updated = Drafter.Widget.Gauge.update(%{value: 0.9, high_threshold: 0.5}, g)
+      iex> {updated.value, updated.high_threshold}
+      {0.9, 0.9}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     %{
@@ -185,10 +275,36 @@ defmodule Drafter.Widget.Gauge do
     }
   end
 
+  @doc """
+  `opts[:height]`, or `5` when it is absent.
+
+      iex> Drafter.Widget.Gauge.preferred_height(nil, [])
+      5
+
+      iex> Drafter.Widget.Gauge.preferred_height(nil, height: 9)
+      9
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 5)
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.Gauge.component_tag()
+      :gauge
+  """
+  @spec component_tag() :: :gauge
   def component_tag, do: :gauge
 
+  @doc """
+  Turns the `{:gauge, opts}` element into a props map for `mount/1`. The positional
+  argument is ignored.
+
+      iex> props = Drafter.Widget.Gauge.from_component_opts(nil, value: 0.5, label: "CPU")
+      iex> {props.value, props.label, props.low_threshold, props.renderer}
+      {0.5, "CPU", 0.8, :text}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     %{
       value: Keyword.get(opts, :value, 0.0),
@@ -203,6 +319,11 @@ defmodule Drafter.Widget.Gauge do
     }
   end
 
+  @doc """
+  Narrows the props a re-render feeds to `update/2` to `:value` and `:label`, so
+  `:renderer`, the thresholds and the colours stay as mounted.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       value: mount_props.value,
@@ -210,6 +331,13 @@ defmodule Drafter.Widget.Gauge do
     }
   end
 
+  @doc """
+  Sets `:value` to the newest item in the widget's data buffer.
+
+  Everything buffered before the last item is discarded. An empty buffer leaves the
+  state alone.
+  """
+  @spec apply_data_buffer(t(), Drafter.RingBuffer.t(), Drafter.Widget.rect()) :: t()
   @impl Drafter.Widget
   def apply_data_buffer(state, buffer, _rect) do
     case Drafter.RingBuffer.last(buffer) do

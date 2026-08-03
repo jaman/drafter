@@ -1,35 +1,95 @@
 defmodule Drafter.Style.StylesheetLoader do
-  @moduledoc false
+  @moduledoc """
+  Loads and caches the stylesheet an app renders against.
+
+  A singleton `GenServer` registered under this module's name. It assembles an
+  app's stylesheet from the built-in widget defaults, the app's CSS file and the
+  app's inline rules, and holds the result so that later renders do not re-read the
+  file.
+
+  ## How an app declares its styles
+
+  An app module may export either or both of:
+
+    * `__css_path__/0` — path to a CSS file, parsed by `Drafter.Style.CSSParser`.
+      Returning `nil` contributes nothing.
+    * `__inline_styles__/0` — map of `%{selector => style}` added rule by rule.
+
+  A file is layered over the defaults and inline rules over the file, so an inline
+  rule wins a specificity tie against a rule from the CSS file. An app exporting
+  only `__inline_styles__/0` skips the file step entirely.
+
+  ## Caching
+
+  Results are cached per app module and per file path, and only `clear_cache/0`
+  discards them. Editing a CSS file after it has been loaded has no effect until the
+  cache is cleared.
+
+  `load_inline/1` neither reads the cache nor writes to it.
+  """
 
   use GenServer
   alias Drafter.Style.{CSSParser, Stylesheet, WidgetStyles}
 
+  @typedoc "Cache key: an app module's assembled sheet, or one parsed CSS file."
   @type stylesheet_key :: {:app, module()} | {:file, String.t()}
 
   defstruct cache: %{}
 
+  @doc """
+  Start the loader, registered under this module's name.
+
+  `opts` are passed to `init/1`, which ignores them. Starting a second one fails
+  with `{:error, {:already_started, pid}}`.
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
   @doc """
-  Load stylesheet for an app module.
-  Combines CSS file (if specified) with inline styles.
+  The stylesheet for `app_module`, as `{:ok, stylesheet}`.
+
+  Built from `Drafter.Style.WidgetStyles.default_stylesheet/0`, then the CSS file
+  named by the app's `__css_path__/0` if it exports one, then the rules of its
+  `__inline_styles__/0` if it exports one, each layer added after the last. An app
+  exporting neither gets the default stylesheet alone.
+
+  A CSS file that cannot be read or parsed contributes nothing. The result is
+  cached per app module until `clear_cache/0`, so later edits to the CSS file are
+  not picked up.
+
+  Never returns an error: an app that cannot be loaded from still yields the
+  default stylesheet.
   """
+  @spec load_stylesheet(module()) :: {:ok, Stylesheet.t()}
   def load_stylesheet(app_module) when is_atom(app_module) do
     GenServer.call(__MODULE__, {:load_stylesheet, app_module})
   end
 
   @doc """
-  Load stylesheet from a file path.
+  Parse the CSS file at `file_path` on its own, with no default rules merged in.
+
+  Returns `{:ok, stylesheet}`, or `{:error, reason}` when the file cannot be read
+  or parsed. Successful results are cached per path until `clear_cache/0`; a
+  failure is not cached and is retried on the next call.
   """
+  @spec load_from_file(Path.t()) :: {:ok, Stylesheet.t()} | {:error, String.t()}
   def load_from_file(file_path) do
     GenServer.call(__MODULE__, {:load_from_file, file_path})
   end
 
   @doc """
-  Parse inline styles from a map.
+  The default stylesheet with `styles` added on top.
+
+  `styles` maps a selector — a string such as `"button:focus"`, or a widget-type
+  atom — to a map of style properties. Rules are added in map iteration order and
+  the result is not cached. Runs in the calling process, so the loader need not be
+  running.
+
+  Returns the stylesheet itself, not an `{:ok, _}` tuple.
   """
+  @spec load_inline(map()) :: Stylesheet.t()
   def load_inline(styles) when is_map(styles) do
     base = WidgetStyles.default_stylesheet()
 
@@ -39,8 +99,12 @@ defmodule Drafter.Style.StylesheetLoader do
   end
 
   @doc """
-  Clear the stylesheet cache.
+  Discard every cached stylesheet, so the next load re-reads and re-parses.
+
+  Clears both the per-app and the per-file entries. Does not clear the built-in
+  defaults, which `Drafter.Style.WidgetStyles.clear_cache/0` handles.
   """
+  @spec clear_cache() :: :ok
   def clear_cache do
     GenServer.call(__MODULE__, :clear_cache)
   end

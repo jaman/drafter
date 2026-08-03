@@ -4,7 +4,22 @@ defmodule Drafter.Transport.Telnet do
   alias Drafter.{Compositor, Event, EventHandler, ScreenManager, Session, ThemeManager}
   alias Drafter.Transport.TelnetDriver
 
-  @spec start_link(module(), keyword()) :: {:ok, pid()} | {:error, term()}
+  @doc """
+  Spawn a linked acceptor process listening for telnet clients.
+
+  Always returns `{:ok, pid}`; the listen socket is opened inside the spawned process,
+  so a bind failure kills the acceptor instead of being reported here.
+
+  ## Options
+
+    * `:port` - TCP port, bound on all interfaces. Default: `2323`.
+    * `:mode` - `:isolated` or `:shared`. Default: `:isolated`. `:shared` starts (or
+      joins) the app's `Drafter.Session.SharedState` server.
+    * `:mount_props` - map handed to each session's `mount/1`. Default: `%{}`.
+
+  Unknown options are carried along and ignored.
+  """
+  @spec start_link(module(), keyword()) :: {:ok, pid()}
   def start_link(app_module, opts \\ []) do
     port = Keyword.get(opts, :port, 2323)
     acceptor_opts = [app_module: app_module, server_opts: opts]
@@ -57,6 +72,10 @@ defmodule Drafter.Transport.Telnet do
 
     session_ctx = start_session_services(driver_pid)
     TelnetDriver.setup(driver_pid, session_ctx.event_manager)
+    session_ctx =
+      session_ctx
+      |> Map.put(:terminal_env, TelnetDriver.terminal_env(driver_pid))
+      |> put_probed_protocol(TelnetDriver.probe(driver_pid))
     Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
 
     session_opts = build_session_opts(app_module, mode, mount_props)
@@ -77,6 +96,11 @@ defmodule Drafter.Transport.Telnet do
   defp build_session_opts(_app_module, mode, mount_props) do
     [mode: mode, props: mount_props]
   end
+
+  defp put_probed_protocol(session_ctx, {:ok, protocol}),
+    do: Map.put(session_ctx, :terminal_protocol, protocol)
+
+  defp put_probed_protocol(session_ctx, :unprobed), do: session_ctx
 
   defp start_session_services(driver_pid) do
     {:ok, em} = Event.Manager.start_link(name: nil)

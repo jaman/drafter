@@ -22,12 +22,35 @@ defmodule Drafter.WidgetServer do
     pending_push_ref: nil,
     image_task: nil,
     image_hash: nil,
+    image_placed: false,
     image_stamp: 0,
     last_image_ms: nil,
     image_retry_ref: nil,
     image_throttle_ms: 50
   ]
 
+  @doc """
+  Start a widget server linked to the caller.
+
+  ## Options
+
+    * `:module` - the widget module. Required; missing raises.
+    * `:props` - map passed to the widget's `mount/1`. Default: `%{}`.
+    * `:rect` - the widget's initial rect. Default:
+      `%{x: 0, y: 0, width: 10, height: 3}`.
+    * `:id` - widget id to register in `Drafter.WidgetPidRegistry`. Default: `nil`,
+      which leaves the widget unregistered.
+    * `:session_ctx` - session context map adopted into this process. Default: `%{}`.
+    * `:buffer` - `:auto` for a 128-item data channel, a positive integer for that
+      many items, or `nil` for none. Default: `nil`. Any other value is treated as
+      `nil`.
+    * `:refresh` - data-channel refresh policy, used only when `:buffer` is set.
+      Default: `:on_demand`.
+    * `:image_throttle` - minimum gap between image renders, as milliseconds or
+      `{n, :tick}`. Default: `{2, :tick}`.
+
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
@@ -53,10 +76,23 @@ defmodule Drafter.WidgetServer do
     end
   end
 
+  @doc """
+  Send an event to a widget without waiting for it to be handled.
+
+  Actions the handler raises are applied by the server itself; nothing comes back to
+  the caller. Use `dispatch_event/2` when the verdict or the actions are needed.
+  """
+  @spec send_event(pid(), term()) :: :ok
   def send_event(pid, event) do
     GenServer.cast(pid, {:event, event})
   end
 
+  @doc """
+  Send an event to a widget and wait until it has been handled.
+
+  Returns `:ok`. Like `send_event/2`, the verdict and actions stay in the server.
+  """
+  @spec send_event_sync(pid(), term()) :: :ok
   def send_event_sync(pid, event) do
     GenServer.call(pid, {:event_sync, event})
   end
@@ -73,6 +109,13 @@ defmodule Drafter.WidgetServer do
     GenServer.call(pid, {:dispatch_event, event})
   end
 
+  @doc """
+  A widget's whole state.
+
+  Exits if the widget is dead or does not reply; use `safe_get_state/2` where that
+  must not happen.
+  """
+  @spec get_state(pid()) :: term()
   def get_state(pid) do
     GenServer.call(pid, :get_state)
   end
@@ -101,42 +144,82 @@ defmodule Drafter.WidgetServer do
     GenServer.call(pid, {:get_state_fields, keys})
   end
 
+  @doc "The widget's strips for its current rect, rendering them if the cache is cold."
+  @spec get_render(pid()) :: [Drafter.Draw.Strip.t()]
   def get_render(pid) do
     GenServer.call(pid, :get_render)
   end
 
+  @doc """
+  Move or resize a widget, notifying it through `on_rect_change/2` if it defines one.
+
+  Synchronous, so the widget has taken the new rect before this returns.
+  """
+  @spec update_rect(pid(), map()) :: :ok
   def update_rect(pid, rect) do
     GenServer.call(pid, {:update_rect, rect})
   end
 
+  @doc """
+  Merge new props into a widget's state. Asynchronous.
+  """
+  @spec update_props(pid(), map()) :: :ok
   def update_props(pid, props) do
     GenServer.cast(pid, {:update_props, props})
   end
 
+  @doc "Stop a widget server normally, waiting for it to exit."
+  @spec stop(pid()) :: :ok
   def stop(pid) do
     GenServer.stop(pid, :normal)
   end
 
+  @doc """
+  Offer an event to a widget during the capture phase, before its descendants see it.
+
+  Returns the widget's own capture result; `:not_handled` when it defines no capture
+  handler.
+  """
+  @spec call_capture_handler(pid(), term()) :: term()
   def call_capture_handler(pid, event) do
     GenServer.call(pid, {:capture_event, event})
   end
 
+  @doc """
+  Replace a widget's state wholesale.
+
+  Synchronous. Bypasses the widget's own event handling, so it is the caller's job to
+  supply a state the widget's `render/2` can draw.
+  """
+  @spec set_state(pid(), term()) :: :ok
   def set_state(pid, new_widget_state) do
     GenServer.call(pid, {:set_state, new_widget_state})
   end
 
+  @doc """
+  Append one item to a widget's data channel. Asynchronous.
+
+  A widget started without a `:buffer` option has no channel and drops the item.
+  """
+  @spec push_data(pid(), term()) :: :ok
   def push_data(pid, data) do
     GenServer.cast(pid, {:push_data, data})
   end
 
+  @doc "Append many items to a widget's data channel, as `push_data/2` does for one."
+  @spec push_data_many(pid(), [term()]) :: :ok
   def push_data_many(pid, items) do
     GenServer.cast(pid, {:push_data_many, items})
   end
 
+  @doc "Stop a widget's data channel from delivering buffered items. Asynchronous."
+  @spec pause_data(pid()) :: :ok
   def pause_data(pid) do
     GenServer.cast(pid, :pause_data)
   end
 
+  @doc "Resume a data channel paused by `pause_data/1`. Asynchronous."
+  @spec resume_data(pid()) :: :ok
   def resume_data(pid) do
     GenServer.cast(pid, :resume_data)
   end
@@ -170,7 +253,7 @@ defmodule Drafter.WidgetServer do
 
     strips = module.render(widget_state, rect)
     WidgetStripCache.put(id, rect, strips)
-    request_image(module)
+    request_image(state)
 
     {:ok, state}
   end
@@ -280,7 +363,7 @@ defmodule Drafter.WidgetServer do
           render_state = maybe_apply_buffer(state)
           strips = state.module.render(render_state, state.rect)
           WidgetStripCache.put(state.id, state.rect, strips)
-          request_image(state.module)
+          request_image(state)
           {state.rect, strips}
 
         cached ->
@@ -312,14 +395,14 @@ defmodule Drafter.WidgetServer do
         new_state = %{state | state: new_widget_state}
         strips = new_state.module.render(new_state.state, new_state.rect)
         WidgetStripCache.put(new_state.id, new_state.rect, strips)
-        request_image(new_state.module)
+        request_image(new_state)
         {:reply, {:ok, new_widget_state}, new_state}
 
       {:ok, new_widget_state, actions} ->
         new_state = %{state | state: new_widget_state}
         strips = new_state.module.render(new_state.state, new_state.rect)
         WidgetStripCache.put(new_state.id, new_state.rect, strips)
-        request_image(new_state.module)
+        request_image(new_state)
         {:reply, {:ok, new_widget_state, actions}, new_state}
 
       {:noreply, new_state} ->
@@ -335,7 +418,7 @@ defmodule Drafter.WidgetServer do
     strips = new_state.module.render(new_state.state, new_state.rect)
     WidgetStripCache.put(new_state.id, new_state.rect, strips)
     notify_render_needed(new_state.id)
-    request_image(new_state.module)
+    request_image(new_state)
     {:reply, :ok, new_state}
   end
 
@@ -523,21 +606,30 @@ defmodule Drafter.WidgetServer do
 
     WidgetStripCache.put(server_state.id, server_state.rect, final_strips)
     notify_render_needed(server_state.id)
-    request_image(server_state.module)
+    request_image(server_state)
   end
 
-  defp request_image(module) do
-    if function_exported?(module, :image, 3), do: GenServer.cast(self(), :maybe_generate_image)
+  defp request_image(%{module: module, state: widget_state, image_placed: placed}) do
+    if placed or Drafter.Widget.image_active?(module, widget_state) do
+      GenServer.cast(self(), :maybe_generate_image)
+    end
   end
 
   defp schedule_image(%{module: module} = state) do
     cond do
-      not function_exported?(module, :image, 3) -> state
+      not Drafter.Widget.image_active?(module, state.state) -> withdraw_image(state)
       not WidgetStripCache.visible?(state.id) -> state
       state.image_task != nil -> state
       not image_due?(state) -> defer_image(state)
       true -> maybe_start_image(state)
     end
+  end
+
+  defp withdraw_image(%{image_placed: false} = state), do: state
+
+  defp withdraw_image(state) do
+    Drafter.Compositor.clear_image(state.id)
+    %{state | image_placed: false, image_hash: nil}
   end
 
   defp defer_image(%{image_retry_ref: ref} = state) when is_reference(ref), do: state
@@ -579,6 +671,7 @@ defmodule Drafter.WidgetServer do
         state
         | image_task: spawn_image_task(state, rect, stamp),
           image_hash: hash,
+          image_placed: true,
           image_stamp: stamp
       }
     end
@@ -613,9 +706,8 @@ defmodule Drafter.WidgetServer do
     end
   end
 
-  defp store_image(id, {paint, clear, %{dx: dx, dy: dy, cols: cols, rows: rows} = meta}, stamp) do
-    place = Map.get(meta, :place)
-    Drafter.Compositor.put_image(id, paint, clear, dx, dy, cols, rows, stamp, place)
+  defp store_image(id, {paint, clear, %{dx: _, dy: _, cols: _, rows: _} = placement}, stamp) do
+    Drafter.Compositor.put_image(id, paint, clear, Map.put(placement, :stamp, stamp))
   end
 
   defp store_image(id, _other, _stamp) do

@@ -1,5 +1,36 @@
 defmodule Drafter.EventHandler do
-  @moduledoc false
+  @moduledoc """
+  Dispatches events to registered callback functions, in registration levels.
+
+  Handlers are kept as an ordered list of levels. Dispatch walks the levels from
+  first to last, calls every handler in a level whose pattern matches, and stops as
+  soon as a level contains a matching non-passthrough handler that returned
+  `:handled`. Registration decides the order: `:top` puts a handler in a new first
+  level, `:bottom` in a new last one, and `{:after, pid}` in a new level directly
+  after the level containing that owner's handler.
+
+      Drafter.EventHandler.register_handler({:type, :key}, &handle/1, self())
+      Drafter.EventHandler.dispatch_event_sync({:key, :escape})
+      #=> :handled
+
+  Event patterns:
+
+    * `:any` — every event
+    * `{:type, type}` — any two-element event tuple tagged `type`
+    * `{type, sub_type}` — a two-element event tuple tagged `type` whose payload is
+      a map with `type: sub_type`, which is how a mouse sub-kind is selected
+
+  A handler function takes the event and returns `:handled` to consume it or
+  anything else to let dispatch continue. Exceptions raised inside it are caught and
+  turned into `{:error, exception}`, which does not count as handled.
+
+  Handlers are removed when their owner process exits; owners are monitored at
+  registration. Dead owners are also swept on every dispatch.
+
+  The functions here resolve the handler process through `Drafter.Session.Context`
+  under the `:event_handler` key, except `register_handler/4` which accepts an
+  explicit `:target`.
+  """
 
   use GenServer
 
@@ -7,6 +38,14 @@ defmodule Drafter.EventHandler do
 
   defstruct [:handlers, :monitors]
 
+  @doc """
+  Start a handler process.
+
+  Options:
+
+    * `:name` — registered name, default `Drafter.EventHandler`. Pass `nil` to start
+      it unregistered, which is what a session other than the local terminal does.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -14,6 +53,23 @@ defmodule Drafter.EventHandler do
     GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
+  @doc """
+  Register `handler_fn` for events matching `event_pattern`, owned by `owner_pid`.
+
+  `event_pattern` is `:any`, `{:type, type}` or `{type, sub_type}`. `handler_fn`
+  takes the event and returns `:handled` to consume it.
+
+  Options:
+
+    * `:passthrough` — when `true` the handler never consumes the event, whatever it
+      returns. Default `false`.
+    * `:level` — `:top` (default) inserts a new first level, `:bottom` a new last
+      one, `{:after, pid}` a new level right after the one holding `pid`'s handler.
+    * `:target` — the handler process to register with; defaults to the session's.
+
+  Returns `{:ok, handler_process}`, or `{:error, :dead_process}` if `owner_pid` is
+  not alive. The registration is dropped when `owner_pid` exits.
+  """
   @spec register_handler(term(), function(), pid(), keyword()) :: {:ok, pid()} | {:error, term()}
   def register_handler(event_pattern, handler_fn, owner_pid, opts \\ []) do
     passthrough = Keyword.get(opts, :passthrough, false)
@@ -28,16 +84,36 @@ defmodule Drafter.EventHandler do
     GenServer.call(target, {:register, event_pattern, handler_fn, owner_pid, passthrough, level})
   end
 
+  @doc """
+  Remove handlers owned by `owner_pid`.
+
+  With `event_pattern` `nil` (the default) every handler that owner registered is
+  removed and the monitor on it is released. With a pattern, only handlers
+  registered under exactly that pattern are removed. Levels left empty are dropped.
+  """
   @spec unregister_handler(pid(), term()) :: :ok
   def unregister_handler(owner_pid, event_pattern \\ nil) do
     GenServer.call(resolve(), {:unregister, owner_pid, event_pattern})
   end
 
+  @doc """
+  Dispatch `event` without waiting for the handlers to run.
+
+  Returns `:ok` immediately and discards whether anything handled the event; use
+  `dispatch_event_sync/1` when that matters.
+  """
   @spec dispatch_event(term()) :: :ok
   def dispatch_event(event) do
     GenServer.cast(resolve(), {:dispatch, event})
   end
 
+  @doc """
+  Dispatch `event` and return once every handler that ran has returned.
+
+  `:handled` means a matching non-passthrough handler consumed the event and later
+  levels were skipped. `:passthrough` means it was not consumed, whether or not
+  handlers ran.
+  """
   @spec dispatch_event_sync(term()) :: :handled | :passthrough
   def dispatch_event_sync(event) do
     GenServer.call(resolve(), {:dispatch, event})

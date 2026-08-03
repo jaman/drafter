@@ -149,6 +149,13 @@ defmodule Drafter.WidgetHierarchy do
     }
   end
 
+  @doc """
+  Stop every widget server the hierarchy holds.
+
+  Widgets held inline and servers that have already exited are skipped, and a server
+  that exits while being stopped is ignored. Always returns `:ok`, including for a
+  `nil` hierarchy.
+  """
   @spec stop_all_servers(t() | nil) :: :ok
   def stop_all_servers(nil), do: :ok
 
@@ -225,12 +232,20 @@ defmodule Drafter.WidgetHierarchy do
     end
   end
 
-  @spec update_widget(t(), widget_id(), map()) :: t()
+  @doc "Reparent a widget. A widget the hierarchy does not hold is left alone."
   @spec update_widget_parent(t(), widget_id(), widget_id() | nil) :: t()
   def update_widget_parent(hierarchy, widget_id, parent_id) do
     update_widget_info(hierarchy, widget_id, &%{&1 | parent: parent_id})
   end
 
+  @doc """
+  Push new props into a widget.
+
+  A widget backed by a live server has them sent to it and the hierarchy comes back
+  unchanged; a widget held inline has them merged into its cached state. A widget the
+  hierarchy does not hold is ignored.
+  """
+  @spec update_widget(t(), widget_id(), map()) :: t()
   def update_widget(hierarchy, widget_id, new_props) do
     case Map.get(hierarchy.widgets, widget_id) do
       nil ->
@@ -353,10 +368,18 @@ defmodule Drafter.WidgetHierarchy do
   @spec clear_consumed(t()) :: t()
   def clear_consumed(hierarchy), do: %{hierarchy | event_consumed: false}
 
+  @doc "Store `widget_info` under `widget_id`, replacing whatever was there."
+  @spec put_widget(t(), widget_id(), map()) :: t()
   def put_widget(hierarchy, widget_id, widget_info) do
     %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, widget_info)}
   end
 
+  @doc """
+  Replace a widget's info map with `fun.(info)`.
+
+  A widget the hierarchy does not hold is left alone and `fun` is not called.
+  """
+  @spec update_widget_info(t(), widget_id(), (map() -> map())) :: t()
   def update_widget_info(hierarchy, widget_id, fun) do
     case Map.get(hierarchy.widgets, widget_id) do
       nil -> hierarchy
@@ -364,6 +387,14 @@ defmodule Drafter.WidgetHierarchy do
     end
   end
 
+  @doc """
+  Replace a widget's whole state.
+
+  A widget backed by a live server has the state set on it and the hierarchy comes
+  back unchanged; a widget held inline has its cached state replaced. A widget the
+  hierarchy does not hold is ignored.
+  """
+  @spec update_widget_state_in_hierarchy(t(), widget_id(), term()) :: t()
   def update_widget_state_in_hierarchy(hierarchy, widget_id, new_state) do
     case Map.get(hierarchy.widgets, widget_id) do
       nil ->
@@ -379,11 +410,20 @@ defmodule Drafter.WidgetHierarchy do
     end
   end
 
+  @doc """
+  The freshest state for a widget info map.
+
+  Asks the widget's server when it has one, falling back to the cached state if the
+  server cannot answer. Returns the cached state directly for an inline widget.
+  """
+  @spec live_widget_state(map()) :: term()
   def live_widget_state(%{pid: pid, state: cached}) when is_pid(pid),
     do: WidgetServer.safe_get_state(pid) || cached
 
   def live_widget_state(%{state: state}), do: state
 
+  @doc "Snapshot the calling process's session context, as `Drafter.Session.Context.capture/0`."
+  @spec collect_session_pdict() :: %{atom() => pid()}
   def collect_session_pdict, do: Context.capture()
 
   defdelegate focus_widget(hierarchy, widget_id), to: __MODULE__.Focus

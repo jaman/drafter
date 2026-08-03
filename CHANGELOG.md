@@ -3,6 +3,73 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.3.0] - 2026-08-03
+
+Upgrading from 0.2.x: see **Removed** and the first three **Changed** entries. An
+application that only uses `Drafter.App`, the widget constructors and `Drafter.run/2`
+needs no source changes; a custom widget that paints images or declares traits does.
+
+### Added
+
+- **`slider(opts)` widget** — a draggable value slider with a track, a fill and a thumb. Arrow keys move one step, `PageUp`/`PageDown` ten, `Home`/`End` jump to the ends of the range, and a press or drag anywhere on the track moves the thumb there (the gesture keeps tracking once the pointer leaves the widget). Supports `min`/`max`/`step`, `bind:` two-way binding, `on_change`, a label and a formatted readout that reserves the widest value in the range so the track never shifts, `:disabled`, per-part colour overrides, and `:horizontal` / `:vertical` orientation. An integer range keeps integer values; any other range works in floats rounded to the decimals the step implies. `Drafter.get_widget_value/1` and `set_widget_value/2` read and write its number.
+- **Slider rendering through `french_curve`** — `renderer: :braille` draws the rounded track and disc thumb as braille cells, and a graphics protocol (`:auto`, `:pixel`, `:kitty`, `:iterm2`, `:sixel`) transmits it as a picture, falling back to braille where the terminal has none. The default `:text` renderer draws characters from the active skin, which now carries a `slider` glyph group.
+- **A font catalogue for `digits(value, opts)`** — `font:` selects `:block` (7×5 box-drawing outlines, the default), `:compact` (5×3), `:tall` (8×4 half blocks), `:pixel` (4×4 quadrants) or `:braille` (4×4). Every built-in font covers digits, upper and lower case, and common punctuation, so swapping one for another never drops characters, and a character a font cannot draw renders as blanks of the font's widest glyph rather than raising. `Drafter.Widget.Digits.Font` exposes `height/1`, `glyph_width/2`, `text_width/2` and `supports?/2` for laying out around a headline. See the [Large Text guide](guides/large_text.md).
+- **FIGlet fonts in `digits`** — `Drafter.Widget.Digits.Figlet.load/1` reads a `.flf` file and `Drafter.Widget.Digits.Font.register/2` names it, after which `digits("Vellum", font: :slant)` works like any built-in. FIGlet fonts are proportional, so measure with `text_width/2` rather than assuming a cell.
+- **`digits` can render as a transmitted image** with `renderer:`, using the same graphics protocols as charts and sliders.
+- **`31_font_catalogue.exs` and `32_slider.exs` examples.** The `widgets.exs` showcase and the theme sandbox gallery gained sliders too.
+- **`Drafter.Clipboard`** — `copy/2` writes OSC 52 to the terminal the session is attached to, so a copy from an app served over SSH or telnet lands on the *client's* clipboard, and additionally writes the local clipboard through `pbcopy`, `clip`, `wl-copy`, `xclip` or `xsel` when one is on `PATH`. `paste/0` reads the clipboard of the machine the app process runs on. Both are configured by `clipboard:` in `Drafter.run/2` or `config :drafter` — `false` makes them no-ops returning `{:error, :disabled}`, and a keyword list sets the two directions separately (`clipboard: [copy: true, paste: false]`). Key bindings come from `:clipboard_keys`.
+- **A widget receives pasted text** by declaring `handles: [:paste]` and implementing `c:Drafter.Widget.handle_paste/2`.
+- **`Drafter.Pty`** — runs a program on a pseudoterminal and hands its byte stream to the caller. `spawn/2` allocates the pty, starts the program in a new session with the pty as its controlling terminal, and returns a handle whose ports deliver `{:data, bytes}` and `{:exit_status, status}` straight to the calling process, with no relay in between. `write/2` feeds standard input and `resize/3` sets the size, which makes the kernel deliver `SIGWINCH` to the program.
+- **Pluggable character-width tables.** `Drafter.CharacterWidth` measures per grapheme cluster and is the single point every width measurement goes through — strip widths, truncation, wrapping, cursor placement and the compositor's column arithmetic. A host that owns the grid Drafter draws into can supply its own tables with `config :drafter, character_width: MyTables`; the setting is read with `Application.compile_env/3`, so the calls compile to direct dispatch.
+- **`refresh_rate` accepts a frame-rate string** — `"30fps"`, `"7.5fps"`, `"unlimited"`, `:unlimited`, or a millisecond integer, in `Drafter.run/2` or the app's `c:Drafter.App.refresh_rate/0`. Anything else raises `ArgumentError` rather than pacing at a silently wrong rate.
+- **`Drafter.Test.screen_text/1` and `screen_lines/1`** — what is on screen as plain text, so a test can assert on rendered output instead of only on state. `sync/1` blocks until the app has drained what it was sent.
+- **Docking in layout** — a child carrying `dock: :top | :bottom | :left | :right` is taken out of the normal flow and given the full span of that edge; the remaining space is what its undocked siblings share. `footer` docks to the bottom without being asked.
+- **Translucent colours.** A colour may carry an alpha component, which the compositor blends against what is already in the cell rather than replacing it.
+- **`radio_set(options, opts)` takes `:width`**, which fixes the column width when `:cols` lays the options out in a grid.
+- **`c:Drafter.Widget.image_active?/1`** — an optional callback saying whether a widget is painting a transmitted image right now.
+- **`Drafter.Compositor.write_raw/1`** — writes bytes to the terminal through the compositor, so output from an embedded program interleaves with the frame rather than racing it.
+- **`handles: [:click]`** is accepted as a spelling of `handles: [:press]`.
+- **Terminal resize is driven by `SIGWINCH`**, so a window change is picked up as it happens rather than at the next poll.
+- **The terminal is asked what graphics it supports instead of being guessed at.** At startup Drafter writes XTVERSION (`CSI > q`) and primary device attributes (`CSI c`) and reads the answers, which name the terminal and list its features. This settles kitty, iTerm2, WezTerm, ghostty and sixel support from the terminal itself, so it is right under a multiplexer, over ssh and over telnet alike — none of which carry the environment variables a guess depends on. A terminal that answers neither query within 250 ms falls back to the environment as before. `Drafter.Terminal.Probe` performs the exchange; `FrenchCurve.Capability.probe/0` and `from_probe/1` say what to send and what the answers mean.
+- **`Drafter.Session.Context.terminal_env/0` and `terminal_protocol/0`** — the terminal a session is attached to, carried between processes by `capture/0` and `adopt/1` like the rest of the context, and falling back to the host's environment outside a session. `Drafter.run_session/3` sets both from `:terminal_env` and `:terminal_protocol` keys on the session context a transport builds.
+- **Telnet negotiates TERMINAL-TYPE**, so a telnet client's `TERM` is known even when it does not answer the graphics probe. A client that answers neither starts anyway after 250 ms.
+- **Two new guides** — [Large Text](guides/large_text.md), on choosing a `digits` font and how the fonts are built, and [Design Notes](guides/design_notes.md), on how the internals fit together, for anyone writing widgets or changing the framework.
+
+### Changed
+
+- **`header(title, opts)` no longer shows a clock unless asked.** `:show_clock` now defaults to `false`, so a header draws a title and starts no timer of its own. Pass `show_clock: true` for the previous behaviour.
+- **`option_list` draws its `▶` cursor only while focused**, and takes `:focused` as a mount option. Several lists can now sit side by side — arrow keys move between them and the highlight of an unfocused list stays put without competing for the eye. `Drafter.get_widget_state/1` reports the field.
+- **`Drafter.Compositor.put_image/4`** takes the placement map a widget's `image/3` returns (`%{dx:, dy:, cols:, rows:, stamp:, place:}`) instead of nine positional arguments. Custom widgets that transmit images must update their calls.
+- **Widget traits are declared with `use Drafter.Widget, traits: [...]`.** The Spark `traits do ... end` block is gone, and with it Drafter's dependency on a DSL compiler for widget definitions. A widget that used the block moves its trait list into the `use` options.
+- **`use Drafter.App` appends its catch-all `handle_event/2` and `on_timer/2` clauses after a module's own clauses** rather than defining them ahead of an override. A module that already ends with its own catch-all keeps working; one that never wrote a catch-all now falls through to `{:noreply, state}` instead of raising `FunctionClauseError` on the first unnamed key. A module whose own catch-all is followed by more clauses will now see an unreachable-clause warning where the clauses were previously silently dropped.
+- **A widget that draws characters costs nothing on the image path.** The renderer and the widget server ask `Drafter.Widget.image_active?/2` before placing or generating an image, so a chart, gauge, digits or slider in a `:text` or `:braille` mode never enters it. A widget that was painting and stops has its image withdrawn once at the transition rather than re-cleared every frame.
+- **Widget value reads and writes go through `Drafter.WidgetValue`**, so a value read through the app loop and one read directly with `Drafter.get_widget_value/1` always agree.
+- **Per-session services are resolved from the calling process rather than from a global name.** `Drafter.Session.Context` holds the association, with `capture/0` and `adopt/1` for carrying it to another process, and falls back to a globally registered process so a widget can still be rendered outside any session. Concurrent SSH and telnet sessions no longer see each other's widget registrations.
+- **The framework's ETS tables are owned by a supervised process** for the lifetime of the application, so a crash in the process that happened to create one no longer takes the table with it.
+- **Terminal input is buffered across reads**, so an escape sequence split across two reads — common on slow links and under multiplexers — is reassembled instead of being delivered as garbage keys.
+- **`Drafter.Test`'s `send_*` functions block until the app has finished handling the input**, so a send and the assertion after it need no sleep between them.
+- **The API documentation has been rewritten throughout**, covering every public callback, element constructor, option and return value, with executable examples. The README now documents `Drafter.run/2`'s options, the two `handle_event` arities and which events reach each, screen types and their option defaults, selector syntax, and headless testing. Several previously documented behaviours were wrong — notably `Ctrl+C` was never a global quit key; `Ctrl+Q` is, and `Ctrl+C` is delivered to the app and is the copy binding inside text widgets.
+
+### Removed
+
+- **`Drafter.Transport.SSHChannel`.** An unused `:ssh_server_channel` implementation. The ssh transport runs an app through an OTP `shell:` function, which the runtime graphics probe reaches as readily as a custom channel would, so nothing needed it.
+- **`Drafter.TreeDiff`, `Drafter.Widget.DirtyTracker`, `Drafter.Widget.Trait.Dsl` and `Drafter.Visualization.BinarySearch`.** These were internal to render-path bookkeeping and the trait DSL, and nothing replaces them at the call site: fingerprinting and dirty tracking now live in the compositor's per-row cache, and traits are declared in `use Drafter.Widget`.
+
+### Fixed
+
+- **Terminals that speak sixel are detected.** Konsole, foot and mlterm drew braille where they could have drawn images: Drafter carried its own copy of the terminal rules, and that copy knew no sixel terminal at all. Detection now goes through `FrenchCurve.Capability.detect/1`, which also recognises kitty and ghostty from `TERM` alone — a kitty session that does not export `KITTY_WINDOW_ID`, such as one inside a multiplexer, previously fell back to braille.
+- **A remote session detects the connecting client's terminal rather than the host's.** Every ssh and telnet session read the environment of the machine the server runs on, so a server started under a plain shell served braille to every client whatever they were running, and a server started inside kitty sent kitty escape sequences to clients that could not draw them.
+- **Switching a chart off a pixel renderer clears the graphic it already sent**, instead of leaving the old image on screen underneath the new glyphs, where the two appeared to alternate as rows repainted.
+- **Escape sequences in pasted text never reach a widget's buffer.** A paste is sanitized where it is handed to the focused widget, so it applies to `text_input`, `text_area` and `file_picker` as well as to widgets declaring `handles: [:paste]`. Ordinary text and the newlines of a multi-line paste come through unchanged.
+- **A widget rendered into a rect too small to draw in produces strips that fit it rather than raising** — reachable in a narrow split, a collapsed pane, or a small terminal.
+- **A rapid second click is reported as consumed**, so a double click no longer leaks its second half to the widget underneath.
+- **Dragging a `data_table` scrollbar** no longer also selects the row released on, no longer leaves the table stuck in drag mode after a plain click, and clamps at the ends instead of overscrolling. A table dragging its scrollbar captures the pointer, so the drag keeps tracking once the pointer leaves the table.
+- **A scrollbar thumb round-trips**: the row a thumb is drawn at maps back to the offset that drew it, so dragging a thumb no longer drifts against the content.
+- **A hovered `switch` is drawn differently**, rather than only recording that it is hovered.
+- **A widget scrolled entirely off screen is marked invisible**, so it stops transmitting images that would be clipped away.
+- **A slider's `:renderer` can change after mount**, so an app switching render modes at runtime moves its mounted sliders with it.
+- **A telnet session registers its loop while it runs and leaves none behind once it closes**, and the last of several rapid keystrokes reaches the wire.
+
 ## [0.2.11] - 2026-06-29
 
 ### Added

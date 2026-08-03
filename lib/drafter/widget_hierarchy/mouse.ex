@@ -7,6 +7,19 @@ defmodule Drafter.WidgetHierarchy.Mouse do
   alias Drafter.WidgetHierarchy.HitTest
   alias Drafter.WidgetHierarchy.Scroll
 
+  @type hierarchy :: WidgetHierarchy.t()
+  @type widget_id :: WidgetHierarchy.widget_id()
+  @type mouse_event :: map()
+  @type result :: {hierarchy(), list()}
+
+  @doc """
+  Route a mouse event, honouring an in-progress drag capture.
+
+  While a widget holds drag capture, `:drag` and `:mouse_up` events go to it
+  regardless of where the pointer is, and `:mouse_up` releases the capture. Anything
+  else falls through to `handle_mouse_event_normal/2`.
+  """
+  @spec handle_mouse_event(hierarchy(), mouse_event()) :: result()
   def handle_mouse_event(hierarchy, mouse_event) do
     case {mouse_event.type, hierarchy.drag_capture_widget} do
       {:drag, capture_id} when capture_id != nil ->
@@ -26,6 +39,16 @@ defmodule Drafter.WidgetHierarchy.Mouse do
     end
   end
 
+  @doc """
+  Route a mouse event by hit-testing the pointer position.
+
+  Updates hover state first, then dispatches to the widget under the pointer with
+  coordinates made relative to it. A `:scroll` event landing on no widget is offered
+  to the enclosing scroll container. Any other event landing on no widget, or an
+  event type this function does not name, leaves the hierarchy untouched with no
+  actions.
+  """
+  @spec handle_mouse_event_normal(hierarchy(), mouse_event()) :: result()
   def handle_mouse_event_normal(hierarchy, mouse_event) do
     target_widget = HitTest.find_widget_at(hierarchy, mouse_event.x, mouse_event.y)
 
@@ -66,6 +89,13 @@ defmodule Drafter.WidgetHierarchy.Mouse do
     end
   end
 
+  @doc """
+  Send `mouse_event` to the scroll container under the pointer, if there is one.
+
+  The event keeps screen coordinates here; it is not made relative. Returns the
+  hierarchy unchanged with no actions when no container is found.
+  """
+  @spec dispatch_to_scroll_container(hierarchy(), mouse_event()) :: result()
   def dispatch_to_scroll_container(hierarchy, mouse_event) do
     case Scroll.find_scroll_container_at(hierarchy, mouse_event.x, mouse_event.y) do
       nil ->
@@ -76,6 +106,14 @@ defmodule Drafter.WidgetHierarchy.Mouse do
     end
   end
 
+  @doc """
+  Handle a release over `widget_id`.
+
+  Ctrl-release toggles the scroll lock at that position instead and dispatches
+  nothing. Otherwise scroll locks elsewhere are cleared, the widget takes focus, and
+  it receives the event in widget-relative coordinates.
+  """
+  @spec handle_mouse_up(hierarchy(), widget_id(), mouse_event()) :: result()
   def handle_mouse_up(hierarchy, widget_id, mouse_event) do
     if :ctrl in Map.get(mouse_event, :mods, []) do
       {Scroll.toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y), []}
@@ -87,6 +125,13 @@ defmodule Drafter.WidgetHierarchy.Mouse do
     end
   end
 
+  @doc """
+  Handle a press over `widget_id`.
+
+  As `handle_mouse_up/3`, and additionally takes drag capture when the widget's state
+  reports a gesture starting.
+  """
+  @spec handle_mouse_down(hierarchy(), widget_id(), mouse_event()) :: result()
   def handle_mouse_down(hierarchy, widget_id, mouse_event) do
     if :ctrl in Map.get(mouse_event, :mods, []) do
       {Scroll.toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y), []}
@@ -110,6 +155,7 @@ defmodule Drafter.WidgetHierarchy.Mouse do
   otherwise. The gesture flags are read both as flat fields and from a `:drag`
   map, whichever shape the widget uses.
   """
+  @spec maybe_start_drag_capture(hierarchy(), widget_id(), map() | nil) :: hierarchy()
   def maybe_start_drag_capture(hierarchy, widget_id, widget_state) do
     if gesture_in_progress?(widget_state) do
       %{hierarchy | drag_capture_widget: widget_id}
@@ -135,6 +181,12 @@ defmodule Drafter.WidgetHierarchy.Mouse do
 
   defp dragging_fields?(_fields), do: false
 
+  @doc """
+  Rewrite a mouse event's `:x`/`:y` to be relative to `widget_id`'s top-left corner.
+
+  Returns the event unchanged when the hierarchy has no rect for that widget.
+  """
+  @spec make_relative_mouse_event(hierarchy(), widget_id(), mouse_event()) :: mouse_event()
   def make_relative_mouse_event(hierarchy, widget_id, mouse_event) do
     case Map.get(hierarchy.widget_rects, widget_id) do
       nil ->
@@ -151,6 +203,13 @@ defmodule Drafter.WidgetHierarchy.Mouse do
     end
   end
 
+  @doc """
+  Where `virtual_rect`'s top-left corner actually sits on screen, as `{x, y}`.
+
+  A widget inside a scroll container is shifted up by that container's vertical
+  scroll offset. Horizontal scrolling is not applied.
+  """
+  @spec widget_screen_position(hierarchy(), widget_id(), map()) :: {integer(), integer()}
   def widget_screen_position(hierarchy, widget_id, virtual_rect) do
     case Map.get(hierarchy.widget_scroll_parents, widget_id) do
       nil ->
@@ -163,6 +222,14 @@ defmodule Drafter.WidgetHierarchy.Mouse do
     end
   end
 
+  @doc """
+  Move hover from whichever widget had it to `target_widget`.
+
+  Sends `:unhover` to the previous widget and `:hover` to the new one. Actions those
+  handlers return are discarded. Returns the hierarchy unchanged when hover has not
+  moved.
+  """
+  @spec update_hover_state(hierarchy(), widget_id() | nil) :: hierarchy()
   def update_hover_state(hierarchy, target_widget) do
     prev_hover = hierarchy.hover_widget
 
@@ -183,6 +250,12 @@ defmodule Drafter.WidgetHierarchy.Mouse do
     end
   end
 
+  @doc """
+  Send `:hover` to `target_widget`, or do nothing when it is `nil`.
+
+  Actions the handler returns are discarded.
+  """
+  @spec send_hover_if_target(hierarchy(), widget_id() | nil) :: hierarchy()
   def send_hover_if_target(hierarchy, nil), do: hierarchy
 
   def send_hover_if_target(hierarchy, target_widget) do

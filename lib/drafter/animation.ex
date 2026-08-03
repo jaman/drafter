@@ -47,18 +47,34 @@ defmodule Drafter.Animation do
   @default_frame_rate 60
   @frame_duration div(1000, @default_frame_rate)
 
+  @doc """
+  Start the animation server, registered under this module's name.
+
+  One runs per node, started by `Drafter.Application`. `opts` are accepted and
+  discarded; the tick rate is fixed at 60 fps.
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
   @doc """
-  Start an animation on a widget property.
+  Animate `property` of the widget with id `widget_id` towards `end_value`.
 
-  ## Options
+  The starting value is the widget's current value for that property. Numbers are
+  interpolated numerically, `{r, g, b}` tuples channel by channel, and any other
+  value switches at the end of the duration.
 
-  - `:duration` - Animation duration in milliseconds (default: 300)
-  - `:easing` - Easing function atom (default: :ease_out)
-  - `:on_complete` - Callback function when animation finishes
+  Options:
+
+    * `:duration` — milliseconds the animation runs for, default `300`
+    * `:easing` — one of the easing atoms listed in the module documentation,
+      default `:ease_out`
+    * `:on_complete` — zero-argument function called once the animation finishes;
+      not called when the animation is stopped early
+
+  Returns a reference identifying the animation, which `stop/1` takes. Starting a
+  second animation for the same widget and property leaves the first running.
   """
   @spec animate(atom(), atom(), any(), keyword()) :: reference()
   def animate(widget_id, property, end_value, opts \\ []) do
@@ -77,32 +93,33 @@ defmodule Drafter.Animation do
   end
 
   @doc """
-  Stop an animation.
+  Stop the animation started by the call that returned `animation_id`.
+
+  The property keeps whatever value it had reached and `:on_complete` is not run.
+  An unknown reference is ignored. Asynchronous.
   """
   @spec stop(reference()) :: :ok
   def stop(animation_id) do
     GenServer.cast(__MODULE__, {:stop, animation_id})
   end
 
-  @doc """
-  Stop all animations for a widget.
-  """
+  @doc "Stop every running animation for `widget_id`, as `stop/1` does for one. Asynchronous."
   @spec stop_all(atom()) :: :ok
   def stop_all(widget_id) do
     GenServer.cast(__MODULE__, {:stop_all, widget_id})
   end
 
-  @doc """
-  Get all active animations for a widget.
-  """
+  @doc "The animations currently running for `widget_id`, or `[]` if it has none."
   @spec get_animations(atom()) :: [animation()]
   def get_animations(widget_id) do
     GenServer.call(__MODULE__, {:get_animations, widget_id})
   end
 
   @doc """
-  Get current animated value for a property.
-  Returns {:ok, value} if animation exists, :none otherwise.
+  The value `property` has reached in the animation running for `widget_id`.
+
+  Returns `{:ok, value}`, or `:none` when no animation is running for that widget
+  and property.
   """
   @spec get_value(atom(), atom()) :: {:ok, any()} | :none
   def get_value(widget_id, property) do
@@ -110,8 +127,10 @@ defmodule Drafter.Animation do
   end
 
   @doc """
-  Apply all active animations to widget states.
-  Called by render loop.
+  Advance every running animation by one frame immediately.
+
+  The server already ticks itself at 60 fps; calling this only brings the next
+  frame forward. Asynchronous.
   """
   @spec tick() :: :ok
   def tick do

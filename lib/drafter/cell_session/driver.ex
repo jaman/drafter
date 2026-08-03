@@ -1,11 +1,11 @@
 defmodule Drafter.CellSession.Driver do
   @moduledoc """
-  A terminal driver that holds a size and discards ANSI output.
+  A terminal driver that holds a screen size and discards everything written to it.
 
-  `Drafter.CellSession` reads the composited cell grid straight from the Compositor's
-  buffer, so the encoded ANSI stream is not needed — this driver satisfies the
-  Compositor's `write/2` + `get_size/1` contract while throwing the bytes away, and
-  lets the session resize the virtual surface.
+  Satisfies the `write/2` and `get_size/1` contract `Drafter.Compositor` requires of
+  a terminal driver. `Drafter.CellSession` reads the composited cell grid out of the
+  compositor's buffer directly and never needs the encoded ANSI stream, so the bytes
+  passed to `write/2` are dropped. `set_size/2` resizes the virtual surface.
   """
 
   use GenServer

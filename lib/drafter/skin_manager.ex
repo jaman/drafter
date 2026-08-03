@@ -33,6 +33,18 @@ defmodule Drafter.SkinManager do
 
   defstruct current_skin: @default_skin, app_pid: nil
 
+  @doc """
+  Start a skin manager.
+
+  ## Options
+
+    * `:name` - registered name. Default: `nil`, which starts it unnamed. Note this
+      differs from `Drafter.ThemeManager.start_link/1`, which defaults to its own
+      module name.
+
+  Any other options are accepted and ignored; the starting skin is always
+  `:graphical`.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, nil)
@@ -40,7 +52,13 @@ defmodule Drafter.SkinManager do
     GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
-  @doc "Returns the currently active skin atom."
+  @doc """
+  The active skin atom.
+
+  Reads the calling process's own `:drafter_skin` first, then asks its session's skin
+  manager, and finally falls back to `:graphical` when neither is set. Never raises,
+  unlike `set_skin/1` and `register_app/1`.
+  """
   @spec get_current_skin() :: atom()
   def get_current_skin do
     case Process.get(:drafter_skin) do
@@ -55,7 +73,13 @@ defmodule Drafter.SkinManager do
     end
   end
 
-  @doc "Switches the active skin. Triggers a re-render on the registered app."
+  @doc """
+  Switch the active skin, sending `{:skin_updated, skin}` to the registered app.
+
+  Asynchronous. Any atom is accepted, including one `available_skins/0` does not
+  list; character lookups then fall back to the built-in defaults. Resolved through
+  `Drafter.Session.Context`, so it raises when no skin manager is reachable.
+  """
   @spec set_skin(atom()) :: :ok
   def set_skin(skin) when is_atom(skin) do
     GenServer.cast(resolve(), {:set_skin, skin})
@@ -65,7 +89,12 @@ defmodule Drafter.SkinManager do
   @spec available_skins() :: [atom()]
   def available_skins, do: CharacterSet.skins()
 
-  @doc "Registers the app loop PID to receive `{:skin_updated, skin}` messages."
+  @doc """
+  Register the app loop process to receive `{:skin_updated, skin}` messages.
+
+  Only one process is registered at a time; registering again replaces the previous
+  one. Asynchronous.
+  """
   @spec register_app(pid()) :: :ok
   def register_app(app_pid) do
     GenServer.cast(resolve(), {:register_app, app_pid})

@@ -2,31 +2,84 @@ defmodule Drafter.Widget.OptionList do
   @moduledoc """
   A scrollable, single-selection list widget with keyboard, mouse, and scroll wheel navigation.
 
-  Each option is rendered as a row with a `▶` highlight prefix on the currently focused item.
+  Each option is rendered as a row, and while the widget is focused the highlighted
+  row carries a `▶` prefix. An unfocused list draws no prefix, so several lists can
+  sit side by side with only the focused one showing a cursor.
   Disabled options are skipped during keyboard navigation. Mouse wheel scrolling is
   throttle-limited via `:scroll_throttle_ms` to prevent excessively fast navigation.
 
-  Options are created with `option/3` and passed as a list to `:options`.
+  An option is a map with `:id`, `:label`, `:selected` and `:disabled` keys.
+  `option/3` builds one; `mount/1` takes options in that form only.
+
+  ## Component tag
+
+  Tag `:option_list`, built by `Drafter.App` as `{:option_list, items, opts}`:
+
+      option_list(items, opts)
+
+  The positional `items` list supplies the options, falling back to `opts[:options]`
+  when it is empty. `from_component_opts/2` normalises each entry, so through the
+  element an option may be given as a `{label, id}` tuple, a plain string used as
+  both id and label, or a map containing `:id`. `:visible_height` defaults to the
+  height of the rect the parent allocated.
 
   ## Options
 
-    * `:options` - list of option maps created via `Drafter.Widget.OptionList.option/3`
-    * `:visible_height` - number of rows to display (default: `10`)
-    * `:expand_height` - height expansion behaviour: `:content` (fit to options, default),
-      `:fill` (expand to available height), or an integer row count
-    * `:on_select` - `(option -> term())` called when an option is confirmed via Enter or click
-    * `:on_highlight` - `(option -> term())` called when the highlighted option changes
-    * `:scroll_throttle_ms` - minimum milliseconds between scroll events (default: `150`)
-    * `:inverted_scroll` - when `true`, scrolling up moves down and vice versa (default: `false`)
+    * `:options` - list of option maps, used when no positional `items` are given.
+      Default `[]`. `mount/1` needs each entry to carry `:disabled` already, so
+      build them with `option/3`; `from_component_opts/2` normalises looser forms.
+    * `:selected` - id of the option to mark selected and highlight initially.
+      Default `nil`, which highlights index `0`. Read by `from_component_opts/2`
+      only — `mount/1` ignores both it and the `:highlighted_index` that function
+      computes, and highlights the first enabled option instead.
+    * `:visible_height` - `t:pos_integer/0` rows the scroll logic works with.
+      Default `10` when mounting directly, and the height of `opts[:__rect__]`
+      through the element, itself defaulting to `%{width: 40, height: 10}`.
+    * `:expand_height` - `:content | :fill | pos_integer()`. Default `:content`,
+      which draws `min(option_count, visible_height)` rows; `:fill` draws
+      `rect.height` rows and an integer draws exactly that many.
+    * `:on_select` - atom event name or `(option -> term())` called when an option
+      is confirmed with `enter`, `space` or the mouse. Default `nil`. An atom is
+      wrapped so that the app event carries the option's `:id`, not the whole map.
+    * `:on_highlight` - atom event name or `(option -> term())` called when the
+      highlighted option changes, wrapped the same way. Default `nil`.
+    * `:scroll_throttle_ms` - `t:non_neg_integer/0` minimum milliseconds between
+      wheel steps. Default `150`. The first wheel event is never throttled.
+    * `:inverted_scroll` - `t:boolean/0`; when `true`, scrolling up moves the
+      highlight down and vice versa. Default `false`.
+    * `:trigger` - `:press | :mouse_up`, the mouse event that confirms a
+      selection. Default `:press`. The other event bubbles.
+    * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`. Only a focused
+      list draws the `▶` prefix; `{:focus}` and `{:blur}` maintain it, and
+      `update_props_from_mount/3` leaves it alone so focus survives a re-render.
+
+  `update/2` merges `props` into the state verbatim, so any key at all can be set
+  through it. Through the component tree `update_props_from_mount/3` narrows a
+  re-render to `:options`, `:visible_height`, `:on_select`, `:on_highlight`,
+  `:trigger` and `:classes`, adding `:highlighted_index` only when the selected
+  option's id actually changed — so `:expand_height`, `:scroll_throttle_ms` and
+  `:inverted_scroll` are mount-only.
 
   ## Key bindings
 
-    * `↑` / `↓` — move highlight one step
-    * `Home` / `End` — jump to first/last enabled option
-    * `Page Up` / `Page Down` — jump by `:visible_height` rows
-    * `Enter` / `Space` — confirm selection and call `:on_select`
-    * Mouse click — confirm selection on the clicked row
-    * Mouse scroll — move highlight one step up or down
+    * `up` / `down` — move the highlight to the next enabled option, bubbling when
+      there is none
+    * `home` / `end` — jump to the first or last enabled option
+    * `page_up` / `page_down` — jump by `:visible_height` rows
+    * `enter` / `space` — confirm the highlighted option and call `:on_select`
+    * mouse press or release, per `:trigger` — confirm the option on that row
+    * mouse wheel — move the highlight one enabled option up or down
+
+  A change that fires `:on_highlight` or `:on_select` returns
+  `{:ok, state, actions}`, where each action is the value that callback returned.
+
+  ## Widget value
+
+  This widget's state has both `:selected_index` and `:options`, so
+  `Drafter.get_widget_value/1` returns the id of the selected option. `mount/1`
+  leaves `:selected_index` as `nil` until something is confirmed, and that raises
+  `FunctionClauseError`; read `Drafter.get_widget_state/1` and its
+  `:highlighted_index` when a selection is not guaranteed.
 
   ## Usage
 
@@ -62,7 +115,8 @@ defmodule Drafter.Widget.OptionList do
     :scroll_throttle_ms,
     :inverted_scroll,
     :expand_height,
-    trigger: :press
+    trigger: :press,
+    focused: false
   ]
 
   @type option :: %{
@@ -84,9 +138,27 @@ defmodule Drafter.Widget.OptionList do
           scroll_throttle_ms: integer(),
           inverted_scroll: boolean(),
           expand_height: Drafter.Widget.expand_option(),
-          trigger: :press | :mouse_up
+          trigger: :press | :mouse_up,
+          focused: boolean()
         }
 
+  @doc """
+  Builds a single option map for the `:options` list.
+
+  `id` is the value handed to `:on_select` and `:on_highlight`; `label` is the
+  text drawn in the row. Both must be binaries. A `disabled` option is drawn but
+  skipped by keyboard navigation and cannot be selected.
+
+  Returns a map with `:id`, `:label`, `:disabled` and `:selected`, where
+  `:selected` starts as `false`.
+
+      iex> Drafter.Widget.OptionList.option("two", "Option Two")
+      %{id: "two", label: "Option Two", disabled: false, selected: false}
+
+      iex> Drafter.Widget.OptionList.option("three", "Option Three", true)
+      %{id: "three", label: "Option Three", disabled: true, selected: false}
+  """
+  @spec option(String.t(), String.t(), boolean()) :: option()
   def option(id, label, disabled \\ false)
       when is_binary(id) and is_binary(label) and is_boolean(disabled) do
     %{
@@ -97,6 +169,32 @@ defmodule Drafter.Widget.OptionList do
     }
   end
 
+  @doc """
+  Builds the widget state from `props`.
+
+  Every option listed in the module doc is read here with the default stated there,
+  except `:selected` and `:highlighted_index`, which are ignored: the highlight
+  always starts on the first option whose `:disabled` is falsy, and is `nil` for an
+  empty or fully disabled list. `:selected_index`, `:scroll_offset` and
+  `:last_scroll_time` all start at their zero values.
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options})
+      iex> {state.highlighted_index, state.selected_index, state.visible_height}
+      {0, nil, 10}
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A", true), Drafter.Widget.OptionList.option("b", "B")]
+      iex> Drafter.Widget.OptionList.mount(%{options: options}).highlighted_index
+      1
+
+      iex> state = Drafter.Widget.OptionList.mount(%{})
+      iex> {state.highlighted_index, state.expand_height, state.trigger, state.scroll_throttle_ms}
+      {nil, :content, :press, 150}
+
+      iex> Drafter.Widget.OptionList.mount(%{focused: true}).focused
+      true
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     options = Map.get(props, :options, [])
@@ -107,6 +205,7 @@ defmodule Drafter.Widget.OptionList do
     inverted_scroll = Map.get(props, :inverted_scroll, false)
     expand_height = Map.get(props, :expand_height, :content)
     trigger = Map.get(props, :trigger, :press)
+    focused = Map.get(props, :focused, false)
 
     highlighted_index = find_first_enabled(options)
 
@@ -122,10 +221,21 @@ defmodule Drafter.Widget.OptionList do
       scroll_throttle_ms: scroll_throttle_ms,
       inverted_scroll: inverted_scroll,
       expand_height: expand_height,
-      trigger: trigger
+      trigger: trigger,
+      focused: focused
     }
   end
 
+  @doc """
+  Draws the visible slice of the list into `rect`.
+
+  The number of strips comes from `:expand_height`, not from `rect.height`:
+  `:content` gives `min(option_count, visible_height)`, `:fill` gives
+  `rect.height`, and an integer gives itself. Rows start at `:scroll_offset`, each
+  is truncated and padded to `rect.width`, and the highlighted row is prefixed with
+  `▶` when `:focused` is true.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     actual_height =
@@ -162,6 +272,38 @@ defmodule Drafter.Widget.OptionList do
     end
   end
 
+  @doc """
+  Moves the highlight or confirms the highlighted option.
+
+  Handles `:up`, `:down`, `:home`, `:end`, `:page_up`, `:page_down`, `:enter` and
+  `:" "`; every other key returns `{:bubble, state}`. `:up` and `:down` bubble when
+  there is no further enabled option, while `:home` and `:end` return
+  `{:noreply, state}` when the list has none at all. A move that fires a callback
+  returns `{:ok, state, actions}`.
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A"), Drafter.Widget.OptionList.option("b", "B")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options})
+      iex> {:ok, moved} = Drafter.Widget.OptionList.handle_key(:down, state)
+      iex> {moved.highlighted_index, moved.selected_index}
+      {1, nil}
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options})
+      iex> Drafter.Widget.OptionList.handle_key(:up, state) == {:bubble, state}
+      true
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options})
+      iex> {:ok, chosen} = Drafter.Widget.OptionList.handle_key(:enter, state)
+      iex> chosen.selected_index
+      0
+
+      iex> state = Drafter.Widget.OptionList.mount(%{})
+      iex> Drafter.Widget.OptionList.handle_key(:x, state) == {:bubble, state}
+      true
+  """
+  @spec handle_key(atom(), t()) ::
+          {:ok, t()} | {:ok, t(), list()} | {:bubble, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_key(:up, state), do: action_cursor_up(state)
   def handle_key(:down, state), do: action_cursor_down(state)
@@ -173,6 +315,27 @@ defmodule Drafter.Widget.OptionList do
   def handle_key(:" ", state), do: action_select_highlighted(state)
   def handle_key(_key, state), do: {:bubble, state}
 
+  @doc """
+  Confirms the option on row `y` when `:trigger` is `:press`, and returns
+  `{:bubble, state}` otherwise.
+
+  `y` is relative to the widget's rect and is offset by `:scroll_offset` to find
+  the option. A row outside the list, or one holding a disabled option, returns
+  `{:noreply, state}`. `x` is ignored.
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A"), Drafter.Widget.OptionList.option("b", "B")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options})
+      iex> {:ok, clicked} = Drafter.Widget.OptionList.handle_press(0, 1, state)
+      iex> {clicked.highlighted_index, clicked.selected_index}
+      {1, 1}
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options, trigger: :mouse_up})
+      iex> Drafter.Widget.OptionList.handle_press(0, 0, state) == {:bubble, state}
+      true
+  """
+  @spec handle_press(integer(), integer(), t()) ::
+          {:ok, t()} | {:ok, t(), list()} | {:bubble, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_press(_x, y, state) do
     if state.trigger == :press do
@@ -183,6 +346,23 @@ defmodule Drafter.Widget.OptionList do
     end
   end
 
+  @doc """
+  Confirms the option on row `y` when `:trigger` is `:mouse_up`, and returns
+  `{:bubble, state}` otherwise. Otherwise identical to `handle_press/3`.
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options, trigger: :mouse_up})
+      iex> {:ok, clicked} = Drafter.Widget.OptionList.handle_mouse_up(0, 0, state)
+      iex> clicked.selected_index
+      0
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options})
+      iex> Drafter.Widget.OptionList.handle_mouse_up(0, 0, state) == {:bubble, state}
+      true
+  """
+  @spec handle_mouse_up(integer(), integer(), t()) ::
+          {:ok, t()} | {:ok, t(), list()} | {:bubble, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_mouse_up(_x, y, state) do
     if state.trigger == :mouse_up do
@@ -193,11 +373,38 @@ defmodule Drafter.Widget.OptionList do
     end
   end
 
+  @doc """
+  Moves the highlight one enabled option per wheel step.
+
+  `direction` is `:up` or `:down`, swapped when `:inverted_scroll` is set. Steps
+  arriving less than `:scroll_throttle_ms` after the previous one return
+  `{:noreply, state}` with only the timestamp updated; the first step after mount
+  is never throttled. `:last_scroll_time` is stamped from
+  `System.system_time(:millisecond)`.
+  """
+  @spec handle_scroll(:up | :down, t()) ::
+          {:ok, t()} | {:ok, t(), list()} | {:bubble, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_scroll(direction, state) do
     handle_scroll_event(state, direction)
   end
 
+  @doc """
+  Confirms the highlighted option on `:activate`, exactly as `enter` does, and
+  returns `{:bubble, state}` for every other custom event.
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options})
+      iex> {:ok, chosen} = Drafter.Widget.OptionList.handle_custom_event(:activate, state)
+      iex> chosen.selected_index
+      0
+
+      iex> state = Drafter.Widget.OptionList.mount(%{})
+      iex> Drafter.Widget.OptionList.handle_custom_event(:something, state) == {:bubble, state}
+      true
+  """
+  @spec handle_custom_event(term(), t()) ::
+          {:ok, t()} | {:ok, t(), list()} | {:bubble, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_custom_event(:activate, state) do
     action_select_highlighted(state)
@@ -205,6 +412,15 @@ defmodule Drafter.Widget.OptionList do
 
   def handle_custom_event(_event, state), do: {:bubble, state}
 
+  @doc """
+  Routes an event, taking `{:focus}` itself and delegating everything else to the
+  dispatch `use Drafter.Widget` generated.
+
+  `{:focus}` moves the highlight onto the first enabled option when there is none
+  yet, and sets `:focused` on the state. `{:blur}` reaches the generated dispatch,
+  which clears the same field.
+  """
+  @spec handle_event(term(), t()) :: term()
   @impl Drafter.Widget
   def handle_event({:focus}, state) do
     new_state =
@@ -217,22 +433,80 @@ defmodule Drafter.Widget.OptionList do
         state
       end
 
-    {:ok, Map.put(new_state, :focused, true)}
+    {:ok, %{new_state | focused: true}}
   end
 
   def handle_event(event, state) do
     super(event, state)
   end
 
+  @doc """
+  Merges `props` into `state` verbatim.
+
+  Every key in `props` lands on the state as given, including keys the struct does
+  not declare and `:options` entries that have not been normalised.
+
+      iex> options = [Drafter.Widget.OptionList.option("a", "A")]
+      iex> state = Drafter.Widget.OptionList.mount(%{options: options})
+      iex> Drafter.Widget.OptionList.update(%{visible_height: 4}, state).visible_height
+      4
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     Map.merge(state, props)
   end
 
+  @doc """
+  The number of rows the element asks for.
+
+  Returns `opts[:height]` when given, otherwise the length of the positional items
+  list — which is `0` when the options were passed under `opts[:options]` instead.
+
+      iex> Drafter.Widget.OptionList.preferred_height(["a", "b"], [])
+      2
+
+      iex> Drafter.Widget.OptionList.preferred_height(nil, options: ["a"])
+      0
+
+      iex> Drafter.Widget.OptionList.preferred_height(nil, height: 6)
+      6
+  """
+  @spec preferred_height(list() | nil, keyword()) :: non_neg_integer()
   def preferred_height(args, opts), do: Keyword.get(opts, :height, length(args || []))
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.OptionList.component_tag()
+      :option_list
+  """
+  @spec component_tag() :: :option_list
   def component_tag, do: :option_list
 
+  @doc """
+  Builds the props map for an `{:option_list, items, opts}` element.
+
+  `items` is used when it is a non-empty list, otherwise `opts[:options]`,
+  defaulting to `[]`. Each entry is normalised: a `{label, id}` tuple, a plain
+  string used as both id and label, or a map already carrying `:id`, which keeps
+  its own `:selected` and `:disabled` when it has them. The option whose id matches
+  `:selected` is marked selected.
+
+  `:on_select` and `:on_highlight` given as atoms are wrapped so the app event
+  carries the option's `:id`; given as functions they are passed through and
+  receive the whole option map. The emitted `:highlighted_index` and `:classes`
+  keys are not read by `mount/1`.
+
+      iex> props = Drafter.Widget.OptionList.from_component_opts([{"A", "a"}, "b"], selected: "b")
+      iex> props.options
+      [%{id: "a", label: "A", selected: false, disabled: false}, %{id: "b", label: "b", selected: true, disabled: false}]
+
+      iex> props = Drafter.Widget.OptionList.from_component_opts(["a", "b"], selected: "b")
+      iex> {props.highlighted_index, props.visible_height, props.trigger}
+      {1, 10, :press}
+  """
+  @spec from_component_opts(list() | nil, keyword()) :: Drafter.Widget.props()
   def from_component_opts(items, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
@@ -275,6 +549,26 @@ defmodule Drafter.Widget.OptionList do
     }
   end
 
+  @doc """
+  Narrows a re-render to `:options`, `:visible_height`, `:on_select`,
+  `:on_highlight`, `:trigger` and `:classes`, adding `:highlighted_index` only when
+  the id of the selected option changed.
+
+  `:expand_height`, `:scroll_throttle_ms` and `:inverted_scroll` are dropped, so
+  they are mount-only through the component tree, and the highlight the user moved
+  survives a re-render that does not change the selection.
+
+      iex> props = Drafter.Widget.OptionList.from_component_opts(["a", "b"], [])
+      iex> state = Drafter.Widget.OptionList.mount(props)
+      iex> Drafter.Widget.OptionList.update_props_from_mount(props, state, []) |> Map.keys() |> Enum.sort()
+      [:classes, :on_highlight, :on_select, :options, :trigger, :visible_height]
+
+      iex> props = Drafter.Widget.OptionList.from_component_opts(["a", "b"], selected: "b")
+      iex> state = Drafter.Widget.OptionList.mount(Drafter.Widget.OptionList.from_component_opts(["a", "b"], []))
+      iex> Drafter.Widget.OptionList.update_props_from_mount(props, state, []).highlighted_index
+      1
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, existing_state, _opts) do
     current_selected = Enum.find(existing_state.options, fn o -> o.selected end)
     new_selected = Enum.find(mount_props.options, fn o -> o.selected end)
@@ -404,7 +698,7 @@ defmodule Drafter.Widget.OptionList do
   end
 
   defp render_option(state, option, index, rect) do
-    is_highlighted = index == state.highlighted_index
+    is_highlighted = index == state.highlighted_index and state.focused
     is_selected = index == state.selected_index
 
     item_state = %{

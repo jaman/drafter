@@ -2,6 +2,7 @@ defmodule Drafter.Regression.CompositorImageTest do
   use ExUnit.Case, async: false
 
   alias Drafter.{Compositor, Event}
+  alias Drafter.Draw.Strip
 
   defmodule Cap do
     def start, do: Agent.start_link(fn -> [] end)
@@ -38,7 +39,7 @@ defmodule Drafter.Regression.CompositorImageTest do
   end
 
   test "paints an image that fits on screen and clears it via the clear sequence", %{cap: cap} do
-    Compositor.put_image(:chart, "PAINTBYTES", "DELETESEQ", 0, 0, 6, 2)
+    Compositor.put_image(:chart, "PAINTBYTES", "DELETESEQ", %{dx: 0, dy: 0, cols: 6, rows: 2})
     Compositor.place_image(:chart, 3, 5)
     assert poll(cap, &String.contains?(&1, "PAINTBYTES"))
 
@@ -48,14 +49,14 @@ defmodule Drafter.Regression.CompositorImageTest do
   end
 
   test "never paints an image whose box falls below the screen", %{cap: cap} do
-    Compositor.put_image(:offchart, "OFFSCREEN_IMG", "", 0, 0, 6, 4)
+    Compositor.put_image(:offchart, "OFFSCREEN_IMG", "", %{dx: 0, dy: 0, cols: 6, rows: 4})
     Compositor.place_image(:offchart, 0, 22)
 
     refute String.contains?(settled(cap), "OFFSCREEN_IMG")
   end
 
   test "never paints an image whose box runs past the right edge", %{cap: cap} do
-    Compositor.put_image(:wide, "WIDE_IMG", "", 0, 0, 10, 2)
+    Compositor.put_image(:wide, "WIDE_IMG", "", %{dx: 0, dy: 0, cols: 10, rows: 2})
     Compositor.place_image(:wide, 75, 1)
 
     refute String.contains?(settled(cap), "WIDE_IMG")
@@ -65,50 +66,64 @@ defmodule Drafter.Regression.CompositorImageTest do
     cap: cap
   } do
     Compositor.place_image(:anim, 2, 4)
-    Compositor.put_image(:anim, "FRAME_FIVE", "DEL", 0, 0, 6, 2, 5)
+    Compositor.put_image(:anim, "FRAME_FIVE", "DEL", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 5})
     assert poll(cap, &String.contains?(&1, "FRAME_FIVE"))
 
     Cap.clear(cap)
-    Compositor.put_image(:anim, "STALE_THREE", "DEL", 0, 0, 6, 2, 3)
+    Compositor.put_image(:anim, "STALE_THREE", "DEL", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 3})
     refute String.contains?(settled(cap), "STALE_THREE")
 
     Cap.clear(cap)
-    Compositor.put_image(:anim, "SAME_FIVE", "DEL", 0, 0, 6, 2, 5)
+    Compositor.put_image(:anim, "SAME_FIVE", "DEL", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 5})
     refute String.contains?(settled(cap), "SAME_FIVE")
 
     Cap.clear(cap)
-    Compositor.put_image(:anim, "FRESH_SEVEN", "DEL", 0, 0, 6, 2, 7)
+    Compositor.put_image(:anim, "FRESH_SEVEN", "DEL", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 7})
     assert poll(cap, &String.contains?(&1, "FRESH_SEVEN"))
   end
 
   test "redraws an unchanged image with its place sequence when text crosses it", %{cap: cap} do
-    Compositor.put_image(:field, "FULL_IMAGE", "DEL", 0, 0, 6, 2, 1, "PLACE_ONLY")
+    Compositor.put_image(:field, "FULL_IMAGE", "DEL", %{
+      dx: 0,
+      dy: 0,
+      cols: 6,
+      rows: 2,
+      stamp: 1,
+      place: "PLACE_ONLY"
+    })
+
     Compositor.place_image(:field, 0, 4)
     assert poll(cap, &String.contains?(&1, "FULL_IMAGE"))
 
-    # A text row under the image is rewritten, so the image has to be drawn over it again — but
-    # the image itself has not changed, and the terminal is still holding it.
     Cap.clear(cap)
-    Compositor.render_strips([Drafter.Draw.Strip.from_text("text over the image")], 0, 4)
+    Compositor.render_strips([Strip.from_text("text over the image")], 0, 4)
 
     assert poll(cap, &String.contains?(&1, "PLACE_ONLY"))
     refute String.contains?(settled(cap), "FULL_IMAGE")
   end
 
   test "sends the whole image again when there is no place sequence", %{cap: cap} do
-    Compositor.put_image(:sixel, "PIXEL_BYTES", "", 0, 0, 6, 2, 1, nil)
+    Compositor.put_image(:sixel, "PIXEL_BYTES", "", %{
+      dx: 0,
+      dy: 0,
+      cols: 6,
+      rows: 2,
+      stamp: 1,
+      place: nil
+    })
+
     Compositor.place_image(:sixel, 0, 4)
     assert poll(cap, &String.contains?(&1, "PIXEL_BYTES"))
 
     Cap.clear(cap)
-    Compositor.render_strips([Drafter.Draw.Strip.from_text("text over the image")], 0, 4)
+    Compositor.render_strips([Strip.from_text("text over the image")], 0, 4)
 
     assert poll(cap, &String.contains?(&1, "PIXEL_BYTES"))
   end
 
   test "clear_image resets the stamp so a lower-or-equal stamp paints again", %{cap: cap} do
     Compositor.place_image(:reapp, 2, 4)
-    Compositor.put_image(:reapp, "FIRST_TEN", "DEL", 0, 0, 6, 2, 10)
+    Compositor.put_image(:reapp, "FIRST_TEN", "DEL", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 10})
     assert poll(cap, &String.contains?(&1, "FIRST_TEN"))
 
     Compositor.clear_image(:reapp)
@@ -116,7 +131,7 @@ defmodule Drafter.Regression.CompositorImageTest do
 
     Cap.clear(cap)
     Compositor.place_image(:reapp, 2, 4)
-    Compositor.put_image(:reapp, "REBORN_ONE", "DEL", 0, 0, 6, 2, 1)
+    Compositor.put_image(:reapp, "REBORN_ONE", "DEL", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 1})
     assert poll(cap, &String.contains?(&1, "REBORN_ONE"))
   end
 end

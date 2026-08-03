@@ -5,6 +5,27 @@ defmodule Drafter.Session.Worker do
 
   alias Drafter.{Compositor, Event, EventHandler, ScreenManager, ThemeManager, Transport}
 
+  @doc """
+  Start a session worker, which owns one session's services and app process.
+
+  Starts and links a private `Drafter.Event.Manager`, `Drafter.Compositor`,
+  `Drafter.ThemeManager`, `Drafter.EventHandler` and `Drafter.ScreenManager`, then
+  spawns the app under `Drafter.run_session/3`. The worker stops normally as soon as
+  the app process goes down.
+
+  ## Options
+
+    * `:app_module` - the `Drafter.App` module to run. Required; missing raises.
+    * `:driver_pid` - pid of the transport driver the session renders through.
+      Required; missing raises. Linked to the worker.
+    * `:mode` - `:isolated` or `:shared`, passed through to the session. Default:
+      `:isolated`.
+    * `:shared_state` - pid of a `Drafter.Session.SharedState` server, passed through
+      to the session. Default: `nil`.
+    * `:mount_props` - map of mount props, flattened into the session options.
+      Default: `%{}`.
+
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)

@@ -5,6 +5,33 @@ defmodule Drafter.Widget.Trait do
   Traits are reusable capabilities that can be composed onto widgets.
   Each trait manages its own slice of state, handles specific events,
   and can decorate rendering via pre/post render hooks.
+
+  A widget opts into traits with `use Drafter.Widget, traits: [...]`; the functions
+  here are what that macro calls to turn the trait list into handles, default state,
+  a capability bitmap, and the scroll configuration.
+
+  ## Built-in trait names
+
+  `resolve_module/1` maps these atoms to modules; any other atom is taken to be a
+  module name already.
+
+    * `:focusable` - `Drafter.Widget.Trait.Focusable`
+    * `:scrollable` - `Drafter.Widget.Trait.Scrollable`
+    * `:selectable` - `Drafter.Widget.Trait.Selectable`
+    * `:editable` - `Drafter.Widget.Trait.Editable`
+    * `:collapsible` - `Drafter.Widget.Trait.Collapsible`
+    * `:resizable` - `Drafter.Widget.Trait.Resizable`
+    * `:draggable` - `Drafter.Widget.Trait.Draggable`
+    * `:animatable` - `Drafter.Widget.Trait.Animatable`
+
+  ## Optional callbacks and their defaults
+
+  A trait that omits an optional callback is treated as follows:
+
+    * `c:dependencies/0` - no dependencies
+    * `c:handles/0` - handles nothing
+    * `c:render_affecting_fields/0` - every key of `c:default_state/0`
+    * `c:layout_static?/0` - `true`
   """
 
   alias Drafter.Draw.Strip
@@ -63,11 +90,36 @@ defmodule Drafter.Widget.Trait do
     blur: 0b100000000
   }
 
+  @doc """
+  The module behind a trait name.
+
+  Returns the built-in module for one of the names listed in the module doc, and
+  `name` itself for anything else — no check is made that the result is a module.
+
+      iex> Drafter.Widget.Trait.resolve_module(:focusable)
+      Drafter.Widget.Trait.Focusable
+
+      iex> Drafter.Widget.Trait.resolve_module(:not_a_trait)
+      :not_a_trait
+  """
   @spec resolve_module(atom() | module()) :: module()
   def resolve_module(name) when is_atom(name) do
     Map.get(@builtin_traits, name) || name
   end
 
+  @doc """
+  Expands trait specs into the full deduplicated list of trait modules.
+
+  Each spec is a trait name, a module, or a `{name, opts}` pair whose options are
+  discarded. Every trait's `c:dependencies/0` are pulled in transitively and appear
+  before the trait that asked for them. The `opts` argument is ignored.
+
+      iex> Drafter.Widget.Trait.resolve_all([:focusable, :scrollable], [])
+      [Drafter.Widget.Trait.Focusable, Drafter.Widget.Trait.Scrollable]
+
+      iex> Drafter.Widget.Trait.resolve_all([{:focusable, step: 2}, :focusable], [])
+      [Drafter.Widget.Trait.Focusable]
+  """
   @spec resolve_all([atom() | {atom(), keyword()} | module()], keyword()) :: [module()]
   def resolve_all(trait_specs, _opts) do
     trait_specs
@@ -76,6 +128,17 @@ defmodule Drafter.Widget.Trait do
     |> Enum.uniq()
   end
 
+  @doc """
+  The deduplicated union of every trait's `c:handles/0`, in trait order.
+
+  A trait that does not export `c:handles/0` contributes nothing.
+
+      iex> Drafter.Widget.Trait.collect_handles([Drafter.Widget.Trait.Focusable])
+      [:focus, :blur]
+
+      iex> Drafter.Widget.Trait.collect_handles([])
+      []
+  """
   @spec collect_handles([module()]) :: [atom()]
   def collect_handles(trait_modules) do
     trait_modules
@@ -83,6 +146,16 @@ defmodule Drafter.Widget.Trait do
     |> Enum.uniq()
   end
 
+  @doc """
+  Whether any trait reports the name `:focusable`, which is what makes the widget
+  take part in tab order.
+
+      iex> Drafter.Widget.Trait.any_focusable?([Drafter.Widget.Trait.Focusable])
+      true
+
+      iex> Drafter.Widget.Trait.any_focusable?([Drafter.Widget.Trait.Scrollable])
+      false
+  """
   @spec any_focusable?([module()]) :: boolean()
   def any_focusable?(trait_modules) do
     Enum.any?(trait_modules, fn mod ->
@@ -91,6 +164,16 @@ defmodule Drafter.Widget.Trait do
     end)
   end
 
+  @doc """
+  Every trait's `c:default_state/0` merged left to right, so a later trait wins a
+  key clash.
+
+      iex> Drafter.Widget.Trait.merge_default_states([Drafter.Widget.Trait.Focusable])
+      %{focused: false}
+
+      iex> Drafter.Widget.Trait.merge_default_states([])
+      %{}
+  """
   @spec merge_default_states([module()]) :: map()
   def merge_default_states(trait_modules) do
     Enum.reduce(trait_modules, %{}, fn mod, acc ->
@@ -99,6 +182,28 @@ defmodule Drafter.Widget.Trait do
     end)
   end
 
+  @doc """
+  The scroll configuration for a trait-mode widget, or `nil` when
+  `Drafter.Widget.Trait.Scrollable` is not among its traits.
+
+  Reads `opts[:scroll]`, itself defaulting to `[]`:
+
+    * `:direction` - `:vertical | :horizontal`. Default `:vertical`.
+    * `:step` - `t:pos_integer/0` rows per wheel notch. Default `1`.
+    * `:show_scrollbar` - `:auto | true | false`. Default `:auto`.
+
+  These differ from the handles-mode `:scroll` defaults documented on
+  `Drafter.Widget`, which are `:horizontal` and a step of `5`.
+
+      iex> Drafter.Widget.Trait.scroll_config([Drafter.Widget.Trait.Scrollable], [])
+      %{direction: :vertical, step: 1, show_scrollbar: :auto}
+
+      iex> Drafter.Widget.Trait.scroll_config([Drafter.Widget.Trait.Scrollable], scroll: [step: 4])
+      %{direction: :vertical, step: 4, show_scrollbar: :auto}
+
+      iex> Drafter.Widget.Trait.scroll_config([Drafter.Widget.Trait.Focusable], [])
+      nil
+  """
   @spec scroll_config([module()], keyword()) :: map() | nil
   def scroll_config(trait_modules, opts) do
     scrollable_mod = resolve_module(:scrollable)
@@ -116,6 +221,16 @@ defmodule Drafter.Widget.Trait do
     end
   end
 
+  @doc """
+  The deduplicated union of every trait's `c:render_affecting_fields/0`, in trait
+  order.
+
+  A trait that does not export it contributes the keys of its
+  `c:default_state/0` instead.
+
+      iex> Drafter.Widget.Trait.collect_render_affecting_fields([Drafter.Widget.Trait.Focusable])
+      [:focused]
+  """
   @spec collect_render_affecting_fields([module()]) :: [atom()]
   def collect_render_affecting_fields(trait_modules) do
     trait_modules
@@ -123,6 +238,16 @@ defmodule Drafter.Widget.Trait do
     |> Enum.uniq()
   end
 
+  @doc """
+  Whether every trait reports `c:layout_static?/0` as `true`, treating a trait that
+  does not export it as `true`. An empty list is static.
+
+      iex> Drafter.Widget.Trait.all_layout_static?([Drafter.Widget.Trait.Focusable])
+      true
+
+      iex> Drafter.Widget.Trait.all_layout_static?([])
+      true
+  """
   @spec all_layout_static?([module()]) :: boolean()
   def all_layout_static?(trait_modules) do
     Enum.all?(trait_modules, &get_layout_static?/1)
@@ -130,6 +255,19 @@ defmodule Drafter.Widget.Trait do
 
   import Bitwise
 
+  @doc """
+  The capability bitmap for a trait list, for use with `handles_event?/2`.
+
+  Ors together the bit of every handle the traits collect, plus the focus bit when
+  any trait is focusable. A handle with no bit assigned contributes nothing.
+
+      iex> Drafter.Widget.Trait.build_bitmap([])
+      0
+
+      iex> bitmap = Drafter.Widget.Trait.build_bitmap([Drafter.Widget.Trait.Scrollable])
+      iex> {Drafter.Widget.Trait.handles_event?(bitmap, :scroll), Drafter.Widget.Trait.handles_event?(bitmap, :drag)}
+      {true, false}
+  """
   @spec build_bitmap([module()]) :: non_neg_integer()
   def build_bitmap(trait_modules) do
     handles_bitmap =
@@ -144,6 +282,24 @@ defmodule Drafter.Widget.Trait do
     end
   end
 
+  @doc """
+  Whether a bitmap built by `build_bitmap/1` carries the bit for `event_type`.
+
+  Recognised event types are `:scroll`, `:keyboard`, `:char`, `:click`, `:drag`,
+  `:hover`, `:press`, `:mouse_up`, `:focus` and `:blur`. `:focus` and `:blur` share
+  one bit, so a bitmap that answers `true` for either answers `true` for both. Any
+  other atom is always `false`.
+
+      iex> bitmap = Drafter.Widget.Trait.build_bitmap([Drafter.Widget.Trait.Focusable])
+      iex> {Drafter.Widget.Trait.handles_event?(bitmap, :focus), Drafter.Widget.Trait.handles_event?(bitmap, :blur)}
+      {true, true}
+
+      iex> Drafter.Widget.Trait.handles_event?(0, :keyboard)
+      false
+
+      iex> Drafter.Widget.Trait.handles_event?(0xFFFF, :unknown_event)
+      false
+  """
   @spec handles_event?(non_neg_integer(), atom()) :: boolean()
   def handles_event?(bitmap, event_type) do
     bit = Map.get(@handle_bits, event_type, 0)

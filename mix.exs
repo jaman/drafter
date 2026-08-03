@@ -4,7 +4,7 @@ defmodule Drafter.MixProject do
   def project do
     [
       app: :drafter,
-      version: "0.2.19",
+      version: "0.3.0",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:elixir_make | Mix.compilers()],
@@ -55,7 +55,10 @@ defmodule Drafter.MixProject do
             Drafter.Widget.Log,
             Drafter.Widget.RichLog,
             Drafter.Widget.Rule,
-            Drafter.Widget.Placeholder
+            Drafter.Widget.Placeholder,
+            Drafter.Widget.Gauge,
+            Drafter.Widget.Meter,
+            Drafter.Widget.Breadcrumb
           ],
           "Input Widgets": [
             Drafter.Widget.Button,
@@ -67,18 +70,22 @@ defmodule Drafter.MixProject do
             Drafter.Widget.SelectionList,
             Drafter.Widget.MaskedInput,
             Drafter.Widget.OptionList,
-            Drafter.Widget.Link
+            Drafter.Widget.Link,
+            Drafter.Widget.Calendar,
+            Drafter.Widget.FilePicker
           ],
           "Data Widgets": [
             Drafter.Widget.DataTable,
             Drafter.Widget.Tree,
             Drafter.Widget.DirectoryTree,
-            Drafter.Widget.Chart
+            Drafter.Widget.Chart,
+            Drafter.Widget.PieChart
           ],
           "Layout Widgets": [
             Drafter.Widget.Container,
             Drafter.Widget.ScrollableContainer,
             Drafter.Widget.Grid,
+            Drafter.Widget.Box,
             Drafter.Widget.Card,
             Drafter.Widget.Header,
             Drafter.Widget.Footer,
@@ -100,7 +107,8 @@ defmodule Drafter.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib", "dev", "test/support"]
+  defp elixirc_paths(:dev), do: ["lib", "dev"]
   defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
@@ -117,6 +125,7 @@ defmodule Drafter.MixProject do
   defp package do
     [
       maintainers: ["Drafter"],
+      files: ~w(lib c_src guides Makefile mix.exs .formatter.exs README.md CHANGELOG.md),
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/jaman/drafter"}
     ]

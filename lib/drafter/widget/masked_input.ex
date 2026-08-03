@@ -14,21 +14,61 @@ defmodule Drafter.Widget.MaskedInput do
     * `A` — accepts any letter (`a`–`z` or `A`–`Z`)
     * Any other character — treated as a literal separator and displayed as-is
 
+  ## Component tag
+
+  Tag `:masked_input`, built by `Drafter.App` as `{:masked_input, opts}`:
+
+      masked_input(opts)
+
+  `masked_input/1` requires a keyword list — there is no zero-argument form and
+  no positional argument. `from_component_opts/2` wraps `:on_change` and
+  `:on_submit` with `Drafter.Widget.Callback`, so both may be given as atom
+  event names.
+
   ## Options
 
-    * `:mask` - format mask string, e.g. `"(999) 999-9999"` for a US phone number
-    * `:value` - initial raw value (unmasked characters, default: `""`)
-    * `:placeholder` - hint text shown when the field has no input
-    * `:on_change` - `(String.t() -> term())` called with the raw value on every change
-    * `:style` - map of style overrides
-    * `:classes` - list of theme class atoms
+    * `:mask` - format mask string, e.g. `"(999) 999-9999"` for a US phone number.
+      Default `nil`, which accepts no input at all and displays the raw value
+      unchanged.
+    * `:value` - initial raw value, unmasked characters only. Default `""`.
+      Characters the mask rejects are dropped when it is applied.
+    * `:placeholder` - hint text shown while the raw value is empty. Default `""`.
+    * `:on_change` - atom event name or `(String.t() -> term())` called with the
+      raw value after every insertion or deletion. Default `nil`.
+    * `:on_submit` - atom event name or `(String.t() -> term())` called with the
+      raw value when `enter` is pressed. Default `nil`.
+    * `:style` - `t:map/0` of style overrides passed to the theme computation.
+      Default `%{}`.
+    * `:class` - theme class atom or list of them, normalised by
+      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      Default `[]`.
+    * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`. Every editing
+      key binding requires it.
+
+  `update/2` accepts `:mask`, `:value`, `:placeholder`, `:style`, `:classes`,
+  `:app_module`, `:on_change` and `:on_submit`, and never moves the cursor.
+  Through the component tree `update_props_from_mount/3` narrows that to
+  `:on_change` and `:on_submit`, adding `:mask` and `:placeholder` only when they
+  actually differ from the mounted state — so `:value` is mount-only and the text
+  the user typed survives a re-render.
 
   ## Key bindings
 
-    * `←` / `→` — move cursor between editable positions
-    * Any valid character — fills the current mask position and advances the cursor
-    * `Backspace` — removes the previous character and moves the cursor back
-    * `Delete` — removes the character at the current cursor position
+  All of these require the widget to be focused; otherwise the event bubbles as
+  `{:noreply, state}`.
+
+    * `left` / `right` — move the cursor between editable positions
+    * any character the mask position accepts — fills that position and advances
+      the cursor
+    * `backspace` — removes the character before the cursor and moves it back
+    * `delete` — removes the character at the cursor
+    * `enter` — calls `:on_submit`
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns `nil` for this widget: the text lives under
+  `:raw_value` and `:value`, neither of which it reads. Use
+  `get_unmasked_value/1` on the state from `Drafter.get_widget_state/1`.
 
   ## Usage
 
@@ -59,6 +99,42 @@ defmodule Drafter.Widget.MaskedInput do
     :on_submit
   ]
 
+  @type t :: %__MODULE__{
+          mask: String.t() | nil,
+          value: String.t(),
+          raw_value: String.t(),
+          placeholder: String.t(),
+          style: map(),
+          classes: [atom()],
+          app_module: module() | nil,
+          focused: boolean(),
+          cursor_pos: non_neg_integer(),
+          on_change: (String.t() -> term()) | nil,
+          on_submit: (String.t() -> term()) | nil
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  `:value` is kept as `:raw_value` and also run through the mask to produce
+  `:value`, with unfilled positions shown as `_`. `:cursor_pos` always starts at
+  `0` and counts editable mask positions, not display columns.
+
+      iex> Drafter.Widget.MaskedInput.mount(%{mask: "99/99"}).value
+      "__/__"
+
+      iex> state = Drafter.Widget.MaskedInput.mount(%{mask: "99/99", value: "1234"})
+      iex> {state.value, state.raw_value, state.cursor_pos}
+      {"12/34", "1234", 0}
+
+      iex> Drafter.Widget.MaskedInput.mount(%{mask: "999", value: "1a2"}).value
+      "12_"
+
+      iex> state = Drafter.Widget.MaskedInput.mount(%{value: "anything"})
+      iex> {state.mask, state.value}
+      {nil, "anything"}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     mask = Map.get(props, :mask)
@@ -80,6 +156,15 @@ defmodule Drafter.Widget.MaskedInput do
     }
   end
 
+  @doc """
+  Draws the field into `rect` as a single strip.
+
+  `state` may be a plain props map, in which case it is passed through `mount/1`
+  first. The masked value is drawn once there is any raw input and the placeholder
+  before that, either padded or truncated to `rect.width`. The cursor cell is drawn
+  reversed only while the widget is focused and has input.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
@@ -109,6 +194,47 @@ defmodule Drafter.Widget.MaskedInput do
     [Strip.new(segments)]
   end
 
+  @doc """
+  Handles the field's own events, replacing the dispatch `use Drafter.Widget`
+  would otherwise generate.
+
+  A plain props map is passed through `mount/1` first, so the returned state is
+  always a `t:t/0`. Recognised events:
+
+    * `{:focus}` / `{:blur}` - set or clear `:focused`
+    * `{:key, :left}` / `{:key, :right}` - move `:cursor_pos`, clamped to
+      `0..(editable_positions - 1)`
+    * `{:key, :backspace}` - delete before the cursor, or `{:noreply, state}` at
+      position `0`
+    * `{:key, :delete}` - delete at the cursor
+    * `{:key, :enter}` - call `:on_submit` and return the state unchanged
+    * `{:key, key}` where `key` is a single printable character, and
+      `{:char, code}` - insert when the mask position accepts it, otherwise
+      `{:noreply, state}`
+
+  Every binding but focus and blur also requires `:focused`; without it, and for
+  any unrecognised event, the result is `{:noreply, state}`.
+
+      iex> state = Drafter.Widget.MaskedInput.mount(%{mask: "99/99", focused: true})
+      iex> {:ok, typed} = Drafter.Widget.MaskedInput.handle_event({:char, ?5}, state)
+      iex> {typed.value, typed.raw_value, typed.cursor_pos}
+      {"5_/__", "5", 1}
+
+      iex> state = Drafter.Widget.MaskedInput.mount(%{mask: "99/99", focused: true})
+      iex> Drafter.Widget.MaskedInput.handle_event({:char, ?x}, state) |> elem(0)
+      :noreply
+
+      iex> state = Drafter.Widget.MaskedInput.mount(%{mask: "99/99", value: "12", focused: true})
+      iex> {:ok, moved} = Drafter.Widget.MaskedInput.handle_event({:key, :right}, state)
+      iex> {:ok, deleted} = Drafter.Widget.MaskedInput.handle_event({:key, :backspace}, moved)
+      iex> {deleted.raw_value, deleted.value, deleted.cursor_pos}
+      {"2", "2_/__", 0}
+
+      iex> state = Drafter.Widget.MaskedInput.mount(%{mask: "99/99"})
+      iex> Drafter.Widget.MaskedInput.handle_event({:char, ?5}, state) |> elem(0)
+      :noreply
+  """
+  @spec handle_event(term(), t() | Drafter.Widget.props()) :: {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_event({:focus}, state) do
     state = ensure_mounted(state)
@@ -193,6 +319,26 @@ defmodule Drafter.Widget.MaskedInput do
     {:noreply, ensure_mounted(state)}
   end
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  `:value` sets the raw value, and `:value` is re-masked on every call. The mask
+  used for that is the one already on the state, so a `props` that changes both
+  `:mask` and `:value` formats the new value with the old mask until the next
+  update. `:cursor_pos` and `:focused` are never touched here.
+
+      iex> state = Drafter.Widget.MaskedInput.mount(%{mask: "99/99"})
+      iex> updated = Drafter.Widget.MaskedInput.update(%{value: "1234"}, state)
+      iex> {updated.value, updated.raw_value}
+      {"12/34", "1234"}
+
+      iex> state = Drafter.Widget.MaskedInput.mount(%{mask: "99/99"})
+      iex> updated = Drafter.Widget.MaskedInput.update(%{mask: "999", value: "1234"}, state)
+      iex> {updated.mask, updated.value}
+      {"999", "12/34"}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     new_raw_value = Map.get(props, :value, state.raw_value)
@@ -211,13 +357,59 @@ defmodule Drafter.Widget.MaskedInput do
     }
   end
 
+  @doc """
+  The characters the user entered, without the mask's literal separators.
+
+  Returns `:raw_value`, or `""` when it is `nil`.
+
+      iex> Drafter.Widget.MaskedInput.mount(%{mask: "99/99", value: "1234"})
+      ...> |> Drafter.Widget.MaskedInput.get_unmasked_value()
+      "1234"
+
+      iex> Drafter.Widget.MaskedInput.mount(%{mask: "99/99"})
+      ...> |> Drafter.Widget.MaskedInput.get_unmasked_value()
+      ""
+  """
+  @spec get_unmasked_value(t()) :: String.t()
   def get_unmasked_value(%__MODULE__{raw_value: raw_value}), do: raw_value || ""
   def get_unmasked_value(%__MODULE__{value: value, mask: mask}), do: strip_mask(value, mask)
 
+  @doc """
+  The number of rows the element asks for: always `3`. There is no `:height`
+  override.
+
+      iex> Drafter.Widget.MaskedInput.preferred_height(nil, height: 1)
+      3
+  """
+  @spec preferred_height(term(), keyword()) :: 3
   def preferred_height(_args, _opts), do: 3
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.MaskedInput.component_tag()
+      :masked_input
+  """
+  @spec component_tag() :: :masked_input
   def component_tag, do: :masked_input
 
+  @doc """
+  Builds the props map for a `{:masked_input, opts}` element.
+
+  The positional argument is ignored. `:on_change` and `:on_submit` go through
+  `Drafter.Widget.Callback.wrap_1/1`, so an atom becomes a closure that dispatches
+  an app event. `:class` is normalised into `:classes` and `:__app_module__`
+  becomes `:app_module`.
+
+      iex> props = Drafter.Widget.MaskedInput.from_component_opts(nil, mask: "99/99")
+      iex> {props.mask, props.value, props.placeholder, props.on_change}
+      {"99/99", "", "", nil}
+
+      iex> props = Drafter.Widget.MaskedInput.from_component_opts(nil, on_submit: :saved)
+      iex> is_function(props.on_submit, 1)
+      true
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
@@ -233,6 +425,24 @@ defmodule Drafter.Widget.MaskedInput do
     }
   end
 
+  @doc """
+  Narrows a re-render to `:on_change` and `:on_submit`, adding `:mask` and
+  `:placeholder` only when they differ from the mounted state.
+
+  `:value`, `:style` and `:classes` are always dropped, so the text the user typed
+  survives a re-render.
+
+      iex> props = Drafter.Widget.MaskedInput.from_component_opts(nil, mask: "99/99")
+      iex> state = Drafter.Widget.MaskedInput.mount(props)
+      iex> Drafter.Widget.MaskedInput.update_props_from_mount(props, state, []) |> Map.keys() |> Enum.sort()
+      [:on_change, :on_submit]
+
+      iex> props = Drafter.Widget.MaskedInput.from_component_opts(nil, mask: "999")
+      iex> state = Drafter.Widget.MaskedInput.mount(%{mask: "99/99"})
+      iex> Drafter.Widget.MaskedInput.update_props_from_mount(props, state, []).mask
+      "999"
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, existing_state, _opts) do
     base = %{
       on_change: mount_props.on_change,

@@ -8,21 +8,54 @@ defmodule Drafter.Widget.Log do
   index for efficient random access into large files without loading them fully
   into memory.
 
-  Keyboard navigation is supported when the widget has focus:
-  `↑`/`↓` scroll by one line, `Page Up`/`Page Down` by ten, `Home`/`End` jump
-  to the top and bottom respectively.
+  Scroll keys are handled when they reach the widget: `↑`/`↓` scroll by one line,
+  `Page Up`/`Page Down` by ten, `Home`/`End` jump to the top and bottom. The widget
+  declares no event kinds and is not focusable, so those keys have to be delivered
+  to `handle_event/2` some other way.
+
+  ## Component tag
+
+  Tag `:log`, built by `Drafter.App` as `{:log, opts}`:
+
+      log(opts)
+
+  There is no positional argument; every prop comes from `opts`.
 
   ## Options
 
-    * `:lines` - initial list of strings (default `[]`)
-    * `:file_path` - path to a file; indexed and read on demand
-    * `:max_lines` - maximum number of lines kept in memory (default `1000`)
-    * `:auto_scroll` - follow new output: `true` (default) / `false`
-    * `:wrap` - wrap long lines: `true` (default) / `false`
-    * `:highlight` - apply basic token highlighting: `true` / `false` (default)
-    * `:border` - draw a box border: `true` / `false` (default)
-    * `:style` - map of style properties
-    * `:classes` - list of theme class atoms
+    * `:lines` - initial list of strings. Default `[]`. Only the newest `:max_lines`
+      are kept, and the list is ignored when `:file_path` names an existing file
+    * `:file_path` - path to a file, indexed and read on demand. Default `nil`.
+      Takes precedence over `:lines` when the file exists
+    * `:max_lines` - maximum number of lines kept in memory. Default `1000`
+    * `:auto_scroll` - `t:boolean/0`, jump back to the newest line after each write.
+      Default `true`
+    * `:wrap` - `t:boolean/0`, wrap long lines instead of truncating them. Default
+      `true`
+    * `:highlight` - `t:boolean/0`, apply basic token highlighting to bracketed
+      numbers, quoted strings, numbers and the literals `true`, `false` and `nil`.
+      Default `false`
+    * `:border` - `t:boolean/0`, draw a single-line box border, which costs two rows
+      and two columns of content. Default `false`
+    * `:style` - `t:map/0` of style properties. Default `%{}`
+    * `:class` - theme class atom or list of them, reaching `mount/1` as
+      `:classes`. Default `[]`
+    * `:height` - read only by `preferred_height/2`, never by `mount/1`. Default
+      `10`
+
+  `update/2` re-reads every option, rebuilding the file index when `:file_path`
+  changes to a file that exists. Through the component tree a re-render narrows that
+  to `:file_path`, `:lines` and `:app_module`, so everything else is effectively
+  mount-only there.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`.
+
+  ## Data channel
+
+  When the widget is declared with a data buffer, `apply_data_buffer/3` replaces
+  `:lines` with the newest `:max_lines` items in the buffer.
 
   ## Usage
 
@@ -52,6 +85,42 @@ defmodule Drafter.Widget.Log do
     :border
   ]
 
+  @type t :: %__MODULE__{
+          lines: [String.t()],
+          max_lines: pos_integer(),
+          auto_scroll: boolean(),
+          wrap: boolean(),
+          style: map(),
+          classes: [atom()],
+          app_module: module() | nil,
+          scroll_offset: non_neg_integer(),
+          file_path: Path.t() | nil,
+          total_lines: non_neg_integer(),
+          line_offsets: [non_neg_integer()],
+          highlight: boolean(),
+          border: boolean()
+        }
+
+  @doc """
+  Builds the log state from `props`.
+
+  With a `:file_path` that exists, the file is indexed by byte offset and `:lines`
+  is ignored. Otherwise the newest `:max_lines` entries of `:lines` are kept.
+  `:scroll_offset` always starts at `0`, at the newest line.
+
+      iex> l = Drafter.Widget.Log.mount(%{lines: ["a", "b"]})
+      iex> {l.lines, l.total_lines, l.max_lines, l.auto_scroll, l.wrap}
+      {["a", "b"], 2, 1000, true, true}
+
+      iex> l = Drafter.Widget.Log.mount(%{lines: ["a", "b", "c"], max_lines: 2})
+      iex> {l.lines, l.total_lines}
+      {["b", "c"], 2}
+
+      iex> l = Drafter.Widget.Log.mount(%{})
+      iex> {l.lines, l.file_path, l.scroll_offset, l.highlight, l.border, l.classes}
+      {[], nil, 0, false, false, []}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     file_path = Map.get(props, :file_path)
@@ -83,6 +152,16 @@ defmodule Drafter.Widget.Log do
     end
   end
 
+  @doc """
+  Draws the visible window of the log into `rect`, returning exactly `rect.height`
+  strips.
+
+  Accepts either a `t:t/0` or a raw props map, which is mounted first. Lines are
+  taken from the end of the buffer backwards by `:scroll_offset`, wrapped or
+  truncated to the content width according to `:wrap`, and padded with blank rows.
+  With `:border` set the content area loses one row and one column on each side.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
@@ -110,10 +189,38 @@ defmodule Drafter.Widget.Log do
     end
   end
 
+  @doc """
+  `opts[:height]`, or `10` when it is absent.
+
+      iex> Drafter.Widget.Log.preferred_height(nil, [])
+      10
+
+      iex> Drafter.Widget.Log.preferred_height(nil, height: 30)
+      30
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 10)
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.Log.component_tag()
+      :log
+  """
+  @spec component_tag() :: :log
   def component_tag, do: :log
 
+  @doc """
+  Turns the `{:log, opts}` element into a props map for `mount/1`.
+
+  The positional argument is ignored. `:class` is normalised into `:classes` and
+  `:__app_module__` becomes `:app_module`.
+
+      iex> props = Drafter.Widget.Log.from_component_opts(nil, lines: ["a"])
+      iex> {props.lines, props.max_lines, props.auto_scroll, props.wrap, props.border}
+      {["a"], 1000, true, true, false}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
@@ -131,6 +238,11 @@ defmodule Drafter.Widget.Log do
     }
   end
 
+  @doc """
+  Narrows the props a re-render feeds to `update/2` to `:file_path`, `:lines` and
+  `:app_module`, so every other option stays as mounted.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       file_path: mount_props.file_path,
@@ -139,6 +251,13 @@ defmodule Drafter.Widget.Log do
     }
   end
 
+  @doc """
+  Replaces `:lines` with the newest `:max_lines` items in the widget's data buffer.
+
+  The buffer contents become the whole log, they are not appended, and
+  `:scroll_offset` is left where it was.
+  """
+  @spec apply_data_buffer(t(), Drafter.RingBuffer.t(), Drafter.Widget.rect()) :: t()
   @impl Drafter.Widget
   def apply_data_buffer(state, buffer, _rect) do
     %{state | lines: Drafter.RingBuffer.last_n(buffer, state.max_lines)}
@@ -278,6 +397,40 @@ defmodule Drafter.Widget.Log do
     end)
   end
 
+  @doc """
+  Appends output and scrolls the view.
+
+  `{:write, line}` appends one line and `{:write_lines, lines}` appends a list, both
+  trimming to the newest `:max_lines` and jumping to the bottom when `:auto_scroll`
+  is on. `:clear` empties the buffer and resets the scroll offset. `{:key, :end}`
+  and `{:key, :home}` jump to the newest and oldest line, `{:key, :page_down}` and
+  `{:key, :page_up}` move ten lines, and `{:key, :down}` and `{:key, :up}` move one.
+  All of those return `{:ok, state}`; everything else returns `{:noreply, state}`.
+
+  Writes go to the in-memory buffer even when the widget was mounted with a
+  `:file_path`, in which case the rendered lines still come from the file.
+
+      iex> l = Drafter.Widget.Log.mount(%{lines: ["a"]})
+      iex> {:ok, written} = Drafter.Widget.Log.handle_event({:write, "b"}, l)
+      iex> written.lines
+      ["a", "b"]
+
+      iex> l = Drafter.Widget.Log.mount(%{lines: ["a", "b"], max_lines: 2})
+      iex> {:ok, written} = Drafter.Widget.Log.handle_event({:write_lines, ["c", "d"]}, l)
+      iex> written.lines
+      ["c", "d"]
+
+      iex> l = Drafter.Widget.Log.mount(%{lines: ["a", "b"]})
+      iex> {:ok, cleared} = Drafter.Widget.Log.handle_event(:clear, l)
+      iex> {cleared.lines, cleared.scroll_offset}
+      {[], 0}
+
+      iex> l = Drafter.Widget.Log.mount(%{lines: ["a"]})
+      iex> Drafter.Widget.Log.handle_event({:key, :enter}, l) |> elem(0)
+      :noreply
+  """
+  @spec handle_event(Drafter.Event.t() | tuple() | :clear, t() | Drafter.Widget.props()) ::
+          {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_event({:write, line}, state) when is_binary(line) do
     state = ensure_mounted(state)
@@ -332,6 +485,22 @@ defmodule Drafter.Widget.Log do
     {:noreply, ensure_mounted(state)}
   end
 
+  @doc """
+  Folds fresh props into `state`.
+
+  Re-reads `:max_lines`, `:auto_scroll`, `:wrap`, `:style`, `:classes`,
+  `:app_module`, `:file_path`, `:highlight` and `:border`. A `:file_path` that
+  differs from the current one and names an existing file rebuilds the byte-offset
+  index and replaces the content. Otherwise `:lines` replaces the buffer when it is
+  present and actually different, trimmed to the newest `:max_lines`. A `nil`
+  `:file_path` never clears the one already set.
+
+      iex> l = Drafter.Widget.Log.mount(%{lines: ["a"]})
+      iex> updated = Drafter.Widget.Log.update(%{lines: ["x", "y"]}, l)
+      iex> {updated.lines, updated.total_lines}
+      {["x", "y"], 2}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     new_file_path = Map.get(props, :file_path)

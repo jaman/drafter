@@ -11,6 +11,16 @@ defmodule Drafter.Binding do
     end
   end
 
+  @doc """
+  The value a widget should display, given its options and the app state.
+
+  With `:bind` set to an atom, reads that key out of `app_state`. Without it, falls
+  back to the `:value` option. `default` is used when neither is present, and
+  defaults to `nil`.
+
+  Raises `FunctionClauseError` when `:bind` is present but is not an atom.
+  """
+  @spec get_bound_value(keyword(), map(), term()) :: term()
   def get_bound_value(opts, app_state, default \\ nil) do
     case Keyword.get(opts, :bind) do
       nil -> Keyword.get(opts, :value, default)
@@ -18,6 +28,17 @@ defmodule Drafter.Binding do
     end
   end
 
+  @doc """
+  A one-argument change callback for a widget, or `nil` when it needs none.
+
+  With `:bind` set, the returned function sends `{:bound_state_update, key, value}`
+  to the calling process and, when `:on_change` is also set, fires that app callback
+  too. Without `:bind`, returns a function that only fires `:on_change`, or `nil` when
+  `:on_change` is absent as well.
+
+  The `value_key` argument is accepted and ignored; the bound key comes from `:bind`.
+  """
+  @spec create_bound_callback(keyword(), atom()) :: (term() -> term()) | nil
   def create_bound_callback(opts, _value_key) do
     session_pid = self()
     build_bound_callback(session_pid, Keyword.get(opts, :bind), opts)
@@ -41,6 +62,13 @@ defmodule Drafter.Binding do
     end
   end
 
+  @doc """
+  As `create_bound_callback/2`, but for a text input's `{text, validation_result}` pair.
+
+  Only the text is written back to the bound key; the whole pair is passed to
+  `:on_change`.
+  """
+  @spec create_text_input_callback(keyword()) :: ({String.t(), term()} -> term()) | nil
   def create_text_input_callback(opts) do
     session_pid = self()
     build_text_input_callback(session_pid, Keyword.get(opts, :bind), opts)
@@ -64,10 +92,14 @@ defmodule Drafter.Binding do
     end
   end
 
+  @doc "Whether `opts` carries a `:bind` key, even one set to `nil`."
+  @spec has_binding?(keyword()) :: boolean()
   def has_binding?(opts) do
     Keyword.has_key?(opts, :bind)
   end
 
+  @doc "The app-state key named by `:bind`, or `nil` when unbound."
+  @spec get_binding_key(keyword()) :: atom() | nil
   def get_binding_key(opts) do
     Keyword.get(opts, :bind)
   end

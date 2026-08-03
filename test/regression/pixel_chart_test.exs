@@ -1,5 +1,6 @@
 defmodule Drafter.Regression.PixelChartTest do
-  use ExUnit.Case, async: true
+  # not async: these pin the terminal environment, which picks the kitty dialect
+  use ExUnit.Case, async: false
 
   alias Drafter.Draw.Strip
   alias Drafter.Widget.{Chart, Gauge, PieChart}
@@ -102,25 +103,69 @@ defmodule Drafter.Regression.PixelChartTest do
     end
   end
 
-  test "kitty protocol emits a transmit+place paint and a delete clear keyed by id" do
-    spec = %{
+  defp line_spec do
+    %{
       type: :line,
       data: [1, 3, 2, 5, 4],
       color: {120, 200, 255, 255},
       smooth: false,
       fill_opacity: 0.5
     }
+  end
 
-    assert {paint, clear} = Pixel.image(spec, :kitty, {24, 10}, :w_kitty)
-    paint = IO.iodata_to_binary(paint)
-    clear = IO.iodata_to_binary(clear)
+  defp with_env(vars, fun) do
+    kept = Map.new(vars, fn {name, _value} -> {name, System.get_env(name)} end)
 
-    assert paint =~ "a=t,i="
-    assert paint =~ "a=p,i="
-    assert clear =~ "a=d,d=i,i="
+    Enum.each(vars, fn
+      {name, nil} -> System.delete_env(name)
+      {name, value} -> System.put_env(name, value)
+    end)
 
-    assert {other_paint, _} = Pixel.image(spec, :kitty, {24, 10}, :w_other)
-    refute IO.iodata_to_binary(other_paint) == paint
+    try do
+      fun.()
+    after
+      Enum.each(kept, fn
+        {name, nil} -> System.delete_env(name)
+        {name, value} -> System.put_env(name, value)
+      end)
+    end
+  end
+
+  @real_kitty %{"TERM" => "xterm-kitty", "TERM_PROGRAM" => nil, "TERM_PROGRAM_VERSION" => nil}
+  @iterm %{
+    "TERM" => "xterm-256color",
+    "KITTY_WINDOW_ID" => nil,
+    "TERM_PROGRAM" => "iTerm.app",
+    "TERM_PROGRAM_VERSION" => "3.5.0"
+  }
+
+  test "on a terminal that keeps images, kitty is a transmit+place keyed by id" do
+    with_env(@real_kitty, fn ->
+      assert {paint, clear} = Pixel.image(line_spec(), :kitty, {24, 10}, :w_kitty)
+      paint = IO.iodata_to_binary(paint)
+      clear = IO.iodata_to_binary(clear)
+
+      assert paint =~ "a=t,i="
+      assert paint =~ "a=p,i="
+      assert clear =~ "a=d,d=i,i="
+
+      assert {other_paint, _} = Pixel.image(line_spec(), :kitty, {24, 10}, :w_other)
+      refute IO.iodata_to_binary(other_paint) == paint
+    end)
+  end
+
+  test "on iTerm, which keeps none, it is one transmit-and-display instead" do
+    with_env(@iterm, fn ->
+      assert Pixel.protocol(:auto) == :iterm2
+
+      assert {paint, clear} = Pixel.image(line_spec(), Pixel.protocol(:auto), {24, 10}, :w_iterm)
+      paint = IO.iodata_to_binary(paint)
+
+      assert paint =~ "\e]1337;File=inline=1", "sent and shown together"
+      refute paint =~ "a=t,i=", "storing it would leave iTerm holding a picture it never draws"
+      refute paint =~ "a=p", "and a placement means nothing there"
+      assert IO.iodata_to_binary(clear) == ""
+    end)
   end
 
   test "pie chart rasterizes to a positioned (sub-rect) image, text by default" do

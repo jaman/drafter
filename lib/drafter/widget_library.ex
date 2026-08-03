@@ -66,6 +66,18 @@ defmodule Drafter.WidgetLibrary do
   """
   @callback register() :: :ok
 
+  @doc """
+  Define a widget library on the calling module.
+
+  Implements `c:__widget_library__/0` and `c:register/0` for it. `register/0` is
+  `defoverridable`, so a library that needs extra start-up work can wrap it.
+
+  ## Options
+
+    * `:widgets` - list of widget modules the library exports. Default: `[]`, which
+      makes `register/0` a no-op.
+
+  """
   defmacro __using__(opts) do
     widgets = Keyword.get(opts, :widgets, [])
 

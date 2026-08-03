@@ -3,9 +3,21 @@ defmodule Drafter.Transport.SSHDriver do
 
   use GenServer
 
-  alias Drafter.Terminal.{ANSI, Driver, InputBuffer}
+  alias Drafter.Terminal.{ANSI, Driver, InputBuffer, Probe}
 
-  defstruct [:event_manager, :size, buffer: %InputBuffer{}, raw_mode: false, mouse_enabled: false]
+  defstruct [
+    :event_manager,
+    :size,
+    buffer: %InputBuffer{},
+    raw_mode: false,
+    mouse_enabled: false,
+    probing: false,
+    probe_replies: "",
+    probe_result: :unprobed,
+    probe_waiters: []
+  ]
+
+  @default_probe_timeout 250
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -17,6 +29,20 @@ defmodule Drafter.Transport.SSHDriver do
 
   @spec cleanup(pid()) :: :ok
   def cleanup(server), do: GenServer.call(server, :cleanup)
+
+  @doc """
+  The graphics protocol the connected client's terminal answered with.
+
+  Blocks until the answer arrives or the probe's deadline passes. Returns
+  `:kitty`, `:iterm2`, `:sixel`, or `nil` for a terminal naming none. `setup/2` is
+  what asks, so call this after it.
+  """
+  @spec probe(pid(), timeout()) :: {:ok, atom() | nil} | :unprobed
+  def probe(server, timeout \\ @default_probe_timeout) do
+    GenServer.call(server, :probe_result, timeout + 5_000)
+  catch
+    :exit, _reason -> :unprobed
+  end
 
   @spec write(pid(), iodata()) :: :ok
   def write(server, data), do: GenServer.cast(server, {:write, data})
@@ -49,9 +75,29 @@ defmodule Drafter.Transport.SSHDriver do
     spawn_link(fn -> stdin_reader(driver_pid) end)
     spawn_link(fn -> size_poller(driver_pid, size) end)
 
+    IO.write(Probe.query())
+    Process.send_after(driver_pid, :probe_deadline, @default_probe_timeout)
+
     {:reply, :ok,
-     %{state | event_manager: event_manager, size: size, raw_mode: true, mouse_enabled: true}}
+     %{
+       state
+       | event_manager: event_manager,
+         size: size,
+         raw_mode: true,
+         mouse_enabled: true,
+         probing: true
+     }}
   end
+
+  def handle_call(:probe_result, _from, %__MODULE__{probe_result: {:ok, _} = done} = state) do
+    {:reply, done, state}
+  end
+
+  def handle_call(:probe_result, from, %__MODULE__{probing: true} = state) do
+    {:noreply, %{state | probe_waiters: [from | state.probe_waiters]}}
+  end
+
+  def handle_call(:probe_result, _from, state), do: {:reply, :unprobed, state}
 
   def handle_call(:cleanup, _from, state) do
     if state.raw_mode do
@@ -89,11 +135,27 @@ defmodule Drafter.Transport.SSHDriver do
   end
 
   @impl GenServer
+  def handle_info({:stdin, data}, %__MODULE__{probing: true} = state) do
+    replies = state.probe_replies <> data
+
+    if Probe.settled?(replies) do
+      {:noreply, finish_probe(%{state | probe_replies: replies})}
+    else
+      {:noreply, %{state | probe_replies: replies}}
+    end
+  end
+
   def handle_info({:stdin, data}, state) do
     {events, buffer} = InputBuffer.feed(state.buffer, data)
     emit_events(state.event_manager, events)
     {:noreply, %{state | buffer: buffer}}
   end
+
+  def handle_info(:probe_deadline, %__MODULE__{probing: true} = state) do
+    {:noreply, finish_probe(state)}
+  end
+
+  def handle_info(:probe_deadline, state), do: {:noreply, state}
 
   def handle_info(:input_flush, state) do
     {events, buffer} = InputBuffer.flush(state.buffer)
@@ -116,6 +178,23 @@ defmodule Drafter.Transport.SSHDriver do
 
   defp emit_events(event_manager, events) do
     Enum.each(events, &GenServer.cast(event_manager, {:event, &1}))
+  end
+
+  defp finish_probe(state) do
+    {protocol, leftover} = Probe.resolve(state.probe_replies)
+    Enum.each(state.probe_waiters, &GenServer.reply(&1, {:ok, protocol}))
+
+    {events, buffer} = InputBuffer.feed(state.buffer, leftover)
+    emit_events(state.event_manager, events)
+
+    %{
+      state
+      | probing: false,
+        probe_replies: "",
+        probe_result: {:ok, protocol},
+        probe_waiters: [],
+        buffer: buffer
+    }
   end
 
   defp detect_size do

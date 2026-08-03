@@ -14,50 +14,87 @@ defmodule Drafter.Test.HeadlessDriver do
     raw_mode: false
   ]
 
+  @doc """
+  Start the headless driver, registered under this module's name.
+
+  Only one may run at a time; a second start returns
+  `{:error, {:already_started, pid}}`.
+
+  ## Options
+
+    * `:event_manager` - process input events are published to. Default:
+      `Drafter.Event.Manager`.
+    * `:test_pid` - process notified of driver activity. Default: `nil`.
+    * `:size` - terminal size as `{columns, rows}`. Default: `{80, 24}`.
+
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
+  @doc "Record raw mode, alternate screen and mouse reporting as enabled. No terminal is touched."
+  @spec setup() :: :ok
   def setup do
     GenServer.call(__MODULE__, :setup)
   end
 
+  @doc "Record raw mode, alternate screen and mouse reporting as disabled."
+  @spec cleanup() :: :ok
   def cleanup do
     GenServer.call(__MODULE__, :cleanup)
   end
 
+  @doc "Append `data` to the captured output buffer instead of writing to a terminal."
+  @spec write(iodata()) :: :ok
   def write(data) do
     GenServer.cast(__MODULE__, {:write, data})
   end
 
+  @doc "The simulated terminal size as `{columns, rows}`."
+  @spec get_size() :: {pos_integer(), pos_integer()}
   def get_size do
     GenServer.call(__MODULE__, :get_size)
   end
 
+  @doc "Record mouse reporting as enabled. Asynchronous."
+  @spec enable_mouse() :: :ok
   def enable_mouse do
     GenServer.cast(__MODULE__, :enable_mouse)
   end
 
+  @doc "Record mouse reporting as disabled. Asynchronous."
+  @spec disable_mouse() :: :ok
   def disable_mouse do
     GenServer.cast(__MODULE__, :disable_mouse)
   end
 
+  @doc "Publish `event` to the configured event manager as if the terminal had sent it."
+  @spec inject_event(term()) :: :ok
   def inject_event(event) do
     GenServer.cast(__MODULE__, {:inject_event, event})
   end
 
+  @doc "Everything written since the last `clear_buffer/0`, in write order."
+  @spec get_buffer() :: [iodata()]
   def get_buffer do
     GenServer.call(__MODULE__, :get_buffer)
   end
 
+  @doc "How many frames have been rendered since the driver started."
+  @spec get_render_count() :: non_neg_integer()
   def get_render_count do
     GenServer.call(__MODULE__, :get_render_count)
   end
 
+  @doc "Change the simulated terminal size, publishing a resize event. Asynchronous."
+  @spec set_size(pos_integer(), pos_integer()) :: :ok
   def set_size(width, height) do
     GenServer.cast(__MODULE__, {:set_size, width, height})
   end
 
+  @doc "Discard the captured output buffer and reset the render count to zero. Asynchronous."
+  @spec clear_buffer() :: :ok
   def clear_buffer do
     GenServer.cast(__MODULE__, :clear_buffer)
   end

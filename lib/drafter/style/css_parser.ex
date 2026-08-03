@@ -1,10 +1,81 @@
 defmodule Drafter.Style.CSSParser do
-  @moduledoc false
+  @moduledoc """
+  Parses a CSS-like stylesheet into a `Drafter.Style.Stylesheet`.
+
+  The grammar is a subset of CSS: a sequence of `selector { property: value; ... }`
+  rules, with `/* */` and `//` comments removed first. Selectors are handed to
+  `Drafter.Style.Selector.parse/1`; a comma-separated selector list becomes one
+  rule per selector, each holding a copy of the same properties.
+
+      iex> {:ok, sheet} = Drafter.Style.CSSParser.parse_string("button { color: red; bold: true; }")
+      iex> Drafter.Style.Stylesheet.compute_style(sheet, %{widget_type: :button})
+      %{bold: true, color: :red}
+
+  ## Property names
+
+  A property name is mapped to a style key. `background-color` and `background` both
+  give `:background`; `text-align` and `text_align` both give `:text_align`. Any
+  other name becomes an atom of that exact spelling through
+  `Drafter.Util.normalize_class/1`, so an unknown property is a key rather than an
+  error. `Drafter.Style.new/1` then drops the keys that are not style properties
+  when the rule is added to the stylesheet.
+
+  ## Property values
+
+  Recognised in this order:
+
+  - `true` and `false` — booleans
+  - `#rgb` and `#rrggbb` — an RGB triple. Other hex lengths are not colours.
+  - `rgb(r, g, b)` — an RGB triple, provided each component is at most 255
+  - `rgba(r, g, b, a)` — an `{:rgba, {r, g, b}, alpha}` triple, `alpha` a float
+  - a run of digits — an integer
+  - digits, a dot and digits — a float
+  - anything else — `Drafter.Util.normalize_class/1`, giving an atom
+
+  A value that is not a colour but looks like one, such as `#ff00`, falls through to
+  the atom case rather than failing.
+
+  ## Errors
+
+  Both `parse_string/1` and `parse_file/1` stop at the first bad rule or property and
+  return `{:error, message}`, discarding the rules parsed so far.
+  """
 
   alias Drafter.Style.Stylesheet
 
+  @typedoc "A parsed stylesheet, or the message describing why parsing stopped."
   @type parse_result :: {:ok, Stylesheet.t()} | {:error, String.t()}
 
+  @typedoc """
+  A colour parse, `:error` rather than an error tuple when the string is not of
+  that form.
+  """
+  @type color_result :: {:ok, Drafter.Style.rgb()} | :error
+
+  @doc """
+  Parse a CSS string into a stylesheet.
+
+  Returns `{:ok, stylesheet}`, or `{:error, message}` naming the first rule or
+  property that could not be parsed. An empty string, or one holding only comments,
+  gives an empty stylesheet.
+
+  ## Examples
+
+      iex> {:ok, sheet} = Drafter.Style.CSSParser.parse_string("a, b { color: red; }")
+      iex> length(sheet.rules)
+      2
+
+      iex> Drafter.Style.CSSParser.parse_string("")
+      {:ok, %Drafter.Style.Stylesheet{rules: []}}
+
+      iex> Drafter.Style.CSSParser.parse_string("button { bogus }")
+      {:error, "Invalid property: bogus"}
+
+      iex> Drafter.Style.CSSParser.parse_string("oops")
+      {:error, "Invalid CSS rule: oops"}
+
+  """
+  @spec parse_string(String.t()) :: parse_result()
   def parse_string(css_content) when is_binary(css_content) do
     css_content
     |> preprocess_css()
@@ -133,6 +204,19 @@ defmodule Drafter.Style.CSSParser do
     skip_string(rest, quote, acc <> <<byte>>)
   end
 
+  @doc """
+  Parse the CSS file at `file_path` into a stylesheet.
+
+  Returns `{:error, "Failed to read file: " <> inspect(reason)}` when the file
+  cannot be read, and otherwise whatever `parse_string/1` makes of its contents.
+
+  ## Examples
+
+      iex> Drafter.Style.CSSParser.parse_file("/no/such/file.css")
+      {:error, "Failed to read file: :enoent"}
+
+  """
+  @spec parse_file(Path.t()) :: parse_result()
   def parse_file(file_path) do
     case File.read(file_path) do
       {:ok, content} -> parse_string(content)
@@ -245,6 +329,29 @@ defmodule Drafter.Style.CSSParser do
     end
   end
 
+  @doc """
+  Parse a `#rgb` or `#rrggbb` string into an RGB triple.
+
+  Each digit of the three-digit form is doubled, so `#f00` and `#ff0000` are the
+  same colour. Case is ignored. Returns `:error` for any other length, for a string
+  with a non-hex digit, and for a string that does not start with `#`.
+
+  ## Examples
+
+      iex> Drafter.Style.CSSParser.parse_hex_color("#f00")
+      {:ok, {255, 0, 0}}
+
+      iex> Drafter.Style.CSSParser.parse_hex_color("#FF0000")
+      {:ok, {255, 0, 0}}
+
+      iex> Drafter.Style.CSSParser.parse_hex_color("#ff00")
+      :error
+
+      iex> Drafter.Style.CSSParser.parse_hex_color("red")
+      :error
+
+  """
+  @spec parse_hex_color(term()) :: color_result()
   def parse_hex_color(<<"#", hex_str::binary>>) do
     hex_str = String.downcase(hex_str)
 
@@ -272,6 +379,26 @@ defmodule Drafter.Style.CSSParser do
 
   defp parse_hex_digits(_), do: :error
 
+  @doc """
+  Parse an `rgb(r, g, b)` string into an RGB triple.
+
+  Whitespace around the components is ignored and the function name is matched
+  case-insensitively. Returns `:error` when the string is not of that form, and
+  also when any component is above 255.
+
+  ## Examples
+
+      iex> Drafter.Style.CSSParser.parse_rgb_color("rgb(1, 2, 3)")
+      {:ok, {1, 2, 3}}
+
+      iex> Drafter.Style.CSSParser.parse_rgb_color("rgb(300, 0, 0)")
+      :error
+
+      iex> Drafter.Style.CSSParser.parse_rgb_color("rgb(1, 2)")
+      :error
+
+  """
+  @spec parse_rgb_color(String.t()) :: color_result()
   def parse_rgb_color(str) do
     case Regex.run(~r/^rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i, str) do
       [_, r, g, b] ->
@@ -282,6 +409,29 @@ defmodule Drafter.Style.CSSParser do
     end
   end
 
+  @doc """
+  Parse an `rgba(r, g, b, a)` string into `{:ok, {:rgba, {r, g, b}, alpha}}`.
+
+  `alpha` is always a float: a leading-dot form such as `.5` and a whole number such
+  as `1` are both converted. Returns `:error` when the string is not of that form,
+  and also when any of `r`, `g` or `b` is above 255. `alpha` is not range-checked.
+
+  ## Examples
+
+      iex> Drafter.Style.CSSParser.parse_rgba_color("rgba(1, 2, 3, 0.5)")
+      {:ok, {:rgba, {1, 2, 3}, 0.5}}
+
+      iex> Drafter.Style.CSSParser.parse_rgba_color("rgba(1,2,3,.5)")
+      {:ok, {:rgba, {1, 2, 3}, 0.5}}
+
+      iex> Drafter.Style.CSSParser.parse_rgba_color("rgba(1, 2, 3, 1)")
+      {:ok, {:rgba, {1, 2, 3}, 1.0}}
+
+      iex> Drafter.Style.CSSParser.parse_rgba_color("rgb(1, 2, 3)")
+      :error
+
+  """
+  @spec parse_rgba_color(String.t()) :: {:ok, Drafter.Style.rgba()} | :error
   def parse_rgba_color(str) do
     case Regex.run(~r/^rgba\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i, str) do
       [_, r, g, b, a] ->

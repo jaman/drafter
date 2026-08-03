@@ -25,9 +25,49 @@ defmodule Drafter.Text do
 
   """
 
+  @typedoc """
+  How `wrap/3` breaks a line that is wider than the target width.
+
+    * `:none` - do not wrap; each input line is truncated to the width instead
+    * `:char` - break anywhere, at grapheme boundaries
+    * `:word` - break at whitespace, falling back to `:char` for a single word
+      wider than the width
+  """
   @type wrap_mode :: :none | :char | :word
 
-  @spec wrap(String.t(), non_neg_integer(), wrap_mode()) :: [String.t()]
+  @doc """
+  Break `text` into lines no wider than `width` display columns.
+
+  Embedded newlines always start a new line, whatever the mode. `mode` defaults to
+  `:word`. A `width` of `0` or less returns `[text]` unwrapped, and an empty string
+  returns `[""]`. Trailing whitespace is trimmed from every wrapped line but leading
+  whitespace on the first line is kept.
+
+  ## Examples
+
+      iex> Drafter.Text.wrap("the quick brown fox", 9, :word)
+      ["the quick", "brown fox"]
+
+      iex> Drafter.Text.wrap("the quick brown fox", 9)
+      ["the quick", "brown fox"]
+
+      iex> Drafter.Text.wrap("abcdefgh", 3, :char)
+      ["abc", "def", "gh"]
+
+      iex> Drafter.Text.wrap("abcdefgh", 3, :none)
+      ["abc"]
+
+      iex> Drafter.Text.wrap("one\\ntwo", 10, :word)
+      ["one", "two"]
+
+      iex> Drafter.Text.wrap("anything", 0, :word)
+      ["anything"]
+
+      iex> Drafter.Text.wrap("", 10, :word)
+      [""]
+
+  """
+  @spec wrap(String.t(), integer(), wrap_mode()) :: [String.t()]
   def wrap(text, width, mode \\ :word)
 
   def wrap(text, width, _mode) when width <= 0, do: [text]
@@ -51,7 +91,29 @@ defmodule Drafter.Text do
     |> Enum.flat_map(&wrap_line_word(&1, width))
   end
 
-  @spec truncate(String.t(), non_neg_integer()) :: String.t()
+  @doc """
+  Cut `text` down to at most `width` display columns.
+
+  Nothing is appended. A double-width grapheme that would straddle the limit is
+  dropped rather than half-drawn, so the result can be one column narrower than
+  `width`. A `width` of `0` or less returns `""`.
+
+  ## Examples
+
+      iex> Drafter.Text.truncate("abcdef", 3)
+      "abc"
+
+      iex> Drafter.Text.truncate("abc", 10)
+      "abc"
+
+      iex> Drafter.Text.truncate("漢字", 3)
+      "漢"
+
+      iex> Drafter.Text.truncate("abc", 0)
+      ""
+
+  """
+  @spec truncate(String.t(), integer()) :: String.t()
   def truncate(_text, width) when width <= 0, do: ""
 
   def truncate(text, width) do
@@ -66,7 +128,30 @@ defmodule Drafter.Text do
     end
   end
 
-  @spec ellipsize(String.t(), non_neg_integer(), String.t()) :: String.t()
+  @doc """
+  Truncate `text` to `width` display columns, marking the cut with `ellipsis`.
+
+  `ellipsis` defaults to `"…"` and its own display width counts towards `width`, so
+  the result is never wider than `width`. Text that already fits is returned
+  unchanged, with no ellipsis. A `width` of `0` or less returns `""`; a `width`
+  smaller than the ellipsis itself returns just the ellipsis.
+
+  ## Examples
+
+      iex> Drafter.Text.ellipsize("abcdef", 4)
+      "abc…"
+
+      iex> Drafter.Text.ellipsize("abcd", 4)
+      "abcd"
+
+      iex> Drafter.Text.ellipsize("abcdef", 5, "...")
+      "ab..."
+
+      iex> Drafter.Text.ellipsize("abcdef", 1)
+      "…"
+
+  """
+  @spec ellipsize(String.t(), integer(), String.t()) :: String.t()
   def ellipsize(text, width, ellipsis \\ "…")
 
   def ellipsize(_text, width, _ellipsis) when width <= 0, do: ""
@@ -81,6 +166,25 @@ defmodule Drafter.Text do
     end
   end
 
+  @doc """
+  Width of `text` in terminal display columns.
+
+  Measured per grapheme through `Drafter.CharacterWidth`, so a CJK ideograph counts
+  two, a combining mark counts zero, and an emoji with a variation selector counts as
+  a single cluster.
+
+  ## Examples
+
+      iex> Drafter.Text.display_width("abc")
+      3
+
+      iex> Drafter.Text.display_width("漢字")
+      4
+
+      iex> Drafter.Text.display_width("")
+      0
+
+  """
   @spec display_width(String.t()) :: non_neg_integer()
   def display_width(text) do
     text
@@ -90,6 +194,25 @@ defmodule Drafter.Text do
     end)
   end
 
+  @doc """
+  Pad `text` on the right to `width` display columns.
+
+  `pad_char` defaults to `" "` and is repeated once per missing *column*, so a
+  multi-column pad character overshoots. Text already at or over `width` is returned
+  unchanged — this pads, it does not truncate.
+
+  ## Examples
+
+      iex> Drafter.Text.pad_right("hi", 5)
+      "hi   "
+
+      iex> Drafter.Text.pad_right("hi", 5, ".")
+      "hi..."
+
+      iex> Drafter.Text.pad_right("hello", 3)
+      "hello"
+
+  """
   @spec pad_right(String.t(), non_neg_integer(), String.t()) :: String.t()
   def pad_right(text, width, pad_char \\ " ") do
     current = display_width(text)
@@ -101,6 +224,23 @@ defmodule Drafter.Text do
     end
   end
 
+  @doc """
+  Pad `text` on the left to `width` display columns.
+
+  `pad_char` defaults to `" "`. Text already at or over `width` is returned unchanged.
+
+  ## Examples
+
+      iex> Drafter.Text.pad_left("hi", 5)
+      "   hi"
+
+      iex> Drafter.Text.pad_left("42", 5, "0")
+      "00042"
+
+      iex> Drafter.Text.pad_left("hello", 3)
+      "hello"
+
+  """
   @spec pad_left(String.t(), non_neg_integer(), String.t()) :: String.t()
   def pad_left(text, width, pad_char \\ " ") do
     current = display_width(text)
@@ -112,6 +252,24 @@ defmodule Drafter.Text do
     end
   end
 
+  @doc """
+  Centre `text` within `width` display columns.
+
+  `pad_char` defaults to `" "`. An odd amount of padding puts the extra column on the
+  right. Text already at or over `width` is returned unchanged.
+
+  ## Examples
+
+      iex> Drafter.Text.pad_center("hi", 6, ".")
+      "..hi.."
+
+      iex> Drafter.Text.pad_center("hi", 5, ".")
+      ".hi.."
+
+      iex> Drafter.Text.pad_center("hello", 3)
+      "hello"
+
+  """
   @spec pad_center(String.t(), non_neg_integer(), String.t()) :: String.t()
   def pad_center(text, width, pad_char \\ " ") do
     current = display_width(text)

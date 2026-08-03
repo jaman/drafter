@@ -4,8 +4,16 @@ defmodule Drafter.ContentRenderer do
   alias Drafter.Draw.{Segment, Strip}
 
   @doc """
-  Render a component tree (vertical layout) to a list of strips.
+  Render `components` stacked vertically into a flat list of strips.
+
+  Every component is given the full `width` and `height` as its rect, and the
+  strips each produces are concatenated in order. The result is not padded or
+  cropped to `height`.
+
+  A component whose tag this module does not render contributes one blank strip the
+  full width of the rect.
   """
+  @spec render_vertical_layout([tuple()], non_neg_integer(), non_neg_integer()) :: [Strip.t()]
   def render_vertical_layout(components, width, height) do
     render_vertical_layout(components, 0, 0, width, height, %{})
   end

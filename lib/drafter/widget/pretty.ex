@@ -1,24 +1,50 @@
 defmodule Drafter.Widget.Pretty do
   @moduledoc """
-  Renders any Elixir term with syntax-highlighted pretty-printing.
+  Renders an Elixir term with syntax-highlighted pretty-printing.
 
-  Atoms use atom key syntax (`key: value`) for maps with atom keys, and
-  `=>` only for non-atom keys, mirroring idiomatic Elixir syntax. Structs
-  are displayed with their short module name. The `:expand` option forces
-  multi-line output with one entry per line.
+  Maps and keyword lists print an atom key as `:key: value` and every other key as
+  `key => value`. Structs are displayed with the last segment of their module name.
+  The `:expand` option forces multi-line output with one entry per line.
+
+  Collections nested inside a collection are not descended into: they print as
+  `...`. Only `nil`, booleans, atoms, integers, floats, binaries, lists, keyword
+  lists, maps and structs can be rendered at the top level — any other term, a
+  tuple or a pid among them, raises `FunctionClauseError` from `format_pretty/3`.
+
+  ## Component tag
+
+  Tag `:pretty`, built by `Drafter.App` as `{:pretty, data, opts}`:
+
+      pretty(data, opts)
+
+  The positional argument becomes `:data` directly; it is never re-read from
+  `opts`. Pass the term positionally. Writing `pretty(data: term)` puts a keyword
+  list in the positional slot, which the renderer then treats as options, leaving
+  `:data` as `nil` and rendering nothing.
 
   ## Options
 
-    * `:data` - any Elixir term to display
-    * `:expand` - render collections multi-line: `true` / `false` (default)
-    * `:syntax_highlighting` - apply colour to tokens: `true` (default) / `false`
-    * `:style` - map of style properties
-    * `:classes` - list of theme class atoms
+    * `:data` - the term to display. Default `nil`, which renders the text `nil`.
+      Supplied positionally through the `pretty/2` element.
+    * `:expand` - `t:boolean/0`, put one entry per line. Default `false`.
+    * `:syntax_highlighting` - `t:boolean/0`, colour the tokens. Default `true`.
+    * `:style` - `t:map/0` of style overrides passed to the theme computation.
+      Default `%{}`.
+    * `:class` - theme class atom or list of them, normalised by
+      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      Default `[]`.
+    * `:height` - `t:pos_integer/0` read only by `preferred_height/2`, never by
+      `mount/1`. Default `5`.
+
+  `update/2` accepts every option above. Through the component tree only `:data`
+  is live-updatable — `update_props_from_mount/3` returns `:data` and
+  `:app_module` alone, so `:expand`, `:syntax_highlighting`, `:style` and
+  `:classes` are mount-only.
 
   ## Usage
 
-      pretty(data: %{name: "Alice", age: 30, active: true})
-      pretty(data: my_struct, expand: true)
+      pretty(%{name: "Alice", age: 30, active: true})
+      pretty(my_struct, expand: true)
   """
 
   use Drafter.Widget
@@ -49,6 +75,27 @@ defmodule Drafter.Widget.Pretty do
     :syntax_highlighting
   ]
 
+  @type t :: %__MODULE__{
+          data: term(),
+          style: map(),
+          classes: [atom()],
+          app_module: module() | nil,
+          expand: boolean(),
+          syntax_highlighting: boolean()
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  Reads `:data` (default `nil`), `:expand` (default `false`),
+  `:syntax_highlighting` (default `true`), `:style` (default `%{}`), `:classes`
+  (default `[]`) and `:app_module` (default `nil`).
+
+      iex> state = Drafter.Widget.Pretty.mount(%{data: %{a: 1}})
+      iex> {state.data, state.expand, state.syntax_highlighting}
+      {%{a: 1}, false, true}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
@@ -61,6 +108,14 @@ defmodule Drafter.Widget.Pretty do
     }
   end
 
+  @doc """
+  Draws the formatted term into `rect`, one strip per line of output.
+
+  `state` may be a plain props map, in which case it is passed through `mount/1`
+  first. Each line is padded with spaces or truncated to `rect.width`. The number
+  of strips follows the formatted term, not `rect.height`.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
@@ -88,10 +143,40 @@ defmodule Drafter.Widget.Pretty do
     end)
   end
 
+  @doc """
+  The number of rows the element asks for: `opts[:height]`, default `5`.
+
+      iex> Drafter.Widget.Pretty.preferred_height(nil, [])
+      5
+
+      iex> Drafter.Widget.Pretty.preferred_height(%{a: 1}, height: 12)
+      12
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 5)
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.Pretty.component_tag()
+      :pretty
+  """
+  @spec component_tag() :: :pretty
   def component_tag, do: :pretty
 
+  @doc """
+  Builds the props map for a `{:pretty, data, opts}` element.
+
+  `data` becomes `:data` as it stands and is never re-read from `opts`, so
+  `pretty(data: term)` leaves `:data` as the keyword list itself only if the
+  renderer passes it positionally. `:class` is normalised into `:classes` and
+  `:__app_module__` becomes `:app_module`.
+
+      iex> props = Drafter.Widget.Pretty.from_component_opts(%{a: 1}, expand: true)
+      iex> {props.data, props.expand, props.syntax_highlighting, props.classes}
+      {%{a: 1}, true, true, []}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(data, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
@@ -105,6 +190,18 @@ defmodule Drafter.Widget.Pretty do
     }
   end
 
+  @doc """
+  Narrows a re-render to `:data` and `:app_module`.
+
+  `:expand`, `:syntax_highlighting`, `:style` and `:classes` are dropped, so they
+  are mount-only through the component tree.
+
+      iex> props = Drafter.Widget.Pretty.from_component_opts(%{a: 1}, expand: true)
+      iex> Drafter.Widget.Pretty.update_props_from_mount(props, %{}, [])
+      %{data: %{a: 1}, app_module: nil}
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), term(), keyword()) ::
+          Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       data: mount_props.data,
@@ -131,6 +228,19 @@ defmodule Drafter.Widget.Pretty do
 
   @syntax_color_lookup Map.new(@syntax_colors, fn {k, v} -> {Atom.to_string(k), v} end)
 
+  @doc """
+  The `{r, g, b}` colour for a `"{token_kind}"` marker.
+
+  `spec` must start with `{` — anything else raises `FunctionClauseError`. An
+  unknown token kind falls back to the `:default` colour, `{200, 200, 200}`.
+
+      iex> Drafter.Widget.Pretty.parse_color_spec("{integer}")
+      {181, 206, 168}
+
+      iex> Drafter.Widget.Pretty.parse_color_spec("{not_a_token}")
+      {200, 200, 200}
+  """
+  @spec parse_color_spec(String.t()) :: {0..255, 0..255, 0..255}
   def parse_color_spec("{" <> spec) do
     key = String.slice(spec, 0..-2//1)
     Map.get(@syntax_color_lookup, key, @syntax_colors.default)
@@ -180,12 +290,33 @@ defmodule Drafter.Widget.Pretty do
     end
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`.
+
+  A plain props map is passed through `mount/1` first, so the returned state is
+  always a `t:t/0`. The widget is not focusable.
+  """
+  @spec handle_event(Drafter.Event.t(), t() | Drafter.Widget.props()) :: {:noreply, t()}
   @impl Drafter.Widget
   def handle_event(_event, state) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
     {:noreply, state}
   end
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  Accepts `:data`, `:expand`, `:syntax_highlighting`, `:style`, `:classes` and
+  `:app_module`. A `:data` of `nil` in `props` counts as a value and clears the
+  term.
+
+      iex> state = Drafter.Widget.Pretty.mount(%{data: 1})
+      iex> updated = Drafter.Widget.Pretty.update(%{expand: true}, state)
+      iex> {updated.data, updated.expand}
+      {1, true}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     %{
@@ -199,8 +330,53 @@ defmodule Drafter.Widget.Pretty do
     }
   end
 
+  @doc """
+  The token colour table, keyed by token kind.
+
+      iex> Drafter.Widget.Pretty.syntax_colors() |> Map.keys() |> Enum.sort()
+      [:atom, :boolean, :default, :float, :integer, :keyword_key, :map_key, nil, :separator, :string, :struct_name]
+
+      iex> Drafter.Widget.Pretty.syntax_colors().string
+      {235, 203, 139}
+  """
+  @spec syntax_colors() :: %{atom() => {0..255, 0..255, 0..255}}
   def syntax_colors, do: @syntax_colors
 
+  @doc """
+  Formats `data` into the widget's marked-up text.
+
+  With `highlight` set, each token is followed by a `§{kind}` marker that
+  `render/2` turns into a colour; without it the result is plain text. `expand`
+  puts one entry of a collection per line.
+
+  Handles `nil`, booleans, atoms, integers, floats, binaries, lists, keyword lists,
+  maps and structs. Any other term raises `FunctionClauseError`.
+
+      iex> Drafter.Widget.Pretty.format_pretty(nil, false, false)
+      "nil"
+
+      iex> Drafter.Widget.Pretty.format_pretty(42, true, false)
+      "42§{integer}"
+
+      iex> Drafter.Widget.Pretty.format_pretty("hi", false, false)
+      "\\"hi\\""
+
+      iex> Drafter.Widget.Pretty.format_pretty([1, 2, 3], false, false)
+      "[1, 2, 3]"
+
+      iex> Drafter.Widget.Pretty.format_pretty([a: 1, b: 2], false, false)
+      "[:a: 1, :b: 2]"
+
+      iex> Drafter.Widget.Pretty.format_pretty(%{a: 1}, false, false)
+      "%{:a: 1}"
+
+      iex> Drafter.Widget.Pretty.format_pretty(%{"k" => 1}, false, false)
+      "%{\\"k\\" => 1}"
+
+      iex> Drafter.Widget.Pretty.format_pretty([1, [2]], false, false)
+      "[1, ...]"
+  """
+  @spec format_pretty(term(), boolean(), boolean()) :: String.t()
   def format_pretty(data, highlight, _expand) when is_nil(data) do
     if highlight, do: "nil§{nil}", else: "nil"
   end
@@ -247,6 +423,17 @@ defmodule Drafter.Widget.Pretty do
     end
   end
 
+  @doc """
+  Formats a plain list. Each element goes through `format_simple/2`, so a nested
+  collection prints as `...`.
+
+      iex> Drafter.Widget.Pretty.format_list([1, 2], false, false)
+      "[1, 2]"
+
+      iex> Drafter.Widget.Pretty.format_list([1, 2], false, true)
+      "[\\n  1,\\n  2\\n]"
+  """
+  @spec format_list(list(), boolean(), boolean()) :: String.t()
   def format_list(data, highlight, false) do
     inner = Enum.map_join(data, ", ", &format_simple(&1, highlight))
     separator = if highlight, do: "§{separator}", else: ""
@@ -259,6 +446,17 @@ defmodule Drafter.Widget.Pretty do
     "[#{separator}\n  #{inner}\n]#{separator}"
   end
 
+  @doc """
+  Formats a keyword list. Keys are written with a leading colon and a trailing
+  colon, so `[a: 1]` prints as `[:a: 1]`.
+
+      iex> Drafter.Widget.Pretty.format_keyword([a: 1, b: 2], false, false)
+      "[:a: 1, :b: 2]"
+
+      iex> Drafter.Widget.Pretty.format_keyword([a: 1], false, true)
+      "[\\n  :a: 1\\n]"
+  """
+  @spec format_keyword(keyword(), boolean(), boolean()) :: String.t()
   def format_keyword(data, highlight, false) do
     pairs =
       Enum.map(data, fn {k, v} ->
@@ -285,6 +483,16 @@ defmodule Drafter.Widget.Pretty do
     "[#{separator}\n  #{Enum.join(pairs, ",\n  ")}\n]#{separator}"
   end
 
+  @doc """
+  Formats a map that is not a struct, one `format_pair/3` per entry in key order.
+
+      iex> Drafter.Widget.Pretty.format_map(%{a: 1}, false, false)
+      "%{:a: 1}"
+
+      iex> Drafter.Widget.Pretty.format_map(%{a: 1}, false, true)
+      "%{\\n  :a: 1\\n}"
+  """
+  @spec format_map(map(), boolean(), boolean()) :: String.t()
   def format_map(data, highlight, false) do
     pairs =
       Enum.map(data, fn {k, v} ->
@@ -305,6 +513,18 @@ defmodule Drafter.Widget.Pretty do
     "%#{separator}{\n  #{Enum.join(pairs, ",\n  ")}\n}#{separator}"
   end
 
+  @doc """
+  Formats one map entry.
+
+  An atom key becomes `:key: value`; every other key becomes `key => value`.
+
+      iex> Drafter.Widget.Pretty.format_pair(:a, 1, false)
+      ":a: 1"
+
+      iex> Drafter.Widget.Pretty.format_pair("k", 1, false)
+      "\\"k\\" => 1"
+  """
+  @spec format_pair(term(), term(), boolean()) :: String.t()
   def format_pair(k, v, highlight) when is_atom(k) do
     key_str =
       if highlight, do: ":#{Atom.to_string(k)}§{keyword_key}", else: ":#{Atom.to_string(k)}"
@@ -321,6 +541,18 @@ defmodule Drafter.Widget.Pretty do
     "#{key_str} => #{format_simple(v, highlight)}"
   end
 
+  @doc """
+  Formats a struct, headed by the last segment of its module name.
+
+  Field names go through `format_simple/2`, so they carry a leading colon.
+
+      iex> Drafter.Widget.Pretty.format_struct(1..3, false, false)
+      "%Range{:first: 1, :last: 3, :step: 1}"
+
+      iex> Drafter.Widget.Pretty.format_struct(1..2//1, false, true)
+      "%Range{\\n  :first: 1,\\n  :last: 2,\\n  :step: 1\\n}"
+  """
+  @spec format_struct(struct(), boolean(), boolean()) :: String.t()
   def format_struct(data, highlight, false) do
     fields =
       data
@@ -347,6 +579,22 @@ defmodule Drafter.Widget.Pretty do
     "#{name_str}{\n  #{Enum.join(fields, ",\n  ")}\n}"
   end
 
+  @doc """
+  Formats a single value nested inside a collection.
+
+  Handles `nil`, booleans, atoms, integers, floats and binaries. Anything else,
+  including a nested list, map or tuple, returns `"..."` rather than recursing.
+
+      iex> Drafter.Widget.Pretty.format_simple(:ok, false)
+      ":ok"
+
+      iex> Drafter.Widget.Pretty.format_simple(:ok, true)
+      ":ok§{atom}"
+
+      iex> Drafter.Widget.Pretty.format_simple([1, 2], false)
+      "..."
+  """
+  @spec format_simple(term(), boolean()) :: String.t()
   def format_simple(item, highlight) when is_nil(item) do
     if highlight, do: "nil§{nil}", else: "nil"
   end

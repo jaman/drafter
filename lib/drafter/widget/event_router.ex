@@ -1,6 +1,81 @@
 defmodule Drafter.Widget.EventRouter do
-  @moduledoc false
+  @moduledoc """
+  Turns an event tuple into the right callback on a widget module.
 
+  A widget declares which kinds of event it wants as a list of atoms, and this
+  module calls the matching callback only when that atom is present and the module
+  actually exports the function. Everything else returns `{:bubble, state}`, leaving
+  the event to the parent.
+
+  | event | declared kind | callback |
+  | ----- | ------------- | -------- |
+  | `{:key, key}` | `:keyboard` | `handle_key(key, state)` |
+  | `{:key, key, mods}` | `:keyboard` | `handle_key(key, mods, state)`, or `handle_key(key, state)` when `mods` is empty |
+  | `{:char, _} = event` | `:char` | `handle_char(event, state)` |
+  | `{:bracketed_paste, text}` | `:paste` | `handle_paste(sanitized_text, state)` |
+  | `{:mouse, %{type: :mouse_down}}` | `:press` | `handle_press(x, y, state)` |
+  | `{:mouse, %{type: :mouse_up}}` | `:mouse_up` | `handle_mouse_up(x, y, state)` |
+  | `{:mouse, %{type: :drag}}` | `:drag` | `handle_drag(x, y, state)` |
+  | `{:mouse, %{type: :move}}` | `:hover` | `handle_hover(x, y, state)` |
+  | `{:mouse, %{type: :scroll}}` | `:scroll` | `handle_scroll(direction, state)` |
+  | `{:focus}` / `{:blur}` | — | sets `:focused` on the state when the widget is focusable |
+  | anything else | — | `handle_custom_event(event, state)` |
+
+  Paste text is passed through `Drafter.Clipboard.sanitize/1` before the callback
+  sees it. `{:char, _}` falls through to `handle_custom_event/2` when `:char` is not
+  declared, rather than bubbling.
+
+  ## Default scrolling
+
+  When `:scroll` is declared but the module exports no `handle_scroll/2`, and when
+  left and right arrow keys arrive at a widget with a scroll config, the offset in
+  the state key `:_scroll_offset` is moved by the config's `:step` (default `5`) and
+  clamped at zero. A `nil` scroll config bubbles instead.
+  """
+
+  @doc """
+  Route `event` to the callback `module` declares for it.
+
+  Arguments:
+
+    * `module` — the widget module
+    * `event` — an event tuple as listed in `Drafter.Event`
+    * `state` — the widget's current state, returned unchanged when nothing handles
+      the event
+    * `handles` — the event kinds the widget declared, as atoms
+    * `focusable` — whether `{:focus}` and `{:blur}` set `:focused` on the state
+    * `scroll_config` — map with an optional `:step` key enabling default scrolling,
+      or `nil`
+
+  `scroll_config` defaults to `nil`, which disables both the default wheel scrolling
+  and the left/right arrow scrolling.
+
+  Returns whatever the callback returned, in the shapes `Drafter.EventResult.parse/2`
+  accepts, or `{:bubble, state}` when no callback applies.
+
+      iex> state = %{focused: false}
+      iex> Drafter.Widget.EventRouter.route_event(Drafter.Widget.Label, {:key, :enter}, state, [], false)
+      {:bubble, %{focused: false}}
+
+      iex> state = %{focused: false}
+      iex> Drafter.Widget.EventRouter.route_event(Drafter.Widget.Label, {:focus}, state, [], true)
+      {:ok, %{focused: true}}
+
+      iex> state = %{focused: true}
+      iex> Drafter.Widget.EventRouter.route_event(Drafter.Widget.Label, {:blur}, state, [], false)
+      {:bubble, %{focused: true}}
+
+      iex> state = %{}
+      iex> event = {:mouse, %{type: :scroll, direction: :down}}
+      iex> Drafter.Widget.EventRouter.route_event(Drafter.Widget.Label, event, state, [:scroll], false, %{step: 3})
+      {:ok, %{_scroll_offset: 3}}
+
+      iex> state = %{_scroll_offset: 2}
+      iex> event = {:mouse, %{type: :scroll, direction: :up}}
+      iex> Drafter.Widget.EventRouter.route_event(Drafter.Widget.Label, event, state, [:scroll], false, %{})
+      {:ok, %{_scroll_offset: 0}}
+  """
+  @spec route_event(module(), tuple(), term(), [atom()], boolean(), map() | nil) :: term()
   def route_event(module, event, state, handles, focusable, scroll_config \\ nil) do
     ctx = %{
       module: module,

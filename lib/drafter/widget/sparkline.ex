@@ -11,18 +11,53 @@ defmodule Drafter.Widget.Sparkline do
   When `orientation: :horizontal` is set, each data point becomes one row and
   bars grow left-to-right using left-aligned eighth-block characters.
 
+  ## Component tag
+
+  Tag `:sparkline`, built by `Drafter.App` as `{:sparkline, data, opts}`:
+
+      sparkline(data, opts)
+
+  The positional argument becomes `:data` when it is a non-empty list that is not
+  a keyword list; otherwise `:data` is read from `opts`. Both
+  `sparkline(values, summary: true)` and `sparkline(data: values, summary: true)`
+  are therefore valid.
+
   ## Options
 
-    * `:data` - list of numbers to plot (default `[]`)
-    * `:min_value` - explicit minimum for scaling; defaults to `Enum.min(data)`
-    * `:max_value` - explicit maximum for scaling; defaults to `Enum.max(data)`
-    * `:color` - `{r, g, b}` base bar colour
-    * `:min_color` - `{r, g, b}` colour for the lowest bars (falls back to `:color`)
-    * `:max_color` - `{r, g, b}` colour for the highest bars (falls back to `:color`)
-    * `:summary` - show `min/max/avg` summary at the right edge: `true` / `false` (default)
-    * `:orientation` - `:vertical` (default) or `:horizontal`
-    * `:style` - map of style properties
-    * `:classes` - list of theme class atoms
+    * `:data` - `[number()]` to plot. Default `[]`. Only the first `width` values
+      of a vertical sparkline and the first `rect.height` values of a horizontal
+      one are drawn.
+    * `:min_value` - `t:number/0` explicit minimum for scaling. Default:
+      `Enum.min(data)`, or `0` when the data is empty. A `nil` value falls back to
+      the same default.
+    * `:max_value` - `t:number/0` explicit maximum for scaling. Default:
+      `Enum.max(data)`, or `0` when the data is empty. A `nil` value falls back to
+      the same default.
+    * `:min_color` - `{r, g, b}` colour for the lowest bars. Default `nil`, which
+      uses the sparkline's computed theme colour, itself falling back to
+      `{100, 200, 100}`.
+    * `:max_color` - `{r, g, b}` colour for the highest bars. Default `nil`, with
+      the same fallback as `:min_color`. Equal min and max colours make every bar
+      that colour.
+    * `:color` - `{r, g, b}`. Default `nil`. Held on the state and never read by
+      `render/2`, which takes its base colour from the theme.
+    * `:summary` - `t:boolean/0`, append `min:X max:Y avg:Z` at the right edge.
+      Default `false`. Reserves 20 columns of the rect for the text. Only drawn for
+      a vertical sparkline, though `apply_data_buffer/3` reserves the same 20
+      columns either way.
+    * `:orientation` - `:vertical | :horizontal`. Default `:vertical`; any value
+      other than `:horizontal` renders vertically.
+    * `:style` - `t:map/0` of style overrides passed to the theme computation.
+      Default `%{}`.
+    * `:class` - theme class atom or list of them, normalised by
+      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      Default `[]`.
+    * `:height` - `t:pos_integer/0` read only by `preferred_height/2`, never by
+      `mount/1`. Default `3`.
+
+  Every option except `:height` is live-updatable: `update_props_from_mount/3`
+  passes the full mount props through. Supplying `:data` without `:min_value` or
+  `:max_value` rescales the sparkline to the new data.
 
   ## Usage
 
@@ -51,6 +86,41 @@ defmodule Drafter.Widget.Sparkline do
     :orientation
   ]
 
+  @type rgb :: {0..255, 0..255, 0..255}
+
+  @type t :: %__MODULE__{
+          data: [number()],
+          min_value: number(),
+          max_value: number(),
+          style: map(),
+          classes: [atom()],
+          app_module: module() | nil,
+          color: rgb() | nil,
+          min_color: rgb() | nil,
+          max_color: rgb() | nil,
+          summary: boolean(),
+          orientation: :vertical | :horizontal
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  `:min_value` and `:max_value` are taken from `props` when present and not `nil`,
+  and otherwise from the data — `Enum.min/1` and `Enum.max/1`, or `0` and `0` for
+  empty data.
+
+      iex> state = Drafter.Widget.Sparkline.mount(%{data: [1, 3, 2, 8]})
+      iex> {state.min_value, state.max_value, state.summary, state.orientation}
+      {1, 8, false, :vertical}
+
+      iex> state = Drafter.Widget.Sparkline.mount(%{})
+      iex> {state.data, state.min_value, state.max_value}
+      {[], 0, 0}
+
+      iex> Drafter.Widget.Sparkline.mount(%{data: [1, 2], max_value: 100}).max_value
+      100
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     data = Map.get(props, :data, [])
@@ -77,6 +147,14 @@ defmodule Drafter.Widget.Sparkline do
     }
   end
 
+  @doc """
+  Draws the sparkline into `rect`.
+
+  `state` may be a plain props map, in which case it is passed through `mount/1`
+  first. A vertical sparkline returns a single strip. A horizontal one returns one
+  strip per data point, capped at `rect.height`, so it returns `[]` for empty data.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
@@ -105,6 +183,15 @@ defmodule Drafter.Widget.Sparkline do
     end
   end
 
+  @doc """
+  Replaces `:data` with the newest entries of a `Drafter.RingBuffer` and rescales
+  `:min_value` and `:max_value` to them.
+
+  Takes the last `rect.width` values, or `rect.width - 20` when `:summary` is set,
+  with a floor of one value. Returns `state` unchanged for an empty buffer, which
+  is the only case where an explicit `:min_value` or `:max_value` survives.
+  """
+  @spec apply_data_buffer(t(), RingBuffer.t(), Drafter.Widget.rect()) :: t()
   @impl Drafter.Widget
   def apply_data_buffer(state, %RingBuffer{count: 0}, _rect), do: state
 
@@ -117,12 +204,38 @@ defmodule Drafter.Widget.Sparkline do
     %{state | data: data, min_value: min_val, max_value: max_val}
   end
 
+  @doc """
+  Ignores every event and returns `{:noreply, state}`.
+
+  A plain props map is passed through `mount/1` first, so the returned state is
+  always a `t:t/0`. The sparkline is not focusable.
+  """
+  @spec handle_event(Drafter.Event.t(), t() | Drafter.Widget.props()) :: {:noreply, t()}
   @impl Drafter.Widget
   def handle_event(_event, state) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
     {:noreply, state}
   end
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  New `:data` rescales `:min_value` and `:max_value` to it unless `props` carries a
+  non-`nil` `:min_value` or `:max_value` of its own. Empty new data keeps the
+  existing scale.
+
+      iex> state = Drafter.Widget.Sparkline.mount(%{data: [1, 2, 3]})
+      iex> updated = Drafter.Widget.Sparkline.update(%{data: [10, 20]}, state)
+      iex> {updated.data, updated.min_value, updated.max_value}
+      {[10, 20], 10, 20}
+
+      iex> state = Drafter.Widget.Sparkline.mount(%{data: [1, 2, 3]})
+      iex> updated = Drafter.Widget.Sparkline.update(%{data: [10, 20], max_value: 50}, state)
+      iex> {updated.min_value, updated.max_value}
+      {10, 50}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     new_data = Map.get(props, :data, state.data)
@@ -153,10 +266,46 @@ defmodule Drafter.Widget.Sparkline do
     }
   end
 
+  @doc """
+  The number of rows the element asks for: `opts[:height]`, default `3`.
+
+      iex> Drafter.Widget.Sparkline.preferred_height(nil, [])
+      3
+
+      iex> Drafter.Widget.Sparkline.preferred_height([1, 2, 3], height: 8)
+      8
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 3)
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.Sparkline.component_tag()
+      :sparkline
+  """
+  @spec component_tag() :: :sparkline
   def component_tag, do: :sparkline
 
+  @doc """
+  Builds the props map for a `{:sparkline, data, opts}` element.
+
+  `data` becomes `:data` when it is a non-empty list that is not a keyword list;
+  otherwise `opts[:data]` is used, defaulting to `[]`. `:class` is normalised into
+  `:classes` and `:__app_module__` becomes `:app_module`.
+
+      iex> props = Drafter.Widget.Sparkline.from_component_opts([1, 3, 2], summary: true)
+      iex> {props.data, props.summary, props.min_value}
+      {[1, 3, 2], true, nil}
+
+      iex> props = Drafter.Widget.Sparkline.from_component_opts([data: [4, 5]], [])
+      iex> props.data
+      []
+
+      iex> Drafter.Widget.Sparkline.from_component_opts(nil, data: [4, 5]).data
+      [4, 5]
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(data, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
@@ -182,6 +331,16 @@ defmodule Drafter.Widget.Sparkline do
     }
   end
 
+  @doc """
+  Passes the mount props through unchanged, so every option is live-updatable
+  through the component tree.
+
+      iex> props = Drafter.Widget.Sparkline.from_component_opts([1, 2], [])
+      iex> Drafter.Widget.Sparkline.update_props_from_mount(props, %{}, []) == props
+      true
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), term(), keyword()) ::
+          Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
 
   defp render_vertical(state, rect, bg, min_color, max_color, default_color) do
@@ -261,6 +420,24 @@ defmodule Drafter.Widget.Sparkline do
     end)
   end
 
+  @doc """
+  Turns `data` into `{bar_characters, normalized_values}`.
+
+  Takes at most `width` values, normalises each into `0.0..1.0` against `min_val`
+  and `max_val`, and picks the matching character from the current skin's vertical
+  sparkline levels. Empty data returns `width` spaces and `width` values of `0.5`.
+  The two elements of the result always have the same length, which is
+  `min(length(data), width)` for non-empty data.
+
+      iex> Drafter.Widget.Sparkline.render_sparkline_with_values([], 0, 0, 3)
+      {"   ", [0.5, 0.5, 0.5]}
+
+      iex> {chars, values} = Drafter.Widget.Sparkline.render_sparkline_with_values([1, 5, 10], 1, 10, 2)
+      iex> {String.length(chars), values}
+      {2, [0.0, 0.4444444444444444]}
+  """
+  @spec render_sparkline_with_values([number()], number(), number(), non_neg_integer()) ::
+          {String.t(), [float()]}
   def render_sparkline_with_values(data, min_val, max_val, width) do
     levels = CharacterSet.sparkline_levels_v()
 
@@ -280,6 +457,19 @@ defmodule Drafter.Widget.Sparkline do
     end
   end
 
+  @doc """
+  Blends two `{r, g, b}` colours, rounding each channel.
+
+  `factor` must be a float — an integer raises `FunctionClauseError`. `0.0` returns
+  the first colour and `1.0` the second; values outside `0.0..1.0` extrapolate.
+
+      iex> Drafter.Widget.Sparkline.interpolate_color({0, 0, 0}, {200, 100, 50}, 0.5)
+      {100, 50, 25}
+
+      iex> Drafter.Widget.Sparkline.interpolate_color({10, 20, 30}, {200, 100, 50}, 0.0)
+      {10, 20, 30}
+  """
+  @spec interpolate_color(rgb(), rgb(), float()) :: rgb()
   def interpolate_color({r1, g1, b1}, {r2, g2, b2}, factor) when is_float(factor) do
     r = round(r1 + (r2 - r1) * factor)
     g = round(g1 + (g2 - g1) * factor)

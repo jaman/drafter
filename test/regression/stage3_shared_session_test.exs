@@ -34,7 +34,6 @@ defmodule Drafter.Regression.Stage3SharedSessionTest do
 
     wait_until(fn -> text(a) =~ "messages: 0" and text(b) =~ "messages: 0" end)
 
-    # input to session A mutates the shared state; B must see it via broadcast
     CellSession.feed_input(a, {:char, ?m})
 
     wait_until(fn -> text(a) =~ "messages: 1" end)

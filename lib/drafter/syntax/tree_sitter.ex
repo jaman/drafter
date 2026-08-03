@@ -33,6 +33,15 @@ defmodule Drafter.Syntax.TreeSitter do
     zig: "zig"
   }
 
+  @doc """
+  Start the tree-sitter server, registered under this module's name.
+
+  `opts` are accepted and discarded; the server probes for the `tree-sitter`
+  executable on start and reports the result through `available?/0`. Starting it
+  without that executable present succeeds and leaves every highlight call returning
+  `[]`.
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end

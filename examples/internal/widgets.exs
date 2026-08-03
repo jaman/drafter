@@ -17,6 +17,7 @@ defmodule WidgetsShowcase do
       text: "",
       checked: false,
       switch_on: true,
+      gain: 0.5,
       selected: nil,
       clicks: 0
     }
@@ -56,6 +57,9 @@ defmodule WidgetsShowcase do
             ],
             gap: 4
           ),
+          label(""),
+          label("Slider", style: %{bold: true, fg: :cyan}),
+          slider(bind: :gain, label: "gain ", precision: 2),
           label(""),
           label("Option List", style: %{bold: true, fg: :cyan}),
           option_list(

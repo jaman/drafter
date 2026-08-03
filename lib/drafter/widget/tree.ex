@@ -13,27 +13,86 @@ defmodule Drafter.Widget.Tree do
 
   Each node in the `:data` list is a map with the following fields:
 
-    * `:id` — unique identifier for the node (required; used to track expansion state)
-    * `:label` — display string (required)
-    * `:children` — list of child nodes in the same format (default: `[]`)
-    * `:expanded` — whether the node starts expanded (default: `false`)
-    * `:icon` — optional string icon displayed before the label
-    * `:metadata` — arbitrary map stored on the node, passed to callbacks
+    * `:id` — identifier used to track expansion and selection. Default: eight
+      random bytes, regenerated every time the data is normalised, so a node
+      without an explicit `:id` loses its expansion and selection state on the
+      next `update/2`.
+    * `:label` — display string. Default `"Unnamed"`.
+    * `:children` — list of child nodes in the same format. Default `[]`; a
+      non-list is replaced by `[]`.
+    * `:icon` — string drawn before the label. Default `nil`.
+    * `:metadata` — arbitrary map stored on the node and passed to callbacks.
+      Default `%{}`.
+
+  Every other key, `:expanded` among them, is dropped by normalisation. Nodes
+  therefore always start collapsed and are expanded from the key bindings alone.
 
   Shorthand formats are also accepted:
-    * A bare string becomes `%{label: string, children: []}`
-    * `{"label", [children]}` becomes a node with that label and children list
+    * a bare string becomes a node with that label and no children
+    * `{"label", children}` becomes a node with that label and those children,
+      where `children` may be a list or a map
+    * a map of nodes is turned into a list with `Map.to_list/1`, so each entry
+      arrives as a `{key, value}` tuple
+
+  ## Component tag
+
+  Tag `:tree`, built by `Drafter.App` as `{:tree, opts}`:
+
+      tree(opts)
+
+  There is no positional argument; the nodes are passed as `data:` in `opts`.
+  `from_component_opts/2` wraps `:on_select`, `:on_expand` and
+  `:on_node_highlight` with `Drafter.Widget.Callback`, so each may be given as an
+  atom event name. `:width` and `:height` default to the rect the parent allocated.
 
   ## Options
 
-    * `:data` - list of root nodes (required)
-    * `:selection_mode` - `:none`, `:single` (default), or `:multiple`
-    * `:on_select` - `([node] -> term())` called with the list of selected nodes on selection change
-    * `:on_expand` - `(node, boolean() -> term())` called when a node is expanded or collapsed
-    * `:show_icons` - render node `:icon` fields (default: `true`)
-    * `:indent_size` - spaces per depth level (default: `2`)
-    * `:width` - widget width in columns (default: `80`)
-    * `:height` - widget height in rows (default: `20`)
+    * `:data` - list of root nodes, or a map that is turned into one. Default
+      `[]`. Anything else normalises to `[]`.
+    * `:selection_mode` - `:none | :single | :multiple`. Default `:single`.
+    * `:on_select` - atom event name or `([node] -> term())` called with the list
+      of selected nodes on selection change. Default `nil`.
+    * `:on_expand` - atom event name or `((node, boolean()) -> term())` called when
+      a node is expanded or collapsed. Default `nil`.
+    * `:on_node_highlight` - atom event name or `(node -> term())` called when the
+      cursor moves to a different node. Default `nil`.
+    * `:show_icons` - `t:boolean/0`, draw node `:icon` fields. Default `true`.
+    * `:indent_size` - `t:pos_integer/0` spaces per depth level. Default `2`.
+    * `:width` - `t:pos_integer/0` widget width in columns. Default `80` when
+      mounting directly, and the allocated rect width through the element. Held on
+      the state; `render/2` uses the rect it is given.
+    * `:height` - `t:pos_integer/0` widget height in rows. Default `20` when
+      mounting directly, and the allocated rect height through the element. Read
+      by `handle_scroll/2` and the cursor's scroll adjustment, not by `render/2`.
+    * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`. Every key
+      binding requires it.
+    * `:height` as an element option is also what `preferred_height/2` returns,
+      defaulting to `:auto` rather than to a row count.
+
+  These style maps are read by `mount/1` and `update/2` only; the `tree/1` element
+  does not forward them, and `render/2` overlays the current theme on top of them:
+
+    * `:style` - base row style. Default `%{fg: {200, 200, 200}, bg: {30, 30, 30}}`.
+    * `:selected_style` - style for selected rows. Default
+      `%{fg: {255, 255, 255}, bg: {0, 120, 215}}`.
+    * `:cursor_style` - style for the row under the cursor. Default
+      `%{fg: {255, 255, 255}, bg: {50, 100, 200}, bold: true}`.
+    * `:expanded_style` - style for the `▼` marker. Default
+      `%{fg: {100, 200, 100}, bg: {30, 30, 30}}`.
+    * `:collapsed_style` - style for the `▶` marker. Default
+      `%{fg: {200, 200, 100}, bg: {30, 30, 30}}`.
+
+  `mount/1` always starts the cursor at `0` with nothing expanded, nothing
+  selected and no scroll; none of those can be seeded from props. `update/2`
+  re-normalises `:data` and clamps the cursor into it, but leaves `:expanded_nodes`
+  and `:selected_nodes` alone. Through the component tree
+  `update_props_from_mount/3` always passes `:on_select`, `:on_expand`,
+  `:on_node_highlight`, `:selection_mode`, `:show_icons`, `:indent_size` and
+  `:data`, and `:width` and `:height` only when they changed.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns the selected node ids as a list.
 
   ## Key bindings
 
@@ -46,7 +105,12 @@ defmodule Drafter.Widget.Tree do
     * `-` — collapse current node
     * `*` — expand all nodes
     * `/` — collapse all nodes
-    * Mouse click — move cursor and toggle expand/collapse
+    * `Shift+←` / `Shift+→` — collapse or expand the current node
+    * Mouse click — move cursor and toggle expand/collapse; this one does not
+      require focus
+
+  Every key binding requires the widget to be focused; unfocused, all of them fall
+  through to `{:noreply, state}`.
 
   ## Usage
 
@@ -96,8 +160,7 @@ defmodule Drafter.Widget.Tree do
   @type tree_node :: %{
           id: term(),
           label: String.t(),
-          children: [tree_node()] | nil,
-          expanded: boolean(),
+          children: [tree_node()],
           icon: String.t() | nil,
           metadata: map()
         }
@@ -126,6 +189,33 @@ defmodule Drafter.Widget.Tree do
           height: pos_integer()
         }
 
+  @doc """
+  Builds the widget state from `props`.
+
+  `:data` is normalised into `t:tree_node/0` maps. Because normalisation drops
+  every key it does not know, an `:expanded` field on an input node is gone by the
+  time the expansion set is built, so `:expanded_nodes` always starts empty.
+  `:cursor_index`, `:selected_nodes` and `:scroll_offset` likewise always start
+  empty and cannot be seeded from props.
+
+      iex> state = Drafter.Widget.Tree.mount(%{data: [%{id: :lib, label: "lib"}]})
+      iex> state.data
+      [%{id: :lib, label: "lib", children: [], icon: nil, metadata: %{}}]
+
+      iex> state = Drafter.Widget.Tree.mount(%{data: [%{id: :lib, label: "lib", expanded: true}]})
+      iex> MapSet.to_list(state.expanded_nodes)
+      []
+
+      iex> state = Drafter.Widget.Tree.mount(%{})
+      iex> {state.data, state.cursor_index, state.selection_mode, state.show_icons, state.indent_size}
+      {[], 0, :single, true, 2}
+
+      iex> state = Drafter.Widget.Tree.mount(%{data: [{"lib", [%{id: :app, label: "app.ex"}]}]})
+      iex> [root] = state.data
+      iex> {root.label, Enum.map(root.children, & &1.label)}
+      {"lib", ["app.ex"]}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     raw_data = Map.get(props, :data, [])
@@ -162,6 +252,17 @@ defmodule Drafter.Widget.Tree do
     }
   end
 
+  @doc """
+  Draws the visible slice of the tree into `rect`, always returning exactly
+  `rect.height` strips.
+
+  `state` may be a plain props map, in which case it is passed through `mount/1`
+  first. Only children of expanded nodes appear. Rows start at `:scroll_offset`;
+  when the flattened list is taller than `rect.height` the last column becomes a
+  scrollbar and the rows are cropped one narrower. Theme colours are merged over
+  the state's style maps first.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     normalized_state =
@@ -209,6 +310,25 @@ defmodule Drafter.Widget.Tree do
     end
   end
 
+  @doc """
+  Scrolls the viewport by three rows per wheel step, without moving the cursor.
+
+  Always returns `{:ok, new_state}`. Scrolling up stops at `0`; scrolling down
+  stops at `visible_row_count - height`, using the state's `:height`, not the rect.
+  Works whether or not the widget is focused.
+
+      iex> data = Enum.map(1..20, fn n -> %{id: n, label: "node"} end)
+      iex> state = Drafter.Widget.Tree.mount(%{data: data, height: 5})
+      iex> {:ok, down} = Drafter.Widget.Tree.handle_scroll(:down, state)
+      iex> down.scroll_offset
+      3
+
+      iex> state = Drafter.Widget.Tree.mount(%{data: [%{id: :a, label: "a"}]})
+      iex> {:ok, down} = Drafter.Widget.Tree.handle_scroll(:down, state)
+      iex> down.scroll_offset
+      0
+  """
+  @spec handle_scroll(:up | :down, t()) :: {:ok, t()}
   @impl Drafter.Widget
   def handle_scroll(:up, state) do
     {:ok, %{state | scroll_offset: max(0, state.scroll_offset - 3)}}
@@ -220,6 +340,49 @@ defmodule Drafter.Widget.Tree do
     {:ok, %{state | scroll_offset: min(max_offset, state.scroll_offset + 3)}}
   end
 
+  @doc """
+  Handles the tree's own events, replacing the dispatch `use Drafter.Widget` would
+  otherwise generate.
+
+  Recognised events are the key bindings listed in the module doc — all of which
+  require `:focused` — plus a mouse up, a mouse wheel, `{:focus}` and `{:blur}`,
+  which do not. Anything else returns `{:noreply, state}`, and so does a cursor
+  move that is already at either end and a collapse or expand that would not change
+  anything.
+
+  A cursor move calls `:on_node_highlight`, expanding or collapsing calls
+  `:on_expand` with the node and its new state, and toggling a selection calls
+  `:on_select` with every selected node.
+
+      iex> data = [%{id: :a, label: "a"}, %{id: :b, label: "b"}]
+      iex> state = Drafter.Widget.Tree.mount(%{data: data, focused: true})
+      iex> {:ok, moved} = Drafter.Widget.Tree.handle_event({:key, :down}, state)
+      iex> moved.cursor_index
+      1
+
+      iex> data = [%{id: :a, label: "a"}]
+      iex> state = Drafter.Widget.Tree.mount(%{data: data, focused: true})
+      iex> Drafter.Widget.Tree.handle_event({:key, :up}, state) == {:noreply, state}
+      true
+
+      iex> data = [%{id: :a, label: "a", children: [%{id: :b, label: "b"}]}]
+      iex> state = Drafter.Widget.Tree.mount(%{data: data, focused: true})
+      iex> {:ok, expanded} = Drafter.Widget.Tree.handle_event({:key, :right}, state)
+      iex> MapSet.to_list(expanded.expanded_nodes)
+      [:a]
+
+      iex> data = [%{id: :a, label: "a"}]
+      iex> state = Drafter.Widget.Tree.mount(%{data: data, focused: true})
+      iex> {:ok, selected} = Drafter.Widget.Tree.handle_event({:key, :" "}, state)
+      iex> MapSet.to_list(selected.selected_nodes)
+      [:a]
+
+      iex> data = [%{id: :a, label: "a"}, %{id: :b, label: "b"}]
+      iex> state = Drafter.Widget.Tree.mount(%{data: data})
+      iex> Drafter.Widget.Tree.handle_event({:key, :down}, state) == {:noreply, state}
+      true
+  """
+  @spec handle_event(term(), t()) :: {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
   def handle_event({:key, :up}, %{focused: true} = state), do: move_cursor_up(state)
   def handle_event({:key, :down}, %{focused: true} = state), do: move_cursor_down(state)
@@ -249,6 +412,26 @@ defmodule Drafter.Widget.Tree do
   def handle_event({:blur}, state), do: {:ok, %{state | focused: false}}
   def handle_event(_event, state), do: {:noreply, state}
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  `:data` is re-normalised on every call, whether or not `props` carries it, and
+  the cursor is clamped to the resulting visible row count. `:expanded_nodes`,
+  `:selected_nodes` and `:scroll_offset` are left alone, so expansion survives new
+  data only for nodes that keep the same explicit `:id`.
+
+      iex> data = [%{id: :a, label: "a"}, %{id: :b, label: "b"}]
+      iex> state = %{Drafter.Widget.Tree.mount(%{data: data}) | cursor_index: 1}
+      iex> updated = Drafter.Widget.Tree.update(%{data: [%{id: :a, label: "a"}]}, state)
+      iex> {length(updated.data), updated.cursor_index}
+      {1, 0}
+
+      iex> state = Drafter.Widget.Tree.mount(%{data: [%{id: :a, label: "a"}]})
+      iex> Drafter.Widget.Tree.update(%{show_icons: false}, state).show_icons
+      false
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     new_data = Map.get(props, :data, state.data)
@@ -730,10 +913,49 @@ defmodule Drafter.Widget.Tree do
     end
   end
 
+  @doc """
+  The number of rows the element asks for: `opts[:height]`, default `:auto`.
+
+  Unlike the other widgets this returns an atom when no height is given, leaving
+  the row count to the layout.
+
+      iex> Drafter.Widget.Tree.preferred_height(nil, [])
+      :auto
+
+      iex> Drafter.Widget.Tree.preferred_height(nil, height: 12)
+      12
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer() | :auto
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, :auto)
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.Tree.component_tag()
+      :tree
+  """
+  @spec component_tag() :: :tree
   def component_tag, do: :tree
 
+  @doc """
+  Builds the props map for a `{:tree, opts}` element.
+
+  The positional argument is ignored; the nodes come from `opts[:data]`.
+  `:on_select` and `:on_node_highlight` go through
+  `Drafter.Widget.Callback.wrap_1/1` and `:on_expand` through `wrap_2/1`, so an
+  atom becomes a closure that dispatches an app event. `:width` and `:height` fall
+  back to `opts[:__rect__]`, itself defaulting to `%{width: 80, height: 20}`. The
+  five style maps are not forwarded.
+
+      iex> props = Drafter.Widget.Tree.from_component_opts(nil, data: [%{id: :a, label: "a"}])
+      iex> {props.selection_mode, props.show_icons, props.indent_size, props.width, props.height}
+      {:single, true, 2, 80, 20}
+
+      iex> props = Drafter.Widget.Tree.from_component_opts(nil, on_select: :picked)
+      iex> {props.data, is_function(props.on_select, 1)}
+      {[], true}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
 
@@ -750,6 +972,25 @@ defmodule Drafter.Widget.Tree do
     }
   end
 
+  @doc """
+  Narrows a re-render to the props that may safely change after mount.
+
+  Always passes `:on_select`, `:on_expand`, `:on_node_highlight`,
+  `:selection_mode`, `:show_icons`, `:indent_size` and `:data`. Adds `:width` and
+  `:height` only when they differ from the mounted state.
+
+      iex> props = Drafter.Widget.Tree.from_component_opts(nil, data: [%{id: :a, label: "a"}])
+      iex> state = Drafter.Widget.Tree.mount(props)
+      iex> Drafter.Widget.Tree.update_props_from_mount(props, state, []) |> Map.keys() |> Enum.sort()
+      [:data, :indent_size, :on_expand, :on_node_highlight, :on_select, :selection_mode, :show_icons]
+
+      iex> props = Drafter.Widget.Tree.from_component_opts(nil, __rect__: %{width: 40, height: 8})
+      iex> state = Drafter.Widget.Tree.mount(%{})
+      iex> result = Drafter.Widget.Tree.update_props_from_mount(props, state, [])
+      iex> {result.width, result.height}
+      {40, 8}
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, existing_state, _opts) do
     base = %{
       on_select: mount_props.on_select,

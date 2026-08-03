@@ -1,39 +1,49 @@
 defmodule Drafter.LayerCompositor do
   @moduledoc """
-  Layered composition system for TUI rendering.
+  Composites independently rendered layers into a single list of strips.
 
-  Provides clean layer-based composition similar to modern graphics systems.
-  Each layer renders independently and is composited together while preserving
-  styling and transparency.
+  A layer is `create_layer/5`: an id, the strips to draw, the bounds they occupy
+  within the viewport, a `z_index`, and an opacity. `composite/2` draws the layers
+  onto a blank viewport in ascending `z_index` order, each at its own bounds, so a
+  higher `z_index` covers a lower one. Segment styling is preserved and translucent
+  styles are blended against what they cover.
 
-  Layer types (in render order):
-  1. Background - Base theme colors, panels, backgrounds  
-  2. Content - Text content, panels, cards
-  3. Widgets - Interactive elements (buttons, inputs, etc.)
-  4. Chrome - UI decorations (borders, scrollbars, focus indicators)
+  The named constructors fix the `z_index` for the usual roles:
+
+    * `background_layer/2` — 0, base theme colours and panel fills
+    * `content_layer/3` — 10, text, panels, cards
+    * `chrome_layer/3` — 30, borders, scrollbars, focus indicators
+    * `widget_layer/6` — `z_base` plus a depth derived from the widget, see its
+      own documentation
   """
 
   alias Drafter.Draw.{Segment, Strip}
 
+  @type bounds :: %{x: integer(), y: integer(), width: integer(), height: integer()}
+
   @type layer :: %{
-          id: atom(),
+          id: term(),
           z_index: integer(),
           strips: [Strip.t()],
-          bounds: %{x: integer(), y: integer(), width: integer(), height: integer()}
+          bounds: bounds(),
+          opacity: float()
         }
 
   @type viewport :: %{width: integer(), height: integer()}
   @type composition_result :: [Strip.t()]
 
   @doc """
-  Create a new layer for composition.
+  Build a layer.
 
-  ## Parameters
-  - id: Unique identifier for the layer
-  - strips: Rendered strips for this layer
-  - bounds: Rendering bounds %{x: x, y: y, width: w, height: h}
-  - z_index: Layer depth (higher = on top)
+    * `id` — identifier, unique among the layers composited together
+    * `strips` — the rows to draw, top to bottom; `nil` is taken as `[]`
+    * `bounds` — `%{x: x, y: y, width: w, height: h}`, where the strips are drawn
+    * `z_index` — draw order, higher covering lower, default `0`
+    * `opacity` — `0.0` to `1.0`, default `1.0`
+
+  No validation is performed; the values are stored as given.
   """
+  @spec create_layer(term(), [Strip.t()] | nil, bounds(), integer(), float()) :: layer()
   def create_layer(id, strips, bounds, z_index \\ 0, opacity \\ 1.0) do
     %{
       id: id,
@@ -45,11 +55,13 @@ defmodule Drafter.LayerCompositor do
   end
 
   @doc """
-  Composite multiple layers into a final rendered view.
+  Draw `layers` onto a blank `viewport` and return one strip per viewport row.
 
-  Layers are composited in z_index order (lowest to highest).
-  Each layer's content is placed at its bounds position.
+  `viewport` is `%{width: w, height: h}`. Layers are drawn in ascending `z_index`
+  order, each at its own bounds; parts falling outside the viewport are dropped.
+  Always returns `viewport.height` strips, each `viewport.width` columns wide.
   """
+  @spec composite([layer()], viewport()) :: composition_result()
   def composite(layers, viewport) when is_list(layers) do
     sorted_layers = Enum.sort_by(layers, & &1.z_index)
     canvas = initialize_canvas(viewport)
@@ -59,6 +71,16 @@ defmodule Drafter.LayerCompositor do
     end)
   end
 
+  @doc """
+  Recompose only the viewport rows in `dirty_rows`, reusing `previous_composite`.
+
+  `dirty_rows` holds zero-based viewport row indices. Rows not listed are taken
+  from `previous_composite`, or left blank where it is shorter than the viewport.
+  An empty `dirty_rows` returns `previous_composite` untouched.
+
+  The caller is responsible for `dirty_rows` covering every row that changed;
+  rows omitted keep whatever they showed before.
+  """
   @spec composite_incremental([map()], viewport(), [Strip.t()], MapSet.t(non_neg_integer())) ::
           [Strip.t()]
   def composite_incremental(layers, viewport, previous_composite, dirty_rows) do
@@ -143,15 +165,17 @@ defmodule Drafter.LayerCompositor do
   end
 
   @doc """
-  Create a background layer with theme-based styling.
+  A layer at `z_index` 0, beneath every other layer these constructors make.
+
+  Its id is always `:background`.
   """
+  @spec background_layer([Strip.t()] | nil, bounds()) :: layer()
   def background_layer(strips, bounds) do
     create_layer(:background, strips, bounds, 0)
   end
 
-  @doc """
-  Create a content layer for panels, text, etc.
-  """
+  @doc "A layer at `z_index` 10, above the background and below chrome."
+  @spec content_layer(term(), [Strip.t()] | nil, bounds()) :: layer()
   def content_layer(id, strips, bounds) do
     create_layer(id, strips, bounds, 10)
   end
@@ -164,12 +188,21 @@ defmodule Drafter.LayerCompositor do
   ]
 
   @doc """
-  Wrap a widget's strips in a layer at a depth derived from its id and module.
+  A layer for a widget, at a `z_index` derived from its id and module.
 
-  Ids beginning with `"footer"` or `"header"` sit above content; container modules
-  sit below it; everything else takes the default depth. The result is offset by
-  `z_base`.
+  `z_base` is added to an offset chosen by the first rule that applies: 50 for an
+  id whose name begins `"footer"`, 40 for one beginning `"header"`, 10 for a
+  container module (`Drafter.Widget.Box`, `Card`, `Collapsible`,
+  `ScrollableContainer`), and 20 otherwise.
+
+  `widget_module` may be `nil`, in which case the container rule cannot apply. The id
+  prefix rules match on the id rendered as a string, so both `:footer_bar` and
+  `"footer_bar"` take the footer offset.
+
+  `z_base` defaults to `0` and `opacity` to `1.0`.
   """
+  @spec widget_layer(term(), [Strip.t()] | nil, bounds(), integer(), module() | nil, float()) ::
+          layer()
   def widget_layer(widget_id, strips, bounds, z_base \\ 0, widget_module \\ nil, opacity \\ 1.0) do
     create_layer(
       widget_id,
@@ -195,9 +228,8 @@ defmodule Drafter.LayerCompositor do
   defp id_to_string(id) when is_binary(id), do: id
   defp id_to_string(id), do: inspect(id)
 
-  @doc """
-  Create a chrome layer for UI decorations.
-  """
+  @doc "A layer at `z_index` 30, above content and above widgets at the default `z_base`."
+  @spec chrome_layer(term(), [Strip.t()] | nil, bounds()) :: layer()
   def chrome_layer(id, strips, bounds) do
     create_layer(id, strips, bounds, 30)
   end

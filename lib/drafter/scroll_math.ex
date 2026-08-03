@@ -20,6 +20,25 @@ defmodule Drafter.ScrollMath do
 
   Anchors the viewport to the *end* of the data and scrolls left from there,
   matching the chart/timeline convention where new data arrives at the right.
+
+  `scroll_offset` counts elements back from the end, so `0` shows the newest
+  `viewport_size` elements. `data` may be a list or a tuple; the slice is always a
+  list. When the offset walks past the start, the slice shortens rather than wrapping.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.end_anchored_slice([1, 2, 3, 4, 5], 0, 3)
+      {2, [3, 4, 5]}
+
+      iex> Drafter.ScrollMath.end_anchored_slice([1, 2, 3, 4, 5], 2, 3)
+      {0, [1, 2, 3]}
+
+      iex> Drafter.ScrollMath.end_anchored_slice([1, 2, 3, 4, 5], 4, 3)
+      {0, [1]}
+
+      iex> Drafter.ScrollMath.end_anchored_slice({1, 2, 3, 4, 5}, 1, 2)
+      {2, [3, 4]}
+
   """
   @spec end_anchored_slice(list() | tuple(), non_neg_integer(), pos_integer()) ::
           {non_neg_integer(), list()}
@@ -39,6 +58,22 @@ defmodule Drafter.ScrollMath do
   @doc """
   Returns the adjusted scroll offset that keeps `target_index` visible within
   a viewport of `viewport_size` rows starting at the current `scroll_offset`.
+
+  Scrolls the minimum distance: the target is placed at the top when it is above the
+  viewport, at the bottom when it is below, and the offset is returned unchanged when
+  it is already visible.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.ensure_visible(0, 7, 5)
+      3
+
+      iex> Drafter.ScrollMath.ensure_visible(10, 4, 5)
+      4
+
+      iex> Drafter.ScrollMath.ensure_visible(3, 5, 5)
+      3
+
   """
   @spec ensure_visible(non_neg_integer(), non_neg_integer(), pos_integer()) ::
           non_neg_integer()
@@ -57,6 +92,21 @@ defmodule Drafter.ScrollMath do
 
   @doc """
   Clamps `offset` so it never exceeds `max(0, content_size - viewport_size)`.
+
+  Negative offsets clamp to `0`, and content that fits the viewport pins the offset
+  at `0`.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.clamp(50, 10, 4)
+      6
+
+      iex> Drafter.ScrollMath.clamp(-3, 10, 4)
+      0
+
+      iex> Drafter.ScrollMath.clamp(2, 3, 10)
+      0
+
   """
   @spec clamp(integer(), non_neg_integer(), pos_integer()) :: non_neg_integer()
   def clamp(offset, content_size, viewport_size) do
@@ -66,6 +116,24 @@ defmodule Drafter.ScrollMath do
 
   @doc """
   Converts a drag ratio (0.0–1.0) to a clamped scroll offset.
+
+  The ratio is scaled by `max(0, content_size - viewport_size)` and rounded, then
+  clamped into that same range, so ratios outside `0.0..1.0` are safe.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.from_ratio(0.0, 100, 10)
+      0
+
+      iex> Drafter.ScrollMath.from_ratio(0.5, 100, 10)
+      45
+
+      iex> Drafter.ScrollMath.from_ratio(1.0, 100, 10)
+      90
+
+      iex> Drafter.ScrollMath.from_ratio(2.0, 100, 10)
+      90
+
   """
   @spec from_ratio(float(), non_neg_integer(), pos_integer()) :: non_neg_integer()
   def from_ratio(ratio, content_size, viewport_size) do

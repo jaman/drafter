@@ -114,6 +114,14 @@ defmodule Drafter.CharacterSet do
       braille: ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
       line: ["|", "/", "-", "\\"],
       points: ["•", "·", "•", "·", "•"]
+    },
+    slider: %{
+      track: "─",
+      fill: "━",
+      thumb: "●",
+      thumb_focused: "◉",
+      track_v: "│",
+      fill_v: "┃"
     }
   }
 
@@ -203,6 +211,14 @@ defmodule Drafter.CharacterSet do
       braille: ["|", "/", "-", "\\"],
       line: ["|", "/", "-", "\\"],
       points: [".", "o", "O", "o", "."]
+    },
+    slider: %{
+      track: "─",
+      fill: "═",
+      thumb: "█",
+      thumb_focused: "▓",
+      track_v: "│",
+      fill_v: "║"
     }
   }
 
@@ -292,6 +308,14 @@ defmodule Drafter.CharacterSet do
       braille: ["|", "/", "-", "\\"],
       line: ["|", "/", "-", "\\"],
       points: [".", "o", "O", "o", "."]
+    },
+    slider: %{
+      track: "-",
+      fill: "=",
+      thumb: "O",
+      thumb_focused: "@",
+      track_v: "|",
+      fill_v: "#"
     }
   }
 
@@ -381,6 +405,14 @@ defmodule Drafter.CharacterSet do
       braille: ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
       line: ["|", "/", "-", "\\"],
       points: ["•", "·", "•", "·", "•"]
+    },
+    slider: %{
+      track: "─",
+      fill: "━",
+      thumb: "●",
+      thumb_focused: "◉",
+      track_v: "│",
+      fill_v: "┃"
     }
   }
 
@@ -470,6 +502,14 @@ defmodule Drafter.CharacterSet do
       braille: ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
       line: ["|", "/", "-", "\\"],
       points: ["•", "·", "•", "·", "•"]
+    },
+    slider: %{
+      track: "─",
+      fill: "═",
+      thumb: "●",
+      thumb_focused: "◉",
+      track_v: "│",
+      fill_v: "║"
     }
   }
 
@@ -540,6 +580,14 @@ defmodule Drafter.CharacterSet do
   @doc "Look up a scrollbar character for the given skin."
   @spec scroll(atom(), atom()) :: String.t()
   def scroll(key, skin), do: get_in(@skins, [skin, :scroll, key]) || "?"
+
+  @doc "Look up a slider character for the current skin."
+  @spec slider(atom()) :: String.t()
+  def slider(key), do: slider(key, current_skin())
+
+  @doc "Look up a slider character for the given skin."
+  @spec slider(atom(), atom()) :: String.t()
+  def slider(key, skin), do: get_in(@skins, [skin, :slider, key]) || "?"
 
   @doc "Returns the vertical sparkline level list for the current skin."
   @spec sparkline_levels_v() :: [String.t()]

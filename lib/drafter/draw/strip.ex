@@ -6,6 +6,14 @@ defmodule Drafter.Draw.Strip do
   display column width and a hash-based `cache_key` to skip redundant re-renders.
   Common operations include `crop/2`, `pad/2`, `combine/2`, `divide/2`, `slice/3`,
   `center/2`, and ANSI serialisation via `to_ansi/1`.
+
+      iex> alias Drafter.Draw.{Segment, Strip}
+      iex> strip = Strip.new([Segment.plain("ab"), Segment.new("cd", %{bold: true})])
+      iex> Strip.width(strip)
+      4
+      iex> Strip.to_ansi(strip)
+      "ab\\e[1mcd\\e[0m"
+
   """
 
   alias Drafter.Draw.Segment
@@ -18,7 +26,19 @@ defmodule Drafter.Draw.Strip do
 
   defstruct segments: [], width: 0, cache_key: nil
 
-  @doc "Create a new strip from segments"
+  @doc """
+  A strip holding `segments` in order.
+
+  The strip's width is the sum of the segment widths, and its `cache_key` a hash
+  of the segments.
+
+  ## Examples
+
+      iex> strip = Drafter.Draw.Strip.new([Drafter.Draw.Segment.plain("日本")])
+      iex> strip.width
+      4
+
+  """
   @spec new([Segment.t()]) :: t()
   def new(segments) when is_list(segments) do
     width =
@@ -33,18 +53,53 @@ defmodule Drafter.Draw.Strip do
     }
   end
 
-  @doc "Create an empty strip"
+  @doc """
+  A strip with no segments and zero width.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.empty()
+      %Drafter.Draw.Strip{segments: [], width: 0, cache_key: nil}
+
+  """
   @spec empty() :: t()
   def empty, do: %__MODULE__{}
 
-  @doc "Create strip from plain text"
+  @doc """
+  A strip of one unstyled segment holding `text`.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("hi").segments
+      [%Drafter.Draw.Segment{text: "hi", style: %{}, width: 2}]
+
+  """
   @spec from_text(String.t()) :: t()
   def from_text(text) do
     segment = Segment.plain(text)
     new([segment])
   end
 
-  @doc "Crop strip to specified width"
+  @doc """
+  Cut the strip down to `crop_width` display columns.
+
+  A strip already that narrow is returned unchanged, and a `crop_width` of zero or
+  less gives an empty strip. The segment straddling the boundary is cropped and
+  the segments past it are dropped.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("hello")
+      ...> |> Drafter.Draw.Strip.crop(3)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "hel"
+
+      iex> Drafter.Draw.Strip.from_text("hello")
+      ...> |> Drafter.Draw.Strip.crop(0)
+      ...> |> Drafter.Draw.Strip.width()
+      0
+
+  """
   @spec crop(t(), non_neg_integer()) :: t()
   def crop(%__MODULE__{segments: segments, width: width} = strip, crop_width) do
     cond do
@@ -63,9 +118,28 @@ defmodule Drafter.Draw.Strip do
   @doc """
   Narrow a strip to `width`.
 
-  `:clip` cuts at the boundary. `:ellipsis` cuts at `width - 1` and appends `…`
-  in the trailing segment's style. A strip already within `width` is returned
-  unchanged.
+  `mode` defaults to `:clip`, which cuts at the boundary. `:ellipsis` cuts at
+  `width - 1` and appends `…` in the trailing segment's style. A strip already
+  within `width` is returned unchanged, and a `width` of zero or less clips
+  whatever the mode.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("hello")
+      ...> |> Drafter.Draw.Strip.overflow(3)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "hel"
+
+      iex> Drafter.Draw.Strip.from_text("hello")
+      ...> |> Drafter.Draw.Strip.overflow(3, :ellipsis)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "he…"
+
+      iex> Drafter.Draw.Strip.from_text("hi")
+      ...> |> Drafter.Draw.Strip.overflow(5, :ellipsis)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "hi"
+
   """
   @spec overflow(t(), non_neg_integer(), :clip | :ellipsis) :: t()
   def overflow(strip, width, mode \\ :clip)
@@ -84,13 +158,39 @@ defmodule Drafter.Draw.Strip do
   defp trailing_style(%__MODULE__{segments: []}), do: %{}
   defp trailing_style(%__MODULE__{segments: segments}), do: List.last(segments).style
 
-  @doc "Fit strip to exact width by cropping or padding"
+  @doc """
+  The strip at exactly `target_width` columns, cropped or space-padded on the right.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("hello")
+      ...> |> Drafter.Draw.Strip.fit_to_width(3)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "hel"
+
+      iex> Drafter.Draw.Strip.from_text("hi")
+      ...> |> Drafter.Draw.Strip.fit_to_width(4)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "hi  "
+
+  """
   @spec fit_to_width(t(), non_neg_integer()) :: t()
   def fit_to_width(strip, target_width) do
     strip |> crop(target_width) |> pad(target_width)
   end
 
-  @doc "Pad strip to specified width with spaces"
+  @doc """
+  Append an unstyled run of spaces until the strip is `target_width` columns wide,
+  or return it unchanged if it already is.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("ab")
+      ...> |> Drafter.Draw.Strip.pad(5)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "ab   "
+
+  """
   @spec pad(t(), non_neg_integer()) :: t()
   def pad(%__MODULE__{segments: segments, width: width} = strip, target_width) do
     if target_width > width do
@@ -102,13 +202,36 @@ defmodule Drafter.Draw.Strip do
     end
   end
 
-  @doc "Combine two strips"
+  @doc """
+  A strip whose segments are the first strip's followed by the second's.
+
+  Segments are never merged, even when their styles are equal.
+
+  ## Examples
+
+      iex> left = Drafter.Draw.Strip.from_text("ab")
+      iex> right = Drafter.Draw.Strip.from_text("cd")
+      iex> combined = Drafter.Draw.Strip.combine(left, right)
+      iex> {Drafter.Draw.Strip.to_plain_text(combined), length(combined.segments)}
+      {"abcd", 2}
+
+  """
   @spec combine(t(), t()) :: t()
   def combine(%__MODULE__{segments: segments1}, %__MODULE__{segments: segments2}) do
     new(segments1 ++ segments2)
   end
 
-  @doc "Apply style to all segments in strip"
+  @doc """
+  Merge `style` into every segment's style, `style` winning on shared keys.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("ab")
+      ...> |> Drafter.Draw.Strip.apply_style(%{bold: true})
+      ...> |> Map.fetch!(:segments)
+      [%Drafter.Draw.Segment{text: "ab", style: %{bold: true}, width: 2}]
+
+  """
   @spec apply_style(t(), Segment.style()) :: t()
   def apply_style(%__MODULE__{segments: segments}, style) do
     styled_segments = Enum.map(segments, &Segment.apply_style(&1, style))
@@ -118,10 +241,28 @@ defmodule Drafter.Draw.Strip do
   @doc """
   The row as one ANSI string.
 
-  Style codes carry across segments: a segment whose style matches the one before
-  it emits only its text, and the row is reset once at the end. A reset is emitted
-  mid-row only when a segment drops an attribute the previous one set, since
-  colours can be overwritten but flags cannot.
+  Style codes carry across segments: a segment whose style equals the previous
+  one's emits only its text, and a segment that adds keys emits only the codes for
+  those keys. A full reset (`\\e[0m`) is emitted before a segment that drops a key
+  the previous segment had set, and once more at the end of the row unless the last
+  segment is unstyled.
+
+  ## Examples
+
+      iex> alias Drafter.Draw.{Segment, Strip}
+      iex> Strip.new([Segment.plain("ab"), Segment.new("cd", %{bold: true})])
+      ...> |> Strip.to_ansi()
+      "ab\\e[1mcd\\e[0m"
+
+      iex> alias Drafter.Draw.{Segment, Strip}
+      iex> Strip.new([
+      ...>   Segment.new("A", %{bold: true}),
+      ...>   Segment.new("B", %{bold: true, italic: true}),
+      ...>   Segment.plain("C")
+      ...> ])
+      ...> |> Strip.to_ansi()
+      "\\e[1mA\\e[3mB\\e[0mC"
+
   """
   @spec to_ansi(t()) :: String.t()
   def to_ansi(%__MODULE__{segments: segments}) do
@@ -162,11 +303,33 @@ defmodule Drafter.Draw.Strip do
   defp set?(nil), do: false
   defp set?(_value), do: true
 
-  @doc "Get display width of strip"
+  @doc """
+  The strip's width in display columns.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("日本") |> Drafter.Draw.Strip.width()
+      4
+
+  """
   @spec width(t()) :: non_neg_integer()
   def width(%__MODULE__{width: width}), do: width
 
-  @doc "Check if strip is empty"
+  @doc """
+  Whether the strip has no segments, or every segment has empty text.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.empty() |> Drafter.Draw.Strip.empty?()
+      true
+
+      iex> Drafter.Draw.Strip.from_text("") |> Drafter.Draw.Strip.empty?()
+      true
+
+      iex> Drafter.Draw.Strip.from_text(" ") |> Drafter.Draw.Strip.empty?()
+      false
+
+  """
   @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{segments: []}), do: true
 
@@ -174,7 +337,29 @@ defmodule Drafter.Draw.Strip do
     Enum.all?(segments, &Segment.empty?/1)
   end
 
-  @doc "Divide strip into two parts at specified position"
+  @doc """
+  Split the strip into `{left, right}` at display column `position`.
+
+  `left` is `position` columns wide. A `position` of zero or less puts everything
+  in `right`; a `position` at or past the strip's width puts everything in `left`.
+  A segment straddling the split is divided between the two, both halves keeping
+  its style.
+
+  ## Examples
+
+      iex> {left, right} = Drafter.Draw.Strip.divide(Drafter.Draw.Strip.from_text("hello"), 2)
+      iex> {Drafter.Draw.Strip.to_plain_text(left), Drafter.Draw.Strip.to_plain_text(right)}
+      {"he", "llo"}
+
+      iex> {left, right} = Drafter.Draw.Strip.divide(Drafter.Draw.Strip.from_text("hello"), 0)
+      iex> {Drafter.Draw.Strip.to_plain_text(left), Drafter.Draw.Strip.to_plain_text(right)}
+      {"", "hello"}
+
+      iex> {left, right} = Drafter.Draw.Strip.divide(Drafter.Draw.Strip.from_text("hello"), 9)
+      iex> {Drafter.Draw.Strip.to_plain_text(left), Drafter.Draw.Strip.to_plain_text(right)}
+      {"hello", ""}
+
+  """
   @spec divide(t(), non_neg_integer()) :: {t(), t()}
   def divide(%__MODULE__{segments: segments} = strip, position) do
     cond do
@@ -190,7 +375,17 @@ defmodule Drafter.Draw.Strip do
     end
   end
 
-  @doc "Get slice of strip from start to end position"
+  @doc """
+  The `length` columns of the strip beginning at display column `start`.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("hello")
+      ...> |> Drafter.Draw.Strip.slice(1, 3)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "ell"
+
+  """
   @spec slice(t(), non_neg_integer(), non_neg_integer()) :: t()
   def slice(strip, start, length) do
     strip
@@ -199,7 +394,25 @@ defmodule Drafter.Draw.Strip do
     |> crop(length)
   end
 
-  @doc "Center strip within specified width"
+  @doc """
+  The strip centred in `target_width` columns between unstyled space padding.
+
+  An odd remainder puts the extra column on the right. A strip at least as wide as
+  `target_width` is cropped to it instead.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("ab")
+      ...> |> Drafter.Draw.Strip.center(7)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "  ab   "
+
+      iex> Drafter.Draw.Strip.from_text("hello")
+      ...> |> Drafter.Draw.Strip.center(3)
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "hel"
+
+  """
   @spec center(t(), non_neg_integer()) :: t()
   def center(%__MODULE__{width: width} = strip, target_width) do
     if target_width <= width do
@@ -216,19 +429,51 @@ defmodule Drafter.Draw.Strip do
     end
   end
 
-  @doc "Prepend a segment to the strip"
+  @doc """
+  A strip with `segment` before the existing segments.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("bc")
+      ...> |> Drafter.Draw.Strip.prepend(Drafter.Draw.Segment.plain("a"))
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "abc"
+
+  """
   @spec prepend(t(), Segment.t()) :: t()
   def prepend(%__MODULE__{segments: segments}, segment) do
     new([segment | segments])
   end
 
-  @doc "Append a segment to the strip"
+  @doc """
+  A strip with `segment` after the existing segments.
+
+  ## Examples
+
+      iex> Drafter.Draw.Strip.from_text("ab")
+      ...> |> Drafter.Draw.Strip.append(Drafter.Draw.Segment.plain("c"))
+      ...> |> Drafter.Draw.Strip.to_plain_text()
+      "abc"
+
+  """
   @spec append(t(), Segment.t()) :: t()
   def append(%__MODULE__{segments: segments}, segment) do
     new(segments ++ [segment])
   end
 
-  @doc "Convert strip to plain text without styling"
+  @doc """
+  The strip's segment text joined, with no style codes added.
+
+  Any ANSI sequences already embedded in a segment's text are kept.
+
+  ## Examples
+
+      iex> alias Drafter.Draw.{Segment, Strip}
+      iex> Strip.new([Segment.plain("ab"), Segment.new("cd", %{bold: true})])
+      ...> |> Strip.to_plain_text()
+      "abcd"
+
+  """
   @spec to_plain_text(t()) :: String.t()
   def to_plain_text(%__MODULE__{segments: segments}) do
     Enum.map_join(segments, fn %Segment{text: text} -> text end)

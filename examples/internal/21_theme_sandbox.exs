@@ -214,6 +214,11 @@ defmodule ThemeSandbox do
                     label("Checkboxes:"),
                     checkbox("Option A", checked: false),
                     checkbox("Option B", checked: true)
+                  ]),
+                  vertical([
+                    label("Sliders:"),
+                    slider(value: 0.35),
+                    slider(value: 0.8, disabled: true)
                   ])
                 ],
                 gap: 4

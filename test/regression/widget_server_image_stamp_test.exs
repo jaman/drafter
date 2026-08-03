@@ -15,7 +15,7 @@ defmodule Drafter.Regression.WidgetServerImageStampTest do
 
     @impl true
     def handle_cast(
-          {:put_image, _id, _paint, _clear, _dx, _dy, _cols, _rows, stamp, _place},
+          {:put_image, _id, _paint, _clear, %{stamp: stamp}},
           parent
         ) do
       send(parent, {:put_image_stamp, stamp})

@@ -5,16 +5,35 @@ defmodule Drafter.Widget.FilePicker do
   Use `show/1` to open the picker as a modal overlay. Callbacks are delivered
   as app events to the calling screen's `handle_event/3`.
 
+  This module has no `component_tag/0` and no `Drafter.App` helper: it is a
+  screen shown by `show/1`, not an element placed in a render tree.
+
   ## Options
 
-    * `:on_select` - atom or function called with the selected path
-    * `:on_cancel` - atom or function called when the picker is dismissed
-    * `:path` - initial directory path (default: `~/`)
-    * `:allow_dirs` - allow selecting directories (default: `false`)
-    * `:filter` - list of file extensions to show, e.g. `[".ex", ".exs"]`
-    * `:title` - label for the open button (default: `"Open"`)
-    * `:width` - modal width in columns (default: `90`)
-    * `:height` - modal height in rows (default: `26`)
+  These are the options `show/1` accepts. It converts them into the props
+  `mount/1` receives, so `:path` arrives as `:initial_path`, and `:width` and
+  `:height` are applied to the modal frame rather than passed to `mount/1`.
+
+    * `:on_select` - atom event name or one-arity function called with the selected
+      path. Default `nil`
+    * `:on_cancel` - atom event name, or a function of arity 0 or 1, called when the
+      picker is dismissed. Default `nil`
+    * `:path` - initial path. Default `Path.expand("~/")`. A file path opens its
+      containing directory with that file preselected
+    * `:allow_dirs` - `t:boolean/0`, allow selecting directories. Default `false`.
+      With it on, the Open button stays enabled and falls back to the directory
+      currently shown
+    * `:filter` - list of file extensions, e.g. `[".ex", ".exs"]`. Default `nil`.
+      Carried on the state but not applied: every file is listed either way
+    * `:title` - label for the open button. Default `"Open"`
+    * `:width` - modal width in columns. Default `90`
+    * `:height` - modal height in rows. Default `26`
+
+  ## Key bindings
+
+  `↑`/`↓` navigate the tree, `Enter` expands a directory or selects a file, `h`
+  toggles hidden files, and `Esc` cancels. Pasting text sets the location to the
+  first pasted line, stripping a `file://` prefix.
 
   ## Usage
 
@@ -35,6 +54,28 @@ defmodule Drafter.Widget.FilePicker do
     {"/  (root)", "/"}
   ]
 
+  @type state :: %{
+          tree_root: Path.t(),
+          selected_path: Path.t() | nil,
+          show_hidden: boolean(),
+          sidebar: [{String.t(), Path.t()}],
+          on_select: (Path.t() -> any()) | nil,
+          on_cancel: (any() -> any()) | (-> any()) | nil,
+          allow_dirs: boolean(),
+          filter: [String.t()] | nil,
+          title: String.t()
+        }
+
+  @doc """
+  Builds the `{:show_modal, module, props, opts}` tuple that opens the picker.
+
+  Return it from a screen's `handle_event/3` or `update/2`. An atom `:on_select` or
+  `:on_cancel` is wrapped into a closure that sends `{:app_event, name, data}` to
+  the calling process, so `show/1` must be called from the app loop's process.
+
+  See the module documentation for every option and its default.
+  """
+  @spec show(keyword()) :: {:show_modal, module(), map(), keyword()}
   def show(opts \\ []) do
     session_pid = self()
 
@@ -70,6 +111,15 @@ defmodule Drafter.Widget.FilePicker do
     {:show_modal, __MODULE__, props, modal_opts}
   end
 
+  @doc """
+  Builds the screen state from the props `show/1` produced.
+
+  `:initial_path` decides the starting location: a directory becomes the tree root
+  with nothing selected, and a regular file opens its parent directory with that
+  file preselected. The sidebar lists only the standard locations that exist on this
+  machine.
+  """
+  @spec mount(map()) :: state()
   def mount(props) do
     raw_path = Map.get(props, :initial_path, Path.expand("~/"))
     tree_root = if File.dir?(raw_path), do: raw_path, else: Path.dirname(raw_path)
@@ -88,10 +138,25 @@ defmodule Drafter.Widget.FilePicker do
     }
   end
 
+  @doc """
+  The key bindings shown by `Drafter.Widget.Footer` while the picker is on top.
+
+      iex> Drafter.Widget.FilePicker.keybindings()
+      [{"↑↓", "navigate"}, {"Enter", "expand/select"}, {"h", "hidden"}, {"Esc", "cancel"}]
+  """
+  @spec keybindings() :: [{String.t(), String.t()}]
   def keybindings do
     [{"↑↓", "navigate"}, {"Enter", "expand/select"}, {"h", "hidden"}, {"Esc", "cancel"}]
   end
 
+  @doc """
+  Builds the picker's element tree: a hidden-files toolbar, a split pane with the
+  locations sidebar on the left and the directory tree on the right, and a selection
+  line with Cancel and Open buttons at the bottom.
+
+  Open is disabled while nothing is selected, unless `:allow_dirs` is set.
+  """
+  @spec render(state()) :: tuple()
   def render(state) do
     vertical([
       render_toolbar(state),
@@ -180,6 +245,22 @@ defmodule Drafter.Widget.FilePicker do
     |> Enum.filter(fn {_label, path} -> File.dir?(path) end)
   end
 
+  @doc """
+  Handles the app events the picker's own widgets raise.
+
+    * `:fp_file_selected` — records the file as the selection
+    * `:fp_item_selected` — records the path as the selection when it is a regular
+      file, or a directory with `:allow_dirs` set; otherwise `{:noreply, state}`
+    * `:fp_location_selected` — moves the tree to that directory and clears the
+      selection
+    * `:fp_open` — calls `:on_select` with the selection, or with the current
+      directory when `:allow_dirs` is set and nothing is selected, then returns
+      `{:pop, {:selected, path}}`. With nothing to open it returns
+      `{:noreply, state}`
+    * `:fp_cancel` — calls `:on_cancel` and returns `{:pop, :cancelled}`
+  """
+  @spec handle_event(atom(), term(), state()) ::
+          {:ok, state()} | {:noreply, state()} | {:pop, term()}
   def handle_event(:fp_file_selected, path, state) do
     {:ok, %{state | selected_path: path}}
   end
@@ -217,6 +298,16 @@ defmodule Drafter.Widget.FilePicker do
     {:pop, :cancelled}
   end
 
+  @doc """
+  Handles raw input events.
+
+  `{:key, :escape}` calls `:on_cancel` and returns `{:pop, :cancelled}`.
+  `{:key, :h}` toggles hidden files. A bracketed paste takes the first line, strips
+  a `file://` prefix, and moves to that directory, or to the file's parent with the
+  file selected; a path that does not exist is ignored. Everything else returns
+  `{:noreply, state}`.
+  """
+  @spec handle_event(tuple(), state()) :: {:ok, state()} | {:noreply, state()} | {:pop, term()}
   def handle_event({:key, :escape}, state) do
     call_callback(state.on_cancel, nil)
     {:pop, :cancelled}

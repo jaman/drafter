@@ -5,7 +5,7 @@ defmodule Drafter.Theme do
   A theme is a `%Drafter.Theme{}` struct containing named RGB color slots covering
   UI surfaces, semantic colors (primary, secondary, accent, warning, error, success),
   text variants, cursor colors, and a `syntax` map for code highlighting. The framework
-  ships with eleven ready-to-use themes accessible via `available_themes/0` and
+  ships with thirteen ready-to-use themes accessible via `available_themes/0` and
   `get_theme/1`, including `"textual-dark"`, `"nord"`, `"dracula"`, `"monokai"`,
   `"tokyo-night"`, and `"catppuccin-mocha"`.
   """
@@ -46,9 +46,26 @@ defmodule Drafter.Theme do
   @type rgb :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
   @doc """
-  Calculate a muted version of a color by reducing saturation.
-  Blends the color with gray by approximately 50%.
+  A desaturated version of an `{r, g, b}` colour.
+
+  Each channel is moved halfway towards the mean of the three, which keeps the
+  colour's brightness and halves its saturation. A grey stays exactly as it was.
+
+  `nil` passes through as `nil`, and any other term is returned unchanged.
+
+  ## Examples
+
+      iex> Drafter.Theme.mute_color({200, 100, 0})
+      {150, 100, 50}
+
+      iex> Drafter.Theme.mute_color({80, 80, 80})
+      {80, 80, 80}
+
+      iex> Drafter.Theme.mute_color(nil)
+      nil
+
   """
+  @spec mute_color(rgb() | nil | term()) :: rgb() | nil | term()
   def mute_color({r, g, b}) when is_integer(r) and is_integer(g) and is_integer(b) do
     avg = div(r + g + b, 3)
     mute_factor = 0.5
@@ -100,6 +117,15 @@ defmodule Drafter.Theme do
           syntax: %{atom() => rgb()}
         }
 
+  @doc """
+  The syntax-highlighting palette derived from a theme's semantic colours.
+
+  Keys: `:keyword`, `:keyword_builtin`, `:type`, `:function`, `:function_builtin`,
+  `:variable`, `:string`, `:string_special`, `:number`, `:operator`, `:comment` and
+  `:default`. The mapping is currently the same for dark and light themes, but a
+  theme whose `:dark` field is neither `true` nor `false` raises
+  `FunctionClauseError`.
+  """
   @spec default_syntax_colors(t()) :: %{atom() => rgb()}
   def default_syntax_colors(%__MODULE__{dark: true} = theme) do
     %{
@@ -135,6 +161,17 @@ defmodule Drafter.Theme do
     }
   end
 
+  @doc """
+  The built-in `"textual-dark"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.dark_theme().name
+      "textual-dark"
+
+  """
+  @spec dark_theme() :: t()
   def dark_theme do
     base = %__MODULE__{
       name: "textual-dark",
@@ -175,6 +212,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"textual-light"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.light_theme().name
+      "textual-light"
+
+  """
+  @spec light_theme() :: t()
   def light_theme do
     base = %__MODULE__{
       name: "textual-light",
@@ -215,6 +263,19 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  Every built-in theme, keyed by the name `get_theme/1` takes.
+
+  ## Examples
+
+      iex> Drafter.Theme.available_themes() |> Map.keys() |> Enum.sort() |> hd()
+      "catppuccin-mocha"
+
+      iex> Drafter.Theme.available_themes() |> map_size()
+      13
+
+  """
+  @spec available_themes() :: %{String.t() => t()}
   def available_themes do
     %{
       "textual-dark" => dark_theme(),
@@ -233,6 +294,17 @@ defmodule Drafter.Theme do
     }
   end
 
+  @doc """
+  The built-in `"nord"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.nord_theme().name
+      "nord"
+
+  """
+  @spec nord_theme() :: t()
   def nord_theme do
     base = %__MODULE__{
       name: "nord",
@@ -273,6 +345,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"dracula"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.dracula_theme().name
+      "dracula"
+
+  """
+  @spec dracula_theme() :: t()
   def dracula_theme do
     base = %__MODULE__{
       name: "dracula",
@@ -313,6 +396,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"solarized-dark"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.solarized_dark_theme().name
+      "solarized-dark"
+
+  """
+  @spec solarized_dark_theme() :: t()
   def solarized_dark_theme do
     base = %__MODULE__{
       name: "solarized-dark",
@@ -353,6 +447,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"solarized-light"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.solarized_light_theme().name
+      "solarized-light"
+
+  """
+  @spec solarized_light_theme() :: t()
   def solarized_light_theme do
     base = %__MODULE__{
       name: "solarized-light",
@@ -393,6 +498,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"monokai"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.monokai_theme().name
+      "monokai"
+
+  """
+  @spec monokai_theme() :: t()
   def monokai_theme do
     base = %__MODULE__{
       name: "monokai",
@@ -433,6 +549,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"gruvbox-dark"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.gruvbox_dark_theme().name
+      "gruvbox-dark"
+
+  """
+  @spec gruvbox_dark_theme() :: t()
   def gruvbox_dark_theme do
     base = %__MODULE__{
       name: "gruvbox-dark",
@@ -473,6 +600,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"gruvbox-light"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.gruvbox_light_theme().name
+      "gruvbox-light"
+
+  """
+  @spec gruvbox_light_theme() :: t()
   def gruvbox_light_theme do
     base = %__MODULE__{
       name: "gruvbox-light",
@@ -513,6 +651,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"tokyo-night"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.tokyo_night_theme().name
+      "tokyo-night"
+
+  """
+  @spec tokyo_night_theme() :: t()
   def tokyo_night_theme do
     base = %__MODULE__{
       name: "tokyo-night",
@@ -553,6 +702,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"catppuccin-mocha"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.catppuccin_mocha_theme().name
+      "catppuccin-mocha"
+
+  """
+  @spec catppuccin_mocha_theme() :: t()
   def catppuccin_mocha_theme do
     base = %__MODULE__{
       name: "catppuccin-mocha",
@@ -593,6 +753,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"classic"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.classic_theme().name
+      "classic"
+
+  """
+  @spec classic_theme() :: t()
   def classic_theme do
     base = %__MODULE__{
       name: "classic",
@@ -633,6 +804,17 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in `"retro"` theme, with its syntax map filled in from
+  `default_syntax_colors/1`.
+
+  ## Examples
+
+      iex> Drafter.Theme.retro_theme().name
+      "retro"
+
+  """
+  @spec retro_theme() :: t()
   def retro_theme do
     base = %__MODULE__{
       name: "retro",
@@ -673,10 +855,45 @@ defmodule Drafter.Theme do
     %{base | syntax: default_syntax_colors(base)}
   end
 
+  @doc """
+  The built-in theme called `name`, or `nil` when there is no such theme.
+
+  ## Examples
+
+      iex> Drafter.Theme.get_theme("nord").dark
+      true
+
+      iex> Drafter.Theme.get_theme("no-such-theme")
+      nil
+
+  """
+  @spec get_theme(String.t()) :: t() | nil
   def get_theme(name) do
     Map.get(available_themes(), name)
   end
 
+  @doc """
+  Look a colour up on a theme by slot name.
+
+  `{:syntax, key}` reads the theme's syntax map. A plain atom reads the struct field
+  of that name and, when that field is `nil`, falls back to the theme's `:cursor`
+  map — so `:block_cursor` and friends resolve without naming the map. Returns `nil`
+  when neither carries the name. Any struct field is reachable this way, including
+  the non-colour `:name` and `:dark`.
+
+  ## Examples
+
+      iex> Drafter.Theme.get_color(Drafter.Theme.nord_theme(), :primary)
+      {136, 192, 208}
+
+      iex> Drafter.Theme.get_color(Drafter.Theme.nord_theme(), {:syntax, :no_such_token})
+      nil
+
+      iex> Drafter.Theme.get_color(Drafter.Theme.nord_theme(), :no_such_slot)
+      nil
+
+  """
+  @spec get_color(t(), {:syntax, atom()} | atom()) :: term() | nil
   def get_color(theme, {:syntax, key}) do
     Map.get(theme.syntax || %{}, key)
   end

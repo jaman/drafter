@@ -14,6 +14,15 @@ defmodule Drafter.ComponentRenderer do
     Switch
   }
 
+  @doc """
+  Invoke a component's callback, or describe it as an action for the app loop.
+
+  A function callback is called with `data` and its return value passed through.
+  Anything else is treated as a callback name and returned as
+  `{:app_callback, name, data}`.
+  """
+  @spec send_app_callback((term() -> term()) | atom(), term()) ::
+          term() | {:app_callback, atom(), term()}
   def send_app_callback(callback_fn, data) when is_function(callback_fn), do: callback_fn.(data)
   def send_app_callback(callback_name, data), do: {:app_callback, callback_name, data}
 
@@ -47,8 +56,32 @@ defmodule Drafter.ComponentRenderer do
     do: %{theme: theme, app_state: app_state, app_module: app_module}
 
   @doc """
-  Convert a component tree to a widget hierarchy with automatic layout.
+  Build the widget hierarchy for `component_tree` laid out within `rect`.
+
+  `theme` and `app_state` are handed to each component as it renders.
+  `existing_hierarchy` is the previous frame's hierarchy, whose widget state is
+  carried over and reused; pass `nil` for the first frame.
+
+  ## Options
+
+    * `:app_module` — the application module, used to namespace generated widget ids.
+      Default: `nil`, which namespaces them by component type alone and so risks id
+      collisions between an app and a nested screen.
+
+  Widgets present in `existing_hierarchy` but not rendered this time are recorded
+  in the returned hierarchy's `hidden_widgets`. Focus is preserved when the focused
+  widget rendered again, and otherwise moves to the first focusable widget, or is
+  cleared when there is none.
   """
+  @spec render_tree(
+          tuple(),
+          Layout.rect(),
+          Theme.t(),
+          term(),
+          WidgetHierarchy.t() | nil,
+          keyword()
+        ) ::
+          WidgetHierarchy.t()
   def render_tree(component_tree, rect, theme, app_state, existing_hierarchy \\ nil, opts \\ []) do
     app_module = Keyword.get(opts, :app_module)
     previous_focus = if existing_hierarchy, do: existing_hierarchy.focused_widget, else: nil

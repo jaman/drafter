@@ -1,5 +1,29 @@
 defmodule Drafter.Event.Manager do
-  @moduledoc false
+  @moduledoc """
+  Fans events out from the terminal driver to the processes that want them.
+
+  One manager exists per session. Producers cast events to it; it delivers each one
+  to every subscriber whose filter accepts it, as the message
+  `{:tui_event, event}`. The event shapes are the ones listed in `Drafter.Event`.
+
+      Drafter.Event.Manager.subscribe(self(), &Drafter.Event.key_event?/1)
+      receive do
+        {:tui_event, {:key, key}} -> key
+      end
+
+  A subscriber is monitored and dropped when it exits, so unsubscribing on shutdown
+  is not required. Subscribing the same pid twice replaces its filter.
+
+  The `:app_pid` given at start receives every deliverable event regardless of the
+  subscriber list.
+
+  `{:bracketed_paste, _}` is withheld unless `Drafter.Clipboard.paste_enabled?/0`
+  returns true; every other event is always deliverable.
+
+  Functions without an explicit manager argument resolve it through
+  `Drafter.Session.Context` under the `:event_manager` key, so they address the
+  caller's own session.
+  """
 
   use GenServer
 
@@ -15,6 +39,17 @@ defmodule Drafter.Event.Manager do
   @type event_filter :: (Event.t() -> boolean()) | :all
   @type subscription :: {subscriber(), event_filter()}
 
+  @doc """
+  Start a manager.
+
+  Options:
+
+    * `:name` — registered name, default `Drafter.Event.Manager`. Pass `nil` to
+      start it unregistered, which is what a session other than the local terminal
+      does.
+    * `:app_pid` — a process that receives every deliverable event without
+      subscribing.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -22,39 +57,71 @@ defmodule Drafter.Event.Manager do
     GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
+  @doc """
+  Subscribe `subscriber_pid` to `manager`, for a manager that is not registered
+  under this module's name.
+
+  `filter` is `:all` (the default) or a one-argument function returning `true` for
+  the events to deliver. A filter that raises is treated as no match. The
+  subscriber is monitored; a second subscription for the same pid replaces its
+  filter.
+  """
   @spec subscribe_to(pid() | atom(), pid(), event_filter()) :: :ok
   def subscribe_to(manager, subscriber_pid, filter \\ :all) do
     GenServer.call(manager, {:subscribe, subscriber_pid, filter})
   end
 
+  @doc """
+  Subscribe `subscriber_pid` to this session's manager.
+
+  Defaults to the calling process and to the `:all` filter. See `subscribe_to/3`
+  for the filter contract.
+  """
   @spec subscribe(pid(), event_filter()) :: :ok
   def subscribe(subscriber_pid \\ self(), filter \\ :all) do
     GenServer.call(resolve(), {:subscribe, subscriber_pid, filter})
   end
 
+  @doc """
+  Stop delivering events to `subscriber_pid`, defaulting to the calling process.
+
+  Unnecessary when the subscriber is exiting; the monitor removes it.
+  """
   @spec unsubscribe(pid()) :: :ok
   def unsubscribe(subscriber_pid \\ self()) do
     GenServer.call(resolve(), {:unsubscribe, subscriber_pid})
   end
 
+  @doc """
+  Deliver `event` to this session's subscribers.
+
+  Asynchronous; use `sync/0` to wait for delivery.
+  """
   @spec send_event(Event.t()) :: :ok
   def send_event(event) do
     GenServer.cast(resolve(), {:event, event})
   end
 
+  @doc """
+  Deliver each of `events` in order to this session's subscribers.
+
+  Asynchronous; use `sync/0` to wait for delivery.
+  """
   @spec send_events([Event.t()]) :: :ok
   def send_events(events) when is_list(events) do
     GenServer.cast(resolve(), {:events, events})
   end
 
+  @doc "Always returns `:ok` immediately. Retained for callers in the runtime loop."
   @spec drain_queue() :: :ok
   def drain_queue, do: :ok
 
   @doc """
   Returns once every event cast before this call has been dispatched.
 
-  A synchronous round trip, so it orders against earlier casts from the same
-  caller. Used to hand an event off to subscribers before observing their state.
+  A synchronous round trip through the manager, so it orders after earlier casts
+  from the same caller. Call it before observing a subscriber's state to be sure
+  the events sent to it have been delivered.
   """
   @spec sync() :: :ok
   def sync, do: GenServer.call(resolve(), :sync)

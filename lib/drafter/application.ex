@@ -3,7 +3,16 @@ defmodule Drafter.Application do
 
   use Application
 
+  @doc """
+  Start the Drafter supervision tree.
+
+  Supervises, one-for-one: `Drafter.TableOwner`, `Drafter.ThemeManager`,
+  `Drafter.SkinManager`, the `Drafter.Widget.Supervisor` dynamic supervisor, a
+  `Phoenix.PubSub` named `Drafter.PubSub`, `Drafter.Style.StylesheetLoader`,
+  `Drafter.Animation`, the unique `Drafter.Session.Registry`, and `Drafter.Session`.
+  """
   @impl true
+  @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
     children = [
       Drafter.TableOwner,

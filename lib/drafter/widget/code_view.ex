@@ -5,27 +5,58 @@ defmodule Drafter.Widget.CodeView do
   Source text is provided directly via `:source` or loaded from disk via `:path`.
   When `:path` is given the file is read at mount time and the language is inferred
   from the extension when possible. Syntax highlighting is performed by the
-  the `tree-sitter` CLI when available, falling back to the built-in
-  Elixir highlighter for `.ex` and `.exs` files.
+  `tree-sitter` CLI when available, falling back to the built-in Elixir
+  highlighter for `.ex` and `.exs` files.
 
   Keyboard controls (when focused):
   - `↑` / `↓` — scroll one line
   - `Page Up` / `Page Down` — scroll ten lines
-  - `←` / `→` — horizontal scroll by five columns
+  - `←` / `→` — horizontal scroll by five columns, the right limit being the
+    longest line less 20 columns
   - Mouse wheel — vertical scroll by three lines
-  - Click and drag — pan both axes simultaneously
+
+  Every other key is consumed and leaves the state unchanged, so nothing bubbles out
+  of a focused code view. Dragging is declared but does nothing.
+
+  ## Component tag
+
+  Tag `:code_view`, built by `Drafter.App` as either `{:code_view, opts}` or
+  `{:code_view, source, opts}`:
+
+      code_view(opts)
+      code_view(source, opts)
+
+  `from_component_opts/2` ignores the positional argument and reads every prop
+  from `opts`, so pass the text as `source:` rather than positionally.
 
   ## Options
 
-    * `:source` - source code string to display
-    * `:path` - file path to load; file is read at mount and on path change
-    * `:language` - syntax language atom, e.g. `:elixir`, `:exs` (default `:text`)
-    * `:show_line_numbers` - display a line number gutter: `true` / `false` (default)
+    * `:source` - `t:String.t/0` of source code to display. Default `""`
+    * `:path` - file path to load. Default `nil`. The file is read at mount and
+      again whenever the path or `:hex_view` changes, and an unreadable file yields
+      an empty document. Takes precedence over `:source`
+    * `:language` - syntax language atom, e.g. `:elixir`, `:exs`. Default `:text`
+    * `:show_line_numbers` - `t:boolean/0`, display a line number gutter. Default
+      `false`. Mount-only: neither `update/2` nor a re-render changes it
+    * `:hex_view` - `t:boolean/0`, render the content as a hex dump of 16 bytes per
+      row with offset and ASCII columns instead of as source text, suppressing
+      syntax highlighting. Default `false`
+    * `:height` - read only by `preferred_height/2`, never by `mount/1`. Default
+      `20`
+
+  `update/2` re-reads `:path`, `:hex_view`, `:source` and `:language`, and reloads
+  the document only when the path, the hex mode, or a non-empty source actually
+  changes. A reload resets both scroll offsets to `0`.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`.
 
   ## Usage
 
       code_view(source: File.read!("lib/my_app.ex"), language: :elixir, show_line_numbers: true)
       code_view(path: "/etc/hosts")
+      code_view(path: "/bin/ls", hex_view: true)
   """
 
   use Drafter.Widget,
@@ -50,6 +81,35 @@ defmodule Drafter.Widget.CodeView do
     :hex_view
   ]
 
+  @type t :: %__MODULE__{
+          lines: [String.t()],
+          highlights: term() | nil,
+          language: atom(),
+          path: Path.t() | nil,
+          scroll_offset: non_neg_integer(),
+          h_scroll_offset: non_neg_integer(),
+          focused: boolean(),
+          show_line_numbers: boolean(),
+          hex_view: boolean()
+        }
+
+  @doc """
+  Builds the code view state from `props`, reading `:path` from disk when given and
+  splitting the document into lines.
+
+  Both scroll offsets and `:focused` always start at `0`/`false`. Highlighting is
+  computed here, so a source with no recognised syntax leaves `:highlights` as
+  `nil`.
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: "a\\nb\\nc"})
+      iex> {cv.lines, cv.language, cv.scroll_offset, cv.show_line_numbers, cv.hex_view}
+      {["a", "b", "c"], :text, 0, false, false}
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{})
+      iex> {cv.lines, cv.path, cv.h_scroll_offset, cv.focused}
+      {[""], nil, 0, false}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     path = Map.get(props, :path)
@@ -72,6 +132,16 @@ defmodule Drafter.Widget.CodeView do
     }
   end
 
+  @doc """
+  Draws the visible window of the document into `rect`.
+
+  Emits one strip per visible line, at most `rect.height` of them starting at
+  `:scroll_offset`, so a document shorter than the rect leaves the remaining rows
+  untouched rather than blanking them. With `:show_line_numbers` the gutter takes
+  the width of the largest line number plus one column, and the rest is content
+  scrolled left by `:h_scroll_offset`.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     theme = ThemeManager.get_current_theme()
@@ -100,6 +170,19 @@ defmodule Drafter.Widget.CodeView do
     end)
   end
 
+  @doc """
+  Scrolls the document three lines per wheel notch.
+
+  The offset is clamped to `0..length(lines) - 1`, so the last line can always be
+  scrolled to the top of the rect. Always returns `{:ok, state}`.
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: "a\\nb\\nc\\nd\\ne\\nf"})
+      iex> {:ok, down} = Drafter.Widget.CodeView.handle_scroll(:down, cv)
+      iex> {:ok, up} = Drafter.Widget.CodeView.handle_scroll(:up, down)
+      iex> {down.scroll_offset, up.scroll_offset}
+      {3, 0}
+  """
+  @spec handle_scroll(:up | :down, t()) :: {:ok, t()}
   @impl Drafter.Widget
   def handle_scroll(:up, state) do
     {:ok, %{state | scroll_offset: max(0, state.scroll_offset - 3)}}
@@ -110,6 +193,39 @@ defmodule Drafter.Widget.CodeView do
     {:ok, %{state | scroll_offset: min(max_offset, state.scroll_offset + 3)}}
   end
 
+  @doc """
+  Scrolls the document.
+
+  `:up`/`:down` move one line, `:page_up`/`:page_down` move ten, and `:left`/`:right`
+  move five columns. The vertical offset is clamped to `0..length(lines) - 1`; the
+  horizontal offset is clamped to `0..max(0, longest_line - 20)`. Every other key is
+  consumed unchanged. Always returns `{:ok, state}`, so nothing bubbles.
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: "a\\nb\\nc"})
+      iex> {:ok, moved} = Drafter.Widget.CodeView.handle_key(:down, cv)
+      iex> moved.scroll_offset
+      1
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: "a\\nb\\nc"})
+      iex> {:ok, paged} = Drafter.Widget.CodeView.handle_key(:page_down, cv)
+      iex> paged.scroll_offset
+      2
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: String.duplicate("x", 40)})
+      iex> {:ok, right} = Drafter.Widget.CodeView.handle_key(:right, cv)
+      iex> right.h_scroll_offset
+      5
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: "short"})
+      iex> {:ok, right} = Drafter.Widget.CodeView.handle_key(:right, cv)
+      iex> right.h_scroll_offset
+      0
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: "a"})
+      iex> Drafter.Widget.CodeView.handle_key(:enter, cv) |> elem(0)
+      :ok
+  """
+  @spec handle_key(Drafter.Widget.key(), t()) :: {:ok, t()}
   @impl Drafter.Widget
   def handle_key(:up, state) do
     {:ok, %{state | scroll_offset: max(0, state.scroll_offset - 1)}}
@@ -141,9 +257,35 @@ defmodule Drafter.Widget.CodeView do
 
   def handle_key(_key, state), do: {:ok, state}
 
+  @doc """
+  Consumes the drag event and returns `{:ok, state}` unchanged. Dragging does not
+  pan the document.
+  """
+  @spec handle_drag(integer(), integer(), t()) :: {:ok, t()}
   @impl Drafter.Widget
   def handle_drag(_x, _y, state), do: {:ok, state}
 
+  @doc """
+  Reloads the document when the source changed, and returns `state` untouched
+  otherwise.
+
+  A reload happens when `:path` differs from the mounted one, when `:hex_view`
+  differs, or when `:source` is present, non-empty, and differs from the joined
+  current lines. When it happens both scroll offsets reset to `0` and `:language` is
+  re-read; `:show_line_numbers` never changes.
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: "a\\nb"})
+      iex> {:ok, scrolled} = Drafter.Widget.CodeView.handle_key(:down, cv)
+      iex> Drafter.Widget.CodeView.update(%{source: "a\\nb"}, scrolled).scroll_offset
+      1
+
+      iex> cv = Drafter.Widget.CodeView.mount(%{source: "a\\nb"})
+      iex> {:ok, scrolled} = Drafter.Widget.CodeView.handle_key(:down, cv)
+      iex> reloaded = Drafter.Widget.CodeView.update(%{source: "x\\ny\\nz"}, scrolled)
+      iex> {reloaded.lines, reloaded.scroll_offset}
+      {["x", "y", "z"], 0}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     path = Map.get(props, :path, state.path)
@@ -188,10 +330,36 @@ defmodule Drafter.Widget.CodeView do
   defp resolve_source(_path, source, _lines, _pc, _hc) when source != nil, do: source
   defp resolve_source(_path, _source, lines, _pc, _hc), do: Enum.join(lines, "\n")
 
+  @doc """
+  `opts[:height]`, or `20` when it is absent.
+
+      iex> Drafter.Widget.CodeView.preferred_height(nil, [])
+      20
+
+      iex> Drafter.Widget.CodeView.preferred_height(nil, height: 8)
+      8
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 20)
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.CodeView.component_tag()
+      :code_view
+  """
+  @spec component_tag() :: :code_view
   def component_tag, do: :code_view
 
+  @doc """
+  Turns the `{:code_view, opts}` element into a props map for `mount/1`.
+
+  The positional argument is ignored, so the text must be passed as `source:`.
+
+      iex> Drafter.Widget.CodeView.from_component_opts("ignored", source: "a")
+      %{source: "a", path: nil, language: :text, show_line_numbers: false, hex_view: false}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     %{
       source: Keyword.get(opts, :source, ""),
@@ -202,6 +370,12 @@ defmodule Drafter.Widget.CodeView do
     }
   end
 
+  @doc """
+  Narrows the props a re-render feeds to `update/2` to `:source`, `:path`,
+  `:language` and `:hex_view`. `:show_line_numbers` is left out and stays as
+  mounted.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     %{
       source: mount_props.source,

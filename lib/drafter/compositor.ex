@@ -1,5 +1,35 @@
 defmodule Drafter.Compositor do
-  @moduledoc false
+  @moduledoc """
+  Holds one session's screen as rows of styled cells and writes changed rows to its terminal.
+
+  The screen buffer is a list of `Drafter.Draw.Strip`, one per row, each padded to the
+  screen width. `render_strips/3` blits strips into it at a cell position; the frame is
+  written on the next `:render_frame` message, and only rows whose cache key changed are
+  sent. Frames are wrapped in synchronized-update markers unless `DRAFTER_NO_SYNC` is set.
+
+      Drafter.Compositor.render_strips([Drafter.Draw.Strip.from_text("hello")], 2, 0)
+
+  One compositor exists per session and is resolved through `Drafter.Session.Context`
+  under the `:compositor` key, so the module-level functions address the caller's own
+  session. Output goes to the session's terminal driver, or, for the local terminal,
+  straight to `/dev/tty` unless `DRAFTER_NO_PACED_WRITE` is set.
+
+  A resize arrives as `{:tui_event, {:resize, {cols, rows}}}` from the event manager;
+  the buffer is rebuilt empty at the new size and the whole screen is marked dirty.
+
+  ## Images
+
+  Terminal-graphics bytes live outside the cell grid. A widget registers them with
+  `put_image/4`, positions them with `place_image/3` and withdraws them with
+  `clear_image/1`. Images are drawn after the text of a frame, and are redrawn when
+  their bytes or position changed or when a text row beneath them was rewritten. An
+  image whose rectangle does not fit entirely on screen is not drawn at all.
+
+  Stamps order concurrent generations: a `put_image/4` whose `stamp` is not greater
+  than the highest stamp already accepted for that id is discarded. `clear_image/1`
+  forgets the id's stamp, so the next `put_image/4` for it is accepted whatever its
+  stamp.
+  """
 
   use GenServer
 
@@ -22,14 +52,55 @@ defmodule Drafter.Compositor do
     pending_image_clears: []
   ]
 
+  @typedoc "The screen as one padded `Drafter.Draw.Strip` per row, top row first."
   @type screen_buffer :: [Strip.t()]
+
+  @typedoc """
+  A rectangle of cells recorded as changed since the last frame.
+
+  Whether any region is recorded is what decides that a frame is due; which rows
+  are actually written is decided by comparing strip cache keys. `width` and
+  `height` are therefore not clipped to the screen and can be zero or negative for
+  a rectangle that starts past an edge.
+  """
   @type dirty_region :: %{
-          x: non_neg_integer(),
-          y: non_neg_integer(),
-          width: pos_integer(),
-          height: pos_integer()
+          x: integer(),
+          y: integer(),
+          width: integer(),
+          height: integer()
         }
 
+  @typedoc """
+  Where an image sits and how big it is, as a widget's `image/3` returns it.
+
+  `:stamp` and `:place` are optional, defaulting to `0` and `nil`.
+  """
+  @type image_region :: %{
+          required(:dx) => integer(),
+          required(:dy) => integer(),
+          required(:cols) => non_neg_integer(),
+          required(:rows) => non_neg_integer(),
+          optional(:stamp) => integer(),
+          optional(:place) => iodata() | nil
+        }
+
+  @doc """
+  Start a compositor.
+
+  Options:
+
+    * `:name` — registered name, default `Drafter.Compositor`. Pass `nil` to start
+      it unregistered, which is what a session that is not the local terminal does.
+    * `:terminal_driver` — `Drafter.Terminal.Driver` (the default) or a
+      `{module, pid}` pair whose module exports `write/2` and `get_size/1`.
+    * `:event_manager` — manager to subscribe to for resize events, default
+      `Drafter.Event.Manager`.
+
+  The initial screen size is read from the terminal driver. When the driver is
+  `Drafter.Terminal.Driver` and `DRAFTER_NO_PACED_WRITE` is unset, `/dev/tty` is
+  opened once here and every frame is written to it instead of through the driver;
+  it is closed on termination.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -37,65 +108,124 @@ defmodule Drafter.Compositor do
     GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
+  @doc """
+  Blit `strips` into the screen buffer with their top-left corner at cell `x`, `y`.
+
+  One strip per row, applied downwards from `y`. `x` and `y` are zero-based and
+  both default to `0`. Rows that fall outside the screen are dropped. A row is
+  padded with spaces out to the screen width, and an `x` of `0` or less replaces
+  the whole row. Callers are responsible for supplying strips that fit: a strip
+  reaching past the right edge leaves that row longer than the screen.
+
+  The affected rectangle is marked dirty and a frame is scheduled. Asynchronous.
+
+      Drafter.Compositor.render_strips([Drafter.Draw.Strip.from_text("hello")], 2, 0)
+  """
   @spec render_strips([Strip.t()], non_neg_integer(), non_neg_integer()) :: :ok
   def render_strips(strips, x \\ 0, y \\ 0) do
     GenServer.cast(resolve(), {:render_strips, strips, x, y})
   end
 
+  @doc """
+  Blank the whole screen buffer and withdraw every image region.
+
+  Each image's `clear` sequence is queued so the terminal releases it. The regions
+  themselves are forgotten, bytes, positions and stamps alike, so a later
+  `place_image/3` for the same id shows nothing until `put_image/4` supplies bytes
+  again. Asynchronous.
+  """
   @spec clear_screen() :: :ok
   def clear_screen do
     GenServer.cast(resolve(), :clear_screen)
   end
 
+  @doc """
+  Redraw every row on the next frame, keeping the buffer contents.
+
+  Use after something outside the compositor has written to the terminal, which
+  makes the record of what is on screen untrustworthy. Asynchronous.
+  """
   @spec refresh() :: :ok
   def refresh do
     GenServer.cast(resolve(), :refresh)
   end
 
   @doc """
-  Store the terminal-graphics bytes (kitty/iTerm2/sixel) for an image region.
+  Store the terminal-graphics bytes (kitty, iTerm2, sixel) for an image region.
 
-  Called once per generation, from the widget's async render task. `paint` draws the
-  image and `clear` removes it: a kitty delete for the persistent-layer protocol,
-  empty for cell-grid protocols that re-blank. `dx`/`dy` offset the image within the
-  placed cell, and `cols`/`rows` are its cell size. Painting happens via
-  `place_image/3`.
+  Arguments:
 
-  `stamp` is the per-widget data-time captured when generation was requested. A frame
-  whose stamp is not strictly greater than the highest stamp already displayed for
-  `id` is dropped.
+    * `id` — any term identifying the region; a later call with the same `id`
+      replaces its bytes, keeping the position `place_image/3` gave it
+    * `paint` — the sequence that draws the image
+    * `clear` — the sequence that removes it, for protocols that hold an image
+      outside the cell grid; `""` for protocols where re-blanking the cells is enough
+    * `region` — where and how big the image is, as the placement map a widget's
+      `image/3` returns:
 
-  `place` redraws the image the terminal is already holding, for protocols that hold
-  one. It is used when the image itself has not changed and is only being redrawn
-  because text was written across it; `nil` falls back to sending `paint` again.
+      * `:dx`, `:dy` — cell offset of the image from the position given to
+        `place_image/3`, so the image is drawn at `x + dx`, `y + dy`
+      * `:cols`, `:rows` — size of the image in cells, used to decide whether it fits
+        on screen and which text rows it covers
+      * `:stamp` — generation counter for this `id`, default `0`
+      * `:place` — sequence that redraws the image the terminal is already holding,
+        default `nil`
+
+  A call is discarded outright, changing nothing, when `:stamp` is less than or equal
+  to the stamp of the last accepted call for the same `id`. The first call for an
+  `id` is always accepted, as is the first call after a `clear_image/1`, which
+  forgets the id's stamp. Callers that generate images concurrently must pass a
+  counter that only ever increases for a given `id`; passing the default `0` every
+  time means every call after the first is dropped.
+
+  `place` is sent instead of `paint` when the image is unchanged and is only being
+  drawn again because text was written across it. `nil` sends `paint` in that case
+  too.
+
+  Registering bytes does not make the image visible; `place_image/3` does.
+  Asynchronous.
   """
-  @spec put_image(
-          term(),
-          iodata(),
-          iodata(),
-          integer(),
-          integer(),
-          pos_integer(),
-          pos_integer(),
-          integer(),
-          iodata() | nil
-        ) :: :ok
-  def put_image(id, paint, clear, dx, dy, cols, rows, stamp \\ 0, place \\ nil) do
-    GenServer.cast(resolve(), {:put_image, id, paint, clear, dx, dy, cols, rows, stamp, place})
+  @spec put_image(term(), iodata(), iodata(), image_region()) :: :ok
+  def put_image(id, paint, clear, region) do
+    GenServer.cast(resolve(), {:put_image, id, paint, clear, normalize_region(region)})
+  end
+
+  defp normalize_region(region) do
+    %{
+      dx: Map.fetch!(region, :dx),
+      dy: Map.fetch!(region, :dy),
+      cols: Map.fetch!(region, :cols),
+      rows: Map.fetch!(region, :rows),
+      stamp: Map.get(region, :stamp, 0),
+      place: Map.get(region, :place)
+    }
   end
 
   @doc """
-  Position an image region at a cell and mark it visible.
+  Position the image region `id` with its anchor at cell `x`, `y` and mark it visible.
 
-  Carries no image bytes. The image is repainted after the text frame only when its
-  bytes or position changed, or a text row under it was redrawn.
+  Carries no image bytes. Calling it for an `id` that has no bytes yet records the
+  position; nothing is drawn until `put_image/4` supplies them. The image is drawn
+  after the text of a frame, and only when its bytes or position changed or a text
+  row under it was redrawn. Asynchronous.
   """
   @spec place_image(term(), non_neg_integer(), non_neg_integer()) :: :ok
   def place_image(id, x, y) do
     GenServer.cast(resolve(), {:place_image, id, x, y})
   end
 
-  @doc "Hide an image region and re-blank the cells it occupied."
+  @doc """
+  Hide the image region `id` and re-blank the cells it occupied.
+
+  Queues the region's `clear` sequence and marks the rows it covered dirty, so the
+  text beneath is written again. Its bytes and position are kept, so a later
+  `place_image/3` shows it again.
+
+  The id's stamp is forgotten either way, so the next `put_image/4` for it is
+  accepted whatever its stamp. A region that is already hidden or has no bytes yet
+  is only marked hidden, and an unknown id is ignored; neither schedules a frame.
+  Asynchronous.
+  """
   @spec clear_image(term()) :: :ok
   def clear_image(id) do
     GenServer.cast(resolve(), {:clear_image, id})
@@ -104,29 +234,52 @@ defmodule Drafter.Compositor do
   @doc """
   Write bytes straight to this session's terminal, outside the screen buffer.
 
-  For control sequences that address the terminal itself rather than the screen —
-  an OSC 52 clipboard write, say. The compositor owns which terminal a session is
-  attached to, so a sequence sent this way reaches the ssh or telnet client that is
-  actually looking at the app rather than the tty the server was started from.
+  For control sequences addressed to the terminal itself rather than to the screen,
+  such as an OSC 52 clipboard write. The bytes go to the terminal this session is
+  attached to, which for a remote session is the ssh or telnet client rather than
+  the tty the server was started from. Nothing is written to the cell grid and no
+  row is marked dirty.
   """
   @spec write_raw(iodata()) :: :ok
   def write_raw(data) do
     GenServer.cast(resolve(), {:write_raw, data})
   end
 
+  @doc """
+  The size of the screen buffer as `{cols, rows}`.
+
+  This is the size the buffer was built at, not a fresh measurement of the
+  terminal. Synchronous.
+  """
   @spec get_screen_size() :: {pos_integer(), pos_integer()}
   def get_screen_size do
     GenServer.call(resolve(), :get_screen_size)
   end
 
+  @doc """
+  Set the screen buffer to `width` by `height` cells.
+
+  The buffer is rebuilt blank at the new size, every image region is withdrawn as
+  by `clear_screen/0` and the whole screen is redrawn on the next frame. Returns
+  before any of that has happened.
+
+  This is the same path a `{:resize, {cols, rows}}` event from the event manager
+  takes, so calling it does not stop the terminal's own size from winning later.
+  """
   @spec resize(pos_integer(), pos_integer()) :: :ok
   def resize(width, height) do
     send(resolve(), {:tui_event, {:resize, {width, height}}})
     :ok
   end
 
-  @doc "Returns the current composited screen buffer (one `Strip` per row) for the given compositor."
-  @spec get_buffer(pid()) :: [Drafter.Draw.Strip.t()]
+  @doc """
+  The composited screen buffer of the compositor at `pid`, one `Strip` per row.
+
+  Takes an explicit pid rather than resolving the session, so a caller outside the
+  session can read it. The rows returned are what the next frame will write from,
+  which is not necessarily what is on the terminal yet. Synchronous.
+  """
+  @spec get_buffer(pid()) :: screen_buffer()
   def get_buffer(pid) do
     GenServer.call(pid, :get_buffer)
   end
@@ -185,8 +338,8 @@ defmodule Drafter.Compositor do
     schedule_render(new_state)
   end
 
-  def handle_cast({:put_image, id, paint, clear, dx, dy, cols, rows, stamp, place}, state) do
-    if stale_stamp?(state.image_stamps, id, stamp) do
+  def handle_cast({:put_image, id, paint, clear, placement}, state) do
+    if stale_stamp?(state.image_stamps, id, placement.stamp) do
       {:noreply, state}
     else
       base =
@@ -203,11 +356,11 @@ defmodule Drafter.Compositor do
         Map.merge(base, %{
           bytes: paint,
           clear: clear,
-          place: place,
-          dx: dx,
-          dy: dy,
-          cols: cols,
-          rows: rows,
+          place: placement.place,
+          dx: placement.dx,
+          dy: placement.dy,
+          cols: placement.cols,
+          rows: placement.rows,
           version: base.version + 1
         })
 
@@ -216,7 +369,7 @@ defmodule Drafter.Compositor do
       schedule_render(%{
         state
         | image_regions: Map.put(state.image_regions, id, region),
-          image_stamps: Map.put(state.image_stamps, id, stamp)
+          image_stamps: Map.put(state.image_stamps, id, placement.stamp)
       })
     end
   end
@@ -548,9 +701,6 @@ defmodule Drafter.Compositor do
       (needs_paint?(region, painted) or image_overlaps?(region, changed_set))
   end
 
-  # A repaint the image itself did not ask for — text was drawn across it and has to be drawn
-  # over again — does not need the image sent a second time. Where the protocol can redraw what
-  # the terminal is already holding, that is a few dozen bytes instead of the whole frame.
   defp paint_region(id, region, rows, painted_acc) do
     changed? = needs_paint?(region, Map.get(painted_acc, id))
     trace_paint(id, if(changed?, do: "v", else: "o"))

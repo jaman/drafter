@@ -10,8 +10,10 @@ defmodule Drafter.Runtime.AppLoop do
   alias Drafter.Runtime
   alias Drafter.Runtime.FrameClock
   alias Drafter.Runtime.Renderer
+  alias Drafter.Session.Context
   alias Drafter.Session.SharedState
   alias Drafter.Widget.SplitPaneDivider
+  alias Drafter.WidgetValue
 
   @scroll_debounce_ms 150
 
@@ -24,6 +26,17 @@ defmodule Drafter.Runtime.AppLoop do
 
   Remote sessions call this directly. A local terminal goes through `run/2`,
   which sets the terminal up first.
+
+  `timers` maps a timer id to the `:timer` reference already running for it,
+  `widget_hierarchy` is the hierarchy from a prior render or `nil` for none.
+
+  ## Options
+
+    * `:refresh_rate` - frame pacing, as accepted by
+      `Drafter.Runtime.FrameClock.interval_for/1`. Default: the app's
+      `refresh_rate/0`, or `"30fps"` when it defines none.
+
+  Unlike `start/3`, this function does not mount the app, so `:props` is not read here.
   """
   @spec enter_loop(module(), term(), map(), map(), map() | nil, keyword()) :: :ok
   def enter_loop(
@@ -39,6 +52,17 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, [])
   end
 
+  @doc """
+  Set the local terminal up, then mount the app and run the loop until it stops.
+
+  Registers with the theme, skin and screen managers, drains any stale input, clears
+  the screen and sizes the compositor to the terminal, then hands off to `start/3`
+  with a screen rect covering the whole terminal.
+
+  ## Options
+
+  Takes the same options as `start/3`.
+  """
   @spec run(module(), keyword()) :: :ok
   def run(app_module, opts \\ []) do
     setup_frame_rate(app_module, opts)
@@ -58,6 +82,7 @@ defmodule Drafter.Runtime.AppLoop do
     Terminal.Driver.drain_pending_input()
     Drafter.Event.Manager.drain_queue()
     drain_stale_events()
+    adopt_probed_protocol()
     Compositor.clear_screen()
 
     {width, height} = Terminal.Driver.refresh_size()
@@ -69,9 +94,21 @@ defmodule Drafter.Runtime.AppLoop do
   @doc """
   Mount an app, run its ready hook, and enter the event loop for `screen_rect`.
 
-  Everything `run/2` does after the terminal is set up. A headless run shares this
-  function rather than repeating the sequence, so how an app receives its props and
-  its startup timers cannot differ between a test and a real terminal.
+  This is everything `run/2` does once the terminal has been set up; a headless run
+  enters here directly. Returns when the loop returns.
+
+  `screen_rect` is a `%{x: x, y: y, width: w, height: h}` map. The app is rendered
+  once before its ready hook and once after, so intervals registered during the hook
+  are running before the first event is taken.
+
+  ## Options
+
+    * `:props` - map or keyword list of mount props passed to the app's `mount/1`.
+      Default: `%{}`. See `Drafter.Runtime.mount_props/1`.
+    * `:refresh_rate` - frame pacing, as accepted by
+      `Drafter.Runtime.FrameClock.interval_for/1`. Default: the app's
+      `refresh_rate/0`, or `"30fps"` when it defines none.
+
   """
   @spec start(module(), map(), keyword()) :: :ok
   def start(app_module, screen_rect, opts \\ []) do
@@ -353,10 +390,7 @@ defmodule Drafter.Runtime.AppLoop do
        ) do
     value =
       if wh do
-        case Drafter.WidgetHierarchy.get_widget_state(wh, widget_id) do
-          nil -> nil
-          state -> extract_widget_value(state)
-        end
+        wh |> Drafter.WidgetHierarchy.get_widget_state(widget_id) |> WidgetValue.extract()
       else
         nil
       end
@@ -986,33 +1020,6 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp extract_widget_value(%{text: text}), do: text
-  defp extract_widget_value(%{checked: checked}), do: checked
-  defp extract_widget_value(%{state: s}) when s in [:on, :off], do: s == :on
-
-  defp extract_widget_value(%{selected_index: idx, options: options}),
-    do: option_id_at(options, idx)
-
-  defp extract_widget_value(%{selected_indices: indices, options: options}) do
-    indices
-    |> MapSet.to_list()
-    |> Enum.map(&option_id_at(options, &1))
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp extract_widget_value(%{expanded: expanded}), do: expanded
-  defp extract_widget_value(%{active_tab: tab}), do: tab
-  defp extract_widget_value(%{selected_rows: rows}), do: MapSet.to_list(rows)
-  defp extract_widget_value(%{selected_nodes: nodes}), do: MapSet.to_list(nodes)
-  defp extract_widget_value(_state), do: nil
-
-  defp option_id_at(options, idx) do
-    case Enum.at(options, idx) do
-      %{id: id} -> id
-      nil -> nil
-    end
-  end
-
   defp get_animated_property_from_state(state, property) do
     case property do
       :opacity -> Map.get(state, :opacity, 1.0)
@@ -1075,6 +1082,13 @@ defmodule Drafter.Runtime.AppLoop do
       {:tui_event, {:resize, {nw, nh}}} -> drain_pending_resizes(nw, nh)
     after
       0 -> {w, h}
+    end
+  end
+
+  defp adopt_probed_protocol do
+    case Terminal.Driver.probe() do
+      {:ok, protocol} -> Context.put_terminal_protocol(protocol)
+      :unprobed -> :ok
     end
   end
 

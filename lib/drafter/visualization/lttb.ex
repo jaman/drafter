@@ -13,7 +13,24 @@ defmodule Drafter.Visualization.LTTB do
   the point that forms the largest triangle area with the previously selected
   point and the average of the next bucket.
 
-  Returns points unchanged when `length(points) <= target_count`.
+  Returns points unchanged when `length(points) <= target_count`, and just the first
+  point when `target_count` is less than 2. Points may be `{x, y}` tuples or `[x, y]`
+  lists; whichever form goes in comes back out.
+
+  ## Examples
+
+      iex> Drafter.Visualization.LTTB.downsample([{0, 0}, {1, 5}, {2, 1}], 5)
+      [{0, 0}, {1, 5}, {2, 1}]
+
+      iex> Drafter.Visualization.LTTB.downsample([{0, 0}, {1, 9}, {2, 1}, {3, 2}], 3)
+      [{0, 0}, {1, 9}, {3, 2}]
+
+      iex> Drafter.Visualization.LTTB.downsample([{0, 0}, {1, 9}, {2, 1}], 1)
+      [{0, 0}]
+
+      iex> Drafter.Visualization.LTTB.downsample([], 10)
+      []
+
   """
   @spec downsample([{number(), number()} | [number()]], pos_integer()) ::
           [{number(), number()} | [number()]]
@@ -104,6 +121,17 @@ defmodule Drafter.Visualization.LTTB do
 
   Generates implicit x indices, applies LTTB downsampling, and returns
   only the y-values from the result.
+
+  Returns the values unchanged when `length(values) <= target_count`.
+
+  ## Examples
+
+      iex> Drafter.Visualization.LTTB.downsample_series([1, 2, 3], 10)
+      [1, 2, 3]
+
+      iex> Drafter.Visualization.LTTB.downsample_series([1, 9, 2, 3], 3)
+      [1, 9, 3]
+
   """
   @spec downsample_series([number()], pos_integer()) :: [number()]
   def downsample_series(values, target_count) when length(values) <= target_count, do: values

@@ -6,14 +6,42 @@ defmodule Drafter.Widget.PieChart do
   quarter-block and half-block Unicode characters for sub-cell resolution rendering,
   and braille characters where finer detail is needed.
 
+  ## Component tag
+
+  Tag `:pie_chart`, built by `Drafter.App` as `{:pie_chart, data, opts}`:
+
+      pie_chart(data, opts)
+
+  The positional argument becomes `:data` when it is a non-empty list that is not
+  a keyword list; otherwise `:data` is read from `opts`.
+
   ## Options
 
-    * `:data` - list of `{label, value}` or `{label, value, color}` tuples
-    * `:show_legend` - display a legend with labels and percentages (default `true`)
-    * `:show_percentages` - show percentage values in the legend (default `true`)
-    * `:colors` - list of `{r, g, b}` tuples for the color palette
-    * `:style` - map of style properties
-    * `:classes` - list of theme class atoms
+    * `:data` - `[{label, value} | {label, value, rgb}]`. Default `[]`. A slice
+      without an explicit colour takes the palette entry at its index, cycling.
+      A total of zero gives every slice a percentage of `0.0`.
+    * `:show_legend` - `t:boolean/0`, draw labels down the right-hand side. Default
+      `true`. The legend takes `min(longest_entry + 4, 30)` columns and the pie
+      takes the rest, with at least one column.
+    * `:show_percentages` - `t:boolean/0`, append `(12.5%)` to each legend label.
+      Default `true`. Only read when the legend is drawn.
+    * `:colors` - `[{r, g, b}]` palette. Default
+      `[{100, 180, 255}, {255, 130, 80}, {100, 220, 140}, {220, 100, 220},
+      {255, 220, 80}, {120, 220, 220}, {255, 100, 100}, {180, 140, 255}]`.
+    * `:renderer` - `:text` (default) draws block and braille cells. Any other atom
+      is treated as a terminal graphics protocol and passed to
+      `Drafter.Widget.Chart.Pixel`, falling back to cells when that protocol is
+      unavailable.
+    * `:style` - `t:map/0` of style overrides passed to the theme computation.
+      Default `%{}`.
+    * `:class` - theme class atom or list of them, normalised by
+      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      Default `[]`.
+    * `:height` - `t:pos_integer/0` read only by `preferred_height/2`, never by
+      `mount/1`. Default `10`.
+
+  Every option except `:height` is live-updatable: `update_props_from_mount/3`
+  passes the full mount props through.
 
   ## Usage
 
@@ -64,6 +92,34 @@ defmodule Drafter.Widget.PieChart do
     renderer: :text
   ]
 
+  @type rgb :: {0..255, 0..255, 0..255}
+
+  @type entry :: {String.t(), number()} | {String.t(), number(), rgb()}
+
+  @type t :: %__MODULE__{
+          data: [entry()],
+          show_legend: boolean(),
+          show_percentages: boolean(),
+          colors: [rgb()],
+          style: map(),
+          classes: [atom()],
+          app_module: module() | nil,
+          renderer: atom()
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  Every option listed in the module doc is read here with the default stated there.
+
+      iex> state = Drafter.Widget.PieChart.mount(%{data: [{"A", 60}, {"B", 40}]})
+      iex> {state.data, state.show_legend, state.show_percentages, state.renderer}
+      {[{"A", 60}, {"B", 40}], true, true, :text}
+
+      iex> Drafter.Widget.PieChart.mount(%{}).colors |> length()
+      8
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     %__MODULE__{
@@ -78,6 +134,14 @@ defmodule Drafter.Widget.PieChart do
     }
   end
 
+  @doc """
+  Draws the chart into `rect`, always returning exactly `rect.height` strips.
+
+  `state` may be a plain props map, in which case it is passed through `mount/1`
+  first. Slices are laid out clockwise starting at twelve o'clock. This is the cell
+  renderer and is used whatever `:renderer` says; `image/3` is the graphics path.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
@@ -108,6 +172,9 @@ defmodule Drafter.Widget.PieChart do
   end
 
   @doc false
+  @spec image(t() | Drafter.Widget.props(), Drafter.Widget.rect(), term()) ::
+          {iodata(), iodata(), %{dx: 0, dy: 0, cols: pos_integer(), rows: non_neg_integer()}}
+          | nil
   def image(state, rect, id) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
@@ -127,6 +194,11 @@ defmodule Drafter.Widget.PieChart do
     end
   end
 
+  @doc "Whether this pie chart is drawing a transmitted image rather than cells."
+  @spec image_active?(t()) :: boolean()
+  @impl Drafter.Widget
+  def image_active?(state), do: pie_pixel?(state)
+
   defp pie_pixel?(state) do
     state.renderer != :text and Pixel.protocol(state.renderer) != nil
   end
@@ -139,9 +211,27 @@ defmodule Drafter.Widget.PieChart do
   defp to_rgba({r, g, b, a}), do: {r, g, b, a}
   defp to_rgba(_color), do: {150, 150, 150, 255}
 
+  @doc """
+  Ignores every event and returns `{:bubble, state}`, letting it continue to the
+  parent widget and then to the app.
+  """
+  @spec handle_event(Drafter.Event.t(), t()) :: {:bubble, t()}
   @impl Drafter.Widget
   def handle_event(_event, state), do: {:bubble, state}
 
+  @doc """
+  Replaces the state fields named in `props`, keeping the current value for any key
+  that is absent.
+
+  Accepts `:data`, `:show_legend`, `:show_percentages`, `:colors`, `:style`,
+  `:classes`, `:app_module` and `:renderer`.
+
+      iex> state = Drafter.Widget.PieChart.mount(%{data: [{"A", 1}]})
+      iex> updated = Drafter.Widget.PieChart.update(%{show_legend: false}, state)
+      iex> {updated.data, updated.show_legend}
+      {[{"A", 1}], false}
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     %{
@@ -157,6 +247,23 @@ defmodule Drafter.Widget.PieChart do
     }
   end
 
+  @doc """
+  Replaces `:data` with a non-empty list of slice entries.
+
+  Unlike the other data-driven widgets this expects a plain list rather than a
+  `Drafter.RingBuffer`: `{label, value}` and `{label, value, color}` tuples pass
+  through, and anything else becomes `{"", term}`. An empty list or a value that is
+  not a list returns `state` unchanged.
+
+      iex> state = Drafter.Widget.PieChart.mount(%{})
+      iex> Drafter.Widget.PieChart.apply_data_buffer(state, [{"A", 1}, 7], nil).data
+      [{"A", 1}, {"", 7}]
+
+      iex> state = Drafter.Widget.PieChart.mount(%{data: [{"A", 1}]})
+      iex> Drafter.Widget.PieChart.apply_data_buffer(state, [], nil).data
+      [{"A", 1}]
+  """
+  @spec apply_data_buffer(t(), [entry() | term()], Drafter.Widget.rect() | nil) :: t()
   @impl Drafter.Widget
   def apply_data_buffer(state, data, _rect) when is_list(data) and data != [] do
     normalized =
@@ -171,10 +278,42 @@ defmodule Drafter.Widget.PieChart do
 
   def apply_data_buffer(state, _data, _rect), do: state
 
+  @doc """
+  The number of rows the element asks for: `opts[:height]`, default `10`.
+
+      iex> Drafter.Widget.PieChart.preferred_height(nil, [])
+      10
+
+      iex> Drafter.Widget.PieChart.preferred_height(nil, height: 20)
+      20
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 10)
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.PieChart.component_tag()
+      :pie_chart
+  """
+  @spec component_tag() :: :pie_chart
   def component_tag, do: :pie_chart
 
+  @doc """
+  Builds the props map for a `{:pie_chart, data, opts}` element.
+
+  `data` becomes `:data` when it is a non-empty list that is not a keyword list;
+  otherwise `opts[:data]` is used, defaulting to `[]`. `:class` is normalised into
+  `:classes` and `:__app_module__` becomes `:app_module`.
+
+      iex> props = Drafter.Widget.PieChart.from_component_opts([{"A", 1}], show_legend: false)
+      iex> {props.data, props.show_legend, props.renderer}
+      {[{"A", 1}], false, :text}
+
+      iex> Drafter.Widget.PieChart.from_component_opts(nil, data: [{"B", 2}]).data
+      [{"B", 2}]
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(data, opts) do
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
 
@@ -197,6 +336,16 @@ defmodule Drafter.Widget.PieChart do
     }
   end
 
+  @doc """
+  Passes the mount props through unchanged, so every option is live-updatable
+  through the component tree.
+
+      iex> props = Drafter.Widget.PieChart.from_component_opts([{"A", 1}], [])
+      iex> Drafter.Widget.PieChart.update_props_from_mount(props, %{}, []) == props
+      true
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), term(), keyword()) ::
+          Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts), do: mount_props
 
   defp build_slices(state) do

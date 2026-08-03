@@ -8,10 +8,10 @@ defmodule Drafter.Trace do
   @exit_stamped {__MODULE__, :exit_stamped}
 
   @doc """
-  Whether `DRAFTER_TRACE` is set.
+  Whether `DRAFTER_TRACE` is set to a non-empty value.
 
-  Read once and cached, because callers on the input and render paths check this
-  before building a trace line.
+  The environment variable is read on the first call and the answer cached for
+  the lifetime of the VM; changing it afterwards has no effect.
   """
   @spec enabled?() :: boolean()
   def enabled? do
@@ -31,7 +31,12 @@ defmodule Drafter.Trace do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
 
-  @doc "Start the shared trace log if DRAFTER_TRACE is set and it isn't running yet."
+  @doc """
+  Start the shared trace log, unless `DRAFTER_TRACE` is unset or it is already running.
+
+  `DRAFTER_TRACE=1` (or `true`) writes `drafter_trace.log` in the current
+  directory; any other value is taken as the path to write. Always returns `:ok`.
+  """
   @spec ensure_started() :: :ok
   def ensure_started do
     if enabled?() and Process.whereis(__MODULE__) == nil do
@@ -41,7 +46,11 @@ defmodule Drafter.Trace do
     :ok
   end
 
-  @doc "Append a line (fire-and-forget). For high-frequency events."
+  @doc """
+  Append `iodata` to the trace log without waiting for the write.
+
+  A no-op when the trace log is not running.
+  """
   @spec log(iodata()) :: :ok
   def log(iodata) do
     case Process.whereis(__MODULE__) do
@@ -51,13 +60,13 @@ defmodule Drafter.Trace do
   end
 
   @doc """
-  Writes `label` and the current epoch to stderr, synchronously.
+  Write `label` and the current epoch time to stderr, synchronously.
 
-  For the last moment before the runtime is halted, where the trace log is no
-  longer a useful place to look: stderr interleaves with the shell, so the value
-  can be compared against a timestamp taken by the shell after the process exits.
+  The line has the form `DRAFTER <label> epoch=<seconds>.<microseconds>`. Writing
+  to stderr rather than the trace log means it survives the trace GenServer being
+  gone, so it is usable at the point the runtime is being halted.
 
-  Silent unless `DRAFTER_TRACE` is set.
+  Does nothing unless `DRAFTER_TRACE` is set. Always returns `:ok`.
   """
   @spec stamp(String.t()) :: :ok
   def stamp(label) do
@@ -79,12 +88,12 @@ defmodule Drafter.Trace do
   end
 
   @doc """
-  Register a `stamp/1` to run as the last thing the VM does, once.
+  Register `stamp("vm_exit")` with `System.at_exit/1`, at most once per VM.
 
-  `System.halt/1` skips `System.at_exit/1`, so this covers the graceful shutdown
-  path; `stamp/1` is called directly on the halting path.
+  Covers the graceful shutdown path only: `System.halt/1` skips `System.at_exit/1`,
+  so a halting caller must call `stamp/1` itself.
 
-  Silent unless `DRAFTER_TRACE` is set.
+  Does nothing unless `DRAFTER_TRACE` is set. Always returns `:ok`.
   """
   @spec stamp_on_exit() :: :ok
   def stamp_on_exit do
@@ -106,10 +115,10 @@ defmodule Drafter.Trace do
   end
 
   @doc """
-  Local wall-clock time as `HH:MM:SS.mmmmmm`, for reading against a stopwatch.
+  A timestamp of the form `HH:MM:SS.uuuuuu epoch=<seconds>.<microseconds> +Nms`.
 
-  Also carries `+Nms` — milliseconds since the trace started — so gaps can be read
-  without subtracting timestamps by hand.
+  The clock time is local. `+Nms` is the number of milliseconds elapsed since the
+  first call to this function in the current VM, which reports `+0ms`.
   """
   @spec ts() :: binary()
   def ts do
@@ -157,8 +166,6 @@ defmodule Drafter.Trace do
     {:ok, dev}
   end
 
-  # `DRAFTER_TRACE=1` writes ./drafter_trace.log; any other value names the file, so runs being
-  # compared against each other do not overwrite one another.
   defp path do
     case System.get_env("DRAFTER_TRACE") do
       value when value in [nil, "", "1", "true"] -> Path.join(File.cwd!(), "drafter_trace.log")

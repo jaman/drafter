@@ -2,18 +2,42 @@ defmodule Drafter.Widget.Chart do
   @moduledoc """
   Renders time-series and financial data as interactive charts with multiple styles.
 
-  Supported chart types: `:line`, `:area`, `:braille_area`, `:bar`, `:clustered_bar`,
-  `:stacked_bar`, `:range_bar`, `:scatter`, and `:candlestick`. Braille-dot rendering provides the
-  highest resolution (two data points per column, four per row). Quadrant-block
-  rendering provides 2×2 pixel resolution per cell (coarser but larger dots). Bar
-  charts use half-block characters for 2× vertical resolution.
+  Supported chart types: `:line`, `:braille`, `:step`, `:area`, `:braille_area`,
+  `:bar`, `:clustered_bar`, `:stacked_bar`, `:range_bar`, `:scatter`, `:bubble`,
+  `:histogram`, `:heatmap`, and `:candlestick`. Any unrecognised value renders as
+  `:line`. Braille-dot rendering provides the highest resolution (two data points
+  per column, four per row). Quadrant-block rendering provides 2×2 pixel
+  resolution per cell (coarser but larger dots). Bar charts use half-block
+  characters for 2× vertical resolution.
 
-  Scatter data points accept `[x, y]` lists, `{x, y}` tuples, or weighted
-  variants `[x, y, weight]` / `{x, y, weight}` where weight is a float
-  between 0.0 and 1.0. Higher weights produce denser braille dot clusters
-  and brighter colors, giving visual density feedback for clustered data.
-  Candlestick candles accept `[open, high, low, close]` lists or maps with
-  `:open`, `:high`, `:low`, `:close` keys.
+  Each chart type reads `:data` in its own shape:
+
+    * `:line`, `:braille`, `:step`, `:area`, `:braille_area`, `:bar` — a list of
+      numbers, or a list of such lists for multiple series
+    * `:clustered_bar`, `:stacked_bar` — a list of series, each a list of numbers
+    * `:range_bar` — a list of `[low, high]` pairs, one per bar
+    * `:scatter` — `[x, y]` lists, `{x, y}` tuples, or weighted variants
+      `[x, y, weight]` / `{x, y, weight}` where weight is a float between 0.0 and
+      1.0. Higher weights produce denser braille dot clusters and brighter colors.
+      A list of point-lists renders multiple series
+    * `:bubble` — points carrying a magnitude, rendered as sized dots; a list of
+      point-lists renders multiple series
+    * `:histogram` — a flat list of raw values, binned automatically
+    * `:heatmap` — a list of rows, each a list of numbers, forming a matrix
+    * `:candlestick` — `[open, high, low, close]` lists or maps with `:open`,
+      `:high`, `:low`, `:close` keys
+
+  ## Component tag
+
+  Tag `:chart`, built by `Drafter.App` as `{:chart, data, opts}`:
+
+      chart(data, opts)
+
+  The positional argument becomes `:data` when it is a list; otherwise `:data` is
+  read from `opts`. Because a bare keyword list in the first position is treated
+  as `opts`, both `chart(values, chart_type: :line)` and
+  `chart(data: values, chart_type: :line)` are valid. `:width` and `:height`
+  default to the rect the parent allocated.
 
   ## Negative Values
 
@@ -59,38 +83,79 @@ defmodule Drafter.Widget.Chart do
 
   ## Keyboard Controls (when focused)
 
-    * `←` / `→` — scroll the X-axis by 5 data points
+    * `←` / `→` — scroll the X-axis by 5 data points, clamped at 0 on the left
     * `↑` / `↓` — pan the Y-axis up/down by 1 unit
-    * `c` — re-anchor the Y-axis to the rightmost visible candle open price
+    * `?c` — reset the Y-axis pan offset to `0`
     * Click and drag — pan both axes simultaneously
+
+  Every other key bubbles.
 
   ## Options
 
     * `:data` — numeric list; list of series for multi-series types; `[low, high]`
-      pairs for `:range_bar`
-    * `:chart_type` — `:line` (default), `:area`, `:braille_area`, `:bar`,
-      `:clustered_bar`, `:stacked_bar`, `:range_bar`, `:scatter`, `:candlestick`
-
-    * `:pixel_style` — pixel rendering style for line and scatter: `:braille` (default) or `:quadrant`
-    * `:min_value` — explicit Y minimum; auto-detected when omitted
-    * `:max_value` — explicit Y maximum; auto-detected when omitted
-    * `:color` — `{r, g, b}` primary colour for single-series charts
-    * `:colors` — list of `{r, g, b}` tuples; one per series for multi-series
-      types; first entry overrides `:color` for single-series bar/scatter/area
-    * `:show_axes` — draw axis lines and zero-line when range spans zero: `true` / `false`
-    * `:show_labels` — draw axis tick labels: `true` / `false` (default)
-    * `:title` — string displayed at the top of the chart
-    * `:x_labels` — list of strings for X-axis tick labels
-    * `:y_labels` — list of strings for Y-axis tick labels
-    * `:orientation` — `:vertical` (default) or `:horizontal`; applies to all bar chart types
-    * `:bar_labels` — list of strings labelling each bar or group; shown when `show_labels: true`
-    * `:show_values` — show the numeric value beside each bar: `true` / `false` (default)
-    * `:fill_opacity` — brightness of the area fill body relative to the series color,
-      `0.0` (invisible) to `1.0` (same as edge). Default `0.6`.
-    * `:animated` — animate new data points: `true` / `false` (default)
-    * `:animation_speed` — milliseconds per animation frame (default `100`)
-    * `:style` — map of style properties
-    * `:classes` — list of theme class atoms
+      pairs for `:range_bar`. Default `[]`
+    * `:chart_type` — `:line` (default), `:step`, `:area`, `:braille`,
+      `:braille_area`, `:bar`, `:clustered_bar`, `:stacked_bar`, `:range_bar`,
+      `:scatter`, `:bubble`, `:histogram`, `:heatmap`, `:candlestick`. Any other
+      value renders as `:line`
+    * `:pixel_style` — pixel rendering style for line, step and scatter:
+      `:braille` (default) or `:quadrant`
+    * `:min_value` — explicit Y minimum. Default `nil`, auto-detected from the data
+      with 5% padding on each side
+    * `:max_value` — explicit Y maximum. Default `nil`, auto-detected from the data
+      with 5% padding on each side. When the resolved minimum equals the maximum the
+      range is widened by `0.001` either way
+    * `:color` — `{r, g, b}` primary colour for single-series charts. Default `nil`,
+      falling back to the theme and then to `{100, 200, 255}`
+    * `:colors` — list of `{r, g, b}` tuples, one per series for multi-series types;
+      the first entry overrides `:color` for single-series bar/scatter/area.
+      Default `[]`
+    * `:show_axes` — `t:boolean/0`, draw axis lines and the zero-line when the range
+      spans zero. Default `false`. Reserves two rows and a labelled left column
+    * `:show_labels` — `t:boolean/0`, draw axis tick labels. Default `false`
+    * `:title` — `t:String.t/0` displayed on a row above the chart. Default `nil`;
+      an empty string is treated the same as `nil`
+    * `:x_labels` — list of strings for X-axis tick labels. Default `[]`
+    * `:y_labels` — list of strings for Y-axis tick labels. Default `[]`
+    * `:orientation` — `:vertical` (default) or `:horizontal`; applies to
+      `:bar`, `:clustered_bar`, `:stacked_bar` and `:range_bar` only, and every
+      other chart type falls back to the vertical renderer
+    * `:bar_labels` — list of strings labelling each bar or group, shown when
+      `show_labels: true`. Default `[]`
+    * `:show_values` — `t:boolean/0`, show the numeric value beside each bar.
+      Default `false`
+    * `:fill_opacity` — brightness of the area fill body relative to the series
+      colour, `0.0` (invisible) to `1.0` (same as edge). Default `0.6`
+    * `:animated` — `t:boolean/0`, animate new data points. Default `false`
+    * `:animation_speed` — milliseconds per animation frame. Default `100`
+    * `:width` — chart width in columns. The element defaults it to the rect the
+      parent allocated, but rendering always uses `rect.width`, so this only reaches
+      the state
+    * `:height` — chart height in rows. The element defaults it to the rect the
+      parent allocated; `mount/1` on its own defaults it to `1`
+    * `:max_data_points` — cap on retained points; older points are dropped when
+      exceeded. Default `nil`, no cap
+    * `:bar_gap` — blank columns between bars. Default `0`
+    * `:area_fill` — which side of the line the area body fills: `:below`
+      (default) or `:inverted` to fill from the line up to the top edge
+    * `:show_baseline` — `t:boolean/0`, draw the zero baseline row on stacked
+      braille areas. Default `false`
+    * `:zero_center` — how a stacked range spanning zero is scaled: `:symmetric`
+      (default, equal extent either side of zero) or `:independent` to let the
+      positive and negative extents differ. Ignored when the data does not cross
+      zero
+    * `:smooth` — `t:boolean/0`, interpolate between points on line charts.
+      Default `false`
+    * `:line_thickness` — line width in pixels for line and area charts. Default `1`
+    * `:connect_lines` — `t:boolean/0`, join consecutive points with line segments.
+      Default `false`
+    * `:raw_data` — `t:boolean/0`, plot every point instead of downsampling to the
+      viewport width with LTTB. Default `false`
+    * `:precision` — decimal places in the Y-axis tick labels. Default `3`. Read by
+      `mount/1` and `update/2` only; the `chart/2` element does not forward it
+    * `:style` — `t:map/0` of style properties. Default `%{}`
+    * `:class` — theme class atom or list of them, reaching `mount/1` as
+      `:classes`. Default `[]`
     * `:renderer` — rendering backend for this chart: `:text` (ASCII/block), `:braille`
       (anti-aliased braille), `:pixel` / `:auto` (best terminal graphics available —
       kitty/iTerm2/sixel image, falling back to braille), or `:iterm2` / `:kitty` /
@@ -105,6 +170,13 @@ defmodule Drafter.Widget.Chart do
       more terminal load.
     * `:image_scale` — for `:pixel` charts, pixels generated per terminal cell column
       (rows use `2×`); default `4`. Higher is sharper but produces larger images.
+
+  `update/2` re-reads every option above except `:width`, `:app_module` and
+  `:image_throttle`, which are fixed once the widget is mounted.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` is not implemented for this widget and returns `nil`.
 
   ## Usage
 
@@ -187,9 +259,70 @@ defmodule Drafter.Widget.Chart do
     _internal: %{}
   ]
 
+  @type t :: %__MODULE__{
+          data: list(),
+          chart_type: chart_type(),
+          pixel_style: :braille | :quadrant,
+          min_value: number(),
+          max_value: number(),
+          width: pos_integer() | nil,
+          height: pos_integer(),
+          style: map(),
+          classes: [atom()],
+          app_module: module() | nil,
+          color: {0..255, 0..255, 0..255} | nil,
+          colors: [{0..255, 0..255, 0..255}],
+          show_axes: boolean(),
+          show_labels: boolean(),
+          title: String.t() | nil,
+          x_labels: [String.t()],
+          y_labels: [String.t()],
+          animated: boolean(),
+          animation_speed: pos_integer(),
+          max_data_points: pos_integer() | nil,
+          area_fill: :below | :inverted,
+          fill_opacity: float(),
+          orientation: :vertical | :horizontal,
+          bar_labels: [String.t()],
+          show_values: boolean(),
+          bar_gap: non_neg_integer(),
+          show_baseline: boolean(),
+          zero_center: :symmetric | :independent,
+          focused: boolean(),
+          _internal: map()
+        }
+
+  @doc """
+  Draws several series into one set of strips. See `Drafter.Widget.Chart.MultiSeries`.
+  """
   defdelegate render_multi_series(data_series, width, height, opts), to: MultiSeries, as: :render
+
+  @doc """
+  Draws a multi-row bar chart from a flat value list. See `Drafter.Widget.Chart.Bar`.
+  """
   defdelegate render_tall_bar_chart(data, height, opts), to: Bar
 
+  @doc """
+  Builds the chart state from `props`.
+
+  Resolves the Y range from `:min_value`/`:max_value` and the data, seeds the
+  candlestick live candle, and stores the scroll and drag state under `:_internal`.
+  `:height` defaults to `1` here; the `chart/2` element supplies the parent rect's
+  height instead.
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3], chart_type: :bar})
+      iex> {c.chart_type, c.data, c.height, c.bar_gap, c.show_axes}
+      {:bar, [1, 2, 3], 1, 0, false}
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [0, 100]})
+      iex> {c.min_value, c.max_value}
+      {-5.0, 105.0}
+
+      iex> c = Drafter.Widget.Chart.mount(%{})
+      iex> {c.min_value, c.max_value, c.chart_type, c.pixel_style}
+      {-5.0, 105.0, :line, :braille}
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
     data = Map.get(props, :data, [])
@@ -252,11 +385,46 @@ defmodule Drafter.Widget.Chart do
     }
   end
 
+  @doc """
+  Ends the current drag gesture, clearing `:drag_last_x` and setting
+  `:dragging_scrollbar`. Always returns `{:ok, state}` and consumes the event.
+  """
+  @spec handle_mouse_up(integer(), integer(), t()) :: {:ok, t()}
   @impl Drafter.Widget
   def handle_mouse_up(_x, _y, state) do
     {:ok, update_internal(state, dragging_scrollbar: true, drag_last_x: nil)}
   end
 
+  @doc """
+  Pans the chart.
+
+  `:left`/`:ArrowLeft` and `:right`/`:ArrowRight` move the X scroll offset by 5 data
+  points, clamped at `0` on the left. `:up`/`:ArrowUp` and `:down`/`:ArrowDown` move
+  the Y offset by one unit, unclamped. The codepoint `?c` resets the Y offset to
+  `0`. All of those return `{:ok, state}`; every other key returns
+  `{:bubble, state}`.
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3]})
+      iex> {:ok, scrolled} = Drafter.Widget.Chart.handle_key(:right, c)
+      iex> scrolled._internal.scroll_offset
+      5
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3]})
+      iex> {:ok, clamped} = Drafter.Widget.Chart.handle_key(:left, c)
+      iex> clamped._internal.scroll_offset
+      0
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3]})
+      iex> {:ok, panned} = Drafter.Widget.Chart.handle_key(:up, c)
+      iex> {:ok, reset} = Drafter.Widget.Chart.handle_key(?c, panned)
+      iex> {panned._internal.y_offset, reset._internal.y_offset}
+      {1, 0}
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3]})
+      iex> Drafter.Widget.Chart.handle_key(:enter, c) |> elem(0)
+      :bubble
+  """
+  @spec handle_key(Drafter.Widget.key() | integer(), t()) :: {:ok, t()} | {:bubble, t()}
   @impl Drafter.Widget
   def handle_key(:left, state), do: scroll_left(state)
   def handle_key(:ArrowLeft, state), do: scroll_left(state)
@@ -278,6 +446,15 @@ defmodule Drafter.Widget.Chart do
   def handle_key(?c, state), do: {:ok, update_internal(state, y_offset: 0)}
   def handle_key(_key, state), do: {:bubble, state}
 
+  @doc """
+  Pans both axes as the pointer moves with a button held.
+
+  The first drag event after a press only records the anchor point and leaves the
+  offsets alone. Subsequent events move the X scroll offset by the leftward pointer
+  delta, clamped at `0`, and the Y offset by the downward delta. Always returns
+  `{:ok, state}`.
+  """
+  @spec handle_drag(integer(), integer(), t()) :: {:ok, t()}
   @impl Drafter.Widget
   def handle_drag(x, y, %{_internal: %{drag_last_x: nil}} = state) do
     {:ok, update_internal(state, drag_last_x: x, drag_last_y: y)}
@@ -298,10 +475,48 @@ defmodule Drafter.Widget.Chart do
      )}
   end
 
+  @doc """
+  `opts[:height]`, or `5` when it is absent.
+
+      iex> Drafter.Widget.Chart.preferred_height([1, 2], [])
+      5
+
+      iex> Drafter.Widget.Chart.preferred_height([1, 2], height: 12)
+      12
+  """
+  @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts), do: Keyword.get(opts, :height, 5)
 
+  @doc """
+  The registry tag for this widget.
+
+      iex> Drafter.Widget.Chart.component_tag()
+      :chart
+  """
+  @spec component_tag() :: :chart
   def component_tag, do: :chart
 
+  @doc """
+  Turns the `{:chart, data, opts}` element into a props map for `mount/1`.
+
+  `data` is used as `:data` when it is a list, and otherwise `opts[:data]` is used,
+  which is what lets `chart(chart_type: :line, data: values)` work. `:width` and
+  `:height` default to the parent rect passed as `:__rect__`, itself defaulting to
+  `%{width: 80, height: 20}`. `:class` is normalised into `:classes`,
+  `:__app_module__` becomes `:app_module`, and a `:_render_timestamp` is stamped
+  from the monotonic clock.
+
+  `:precision` is not forwarded; pass it directly to `mount/1` or `update/2`.
+
+      iex> props = Drafter.Widget.Chart.from_component_opts([1, 2, 3], chart_type: :bar)
+      iex> {props.data, props.chart_type, props.width, props.height, props.bar_gap}
+      {[1, 2, 3], :bar, 80, 20, 0}
+
+      iex> props = Drafter.Widget.Chart.from_component_opts(nil, data: [4, 5], height: 6)
+      iex> {props.data, props.height, props.fill_opacity, props.zero_center}
+      {[4, 5], 6, 0.6, :symmetric}
+  """
+  @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(data, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
     classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
@@ -347,6 +562,12 @@ defmodule Drafter.Widget.Chart do
     }
   end
 
+  @doc """
+  Returns `mount_props`, re-stamping `:_render_timestamp` from the monotonic clock
+  when the chart resolves to the text renderer so that animation keeps advancing.
+  Pixel and braille charts get the props through unchanged.
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, _opts) do
     renderer = Map.get(mount_props, :renderer)
     chart_type = Map.get(mount_props, :chart_type, :line)
@@ -358,6 +579,14 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
+  @doc """
+  Replaces `:data` with everything the widget's data channel has buffered.
+
+  The buffer contents become the whole data set, they are not appended. An empty
+  buffer leaves the state alone. The Y range is not recomputed here, so it keeps the
+  bounds from the last `mount/1` or `update/2`.
+  """
+  @spec apply_data_buffer(t(), Drafter.RingBuffer.t(), Drafter.Widget.rect()) :: t()
   @impl Drafter.Widget
   def apply_data_buffer(state, buffer, _rect) do
     data = Drafter.RingBuffer.to_list(buffer)
@@ -369,6 +598,18 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
+  @doc """
+  Draws the chart into `rect`, padded or truncated to exactly `rect.height` strips.
+
+  Returns `[]` when `rect.width` is `0` or less. Accepts either a `t:t/0` or a raw
+  props map, which is mounted first. The renderer resolved from `:renderer` and the
+  chart type decides the output: a `:pixel` chart emits blank strips, because the
+  image itself is emitted separately by the widget server; a `:braille` chart emits
+  braille strips, falling back to the text renderer when the data cannot be drawn
+  that way; a `:text` chart draws blocks and box characters, adding the axes and the
+  title row when those options are on.
+  """
+  @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(_state, %{width: width}) when width <= 0, do: []
 
@@ -440,6 +681,13 @@ defmodule Drafter.Widget.Chart do
     |> pad_strips(rect.height)
   end
 
+  @doc "Whether this chart is drawing a transmitted image rather than cells."
+  @spec image_active?(t()) :: boolean()
+  @impl Drafter.Widget
+  def image_active?(state) do
+    Pixel.mode(renderer(state), state.chart_type) == :pixel
+  end
+
   defp renderer(state), do: Map.get(state._internal, :renderer)
 
   defp braille_render(state, rect) do
@@ -473,6 +721,25 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
+  @doc """
+  Folds fresh props into `state`.
+
+  The Y range is recomputed only when the data hash changes or when `props` carries
+  a numeric `:min_value` or `:max_value`; otherwise the current bounds are kept.
+  `:width` and `:app_module` are not re-read and keep their mounted values, and
+  `:area_fill` falls back to the current value on any falsy prop rather than only on
+  a missing key. Scroll offset, drag anchors and Y pan offset survive untouched.
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3]})
+      iex> updated = Drafter.Widget.Chart.update(%{data: [10, 20], chart_type: :bar}, c)
+      iex> {updated.data, updated.chart_type}
+      {[10, 20], :bar}
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3], width: 40})
+      iex> Drafter.Widget.Chart.update(%{width: 99}, c).width
+      40
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
     new_data = Map.get(props, :data, state.data)

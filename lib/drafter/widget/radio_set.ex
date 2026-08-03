@@ -6,15 +6,60 @@ defmodule Drafter.Widget.RadioSet do
   with labels. Arrow keys move the highlighted cursor; Enter or Space confirms the selection.
   Mouse clicks select the clicked option immediately.
 
+  ## Component tag
+
+  Tag `:radio_set`, built by `Drafter.App` as `{:radio_set, options, opts}`:
+
+      radio_set(options, opts)
+
+  The positional `options` list is used when non-empty, falling back to
+  `opts[:options]`. `:selected` and `:on_change` go through `Drafter.Binding`, so
+  passing `bind: :some_key` reads the current selection from that app-state key
+  and writes the new one back on change. `:visible_height` and `:width` default
+  to the rect the parent allocated, and a `:width` given in `opts` is ignored.
+
   ## Options
 
-    * `:options` - list of options in any of these formats:
+    * `:options` - list of options in any of these formats. Default `[]`. Anything
+      else raises `FunctionClauseError` from `mount/1`.
         * `"label"` — string used as both ID and label
         * `{"label", id}` — tuple with a display label and an identifier
         * `%{id: id, label: label}` — map with explicit fields
-    * `:selected` - ID of the initially selected option
-    * `:on_change` - `(id -> term())` called with the selected option's ID on change
-    * `:visible_height` - number of rows allocated for the list (default: number of options)
+    * `:selected` - ID of the initially selected option. Default `nil`. An ID that
+      is `nil` or matches no option selects index `0`, even when there are no
+      options at all.
+    * `:bind` - app-state key atom for two-way binding of the selection.
+      Default: none.
+    * `:on_change` - `(id -> term())` called with the selected option's ID whenever
+      the selection changes. Default `nil`. An exception it raises is swallowed.
+    * `:visible_height` - `t:non_neg_integer/0` rows allocated for the list.
+      Default: the number of options when mounting directly, and the height of
+      `opts[:__rect__]` through the element. Held on the state; `render/2` uses the
+      rect it is given instead.
+    * `:cols` - `t:pos_integer/0` columns the options are laid out across. Default
+      `1`. Options fill column-major. Mount-only.
+    * `:width` - `t:non_neg_integer/0` total width, used to resolve which column a
+      click landed in. Default `0` when mounting directly. Through the element it
+      always comes from the allocated rect and a `:width` in `opts` is ignored;
+      `on_rect_change/2` keeps it current.
+    * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`.
+
+  `update/2` applies `:options`, `:selected`, `:on_change` and `:visible_height`
+  and drops every other key, so `:cols`, `:width` and `:focused` are mount-only.
+  Through the component tree `update_props_from_mount/3` narrows that to
+  `:options` and `:on_change`, plus `:selected` only when `:bind` is set.
+
+  ## Key bindings
+
+    * `up` / `down` - move the highlight; bubbles at either end
+    * `enter`, `space` - select the highlighted option
+
+  A mouse up selects the option under the pointer immediately.
+
+  ## Widget value
+
+  `Drafter.get_widget_value/1` returns the ID of the selected option, or `nil` when
+  the index lands outside the list.
 
   ## Usage
 
@@ -44,6 +89,41 @@ defmodule Drafter.Widget.RadioSet do
     width: 0
   ]
 
+  @type option :: %{id: term(), label: String.t()}
+
+  @type t :: %__MODULE__{
+          options: [option()],
+          selected_index: non_neg_integer(),
+          highlighted_index: non_neg_integer(),
+          focused: boolean(),
+          on_change: (term() -> term()) | nil,
+          visible_height: non_neg_integer(),
+          cols: pos_integer(),
+          width: non_neg_integer()
+        }
+
+  @doc """
+  Builds the widget state from `props`.
+
+  Options are normalised into `%{id: id, label: label}` maps. `:selected_index` and
+  `:highlighted_index` both start at the index of `:selected`, or at `0` when it is
+  `nil` or matches nothing.
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: ["Light", "Dark"]})
+      iex> state.options
+      [%{id: "Light", label: "Light"}, %{id: "Dark", label: "Dark"}]
+
+      iex> options = [{"Light", :light}, {"Dark", :dark}]
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: options, selected: :dark})
+      iex> {state.selected_index, state.highlighted_index, state.visible_height}
+      {1, 1, 2}
+
+      iex> options = [{"Light", :light}]
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: options, selected: :nope})
+      iex> state.selected_index
+      0
+  """
+  @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
     options = Map.get(props, :options, [])
     selected = Map.get(props, :selected)
@@ -65,8 +145,18 @@ defmodule Drafter.Widget.RadioSet do
   end
 
   @doc false
+  @spec on_rect_change(Drafter.Widget.rect(), t()) :: t()
   def on_rect_change(rect, state), do: %{state | width: rect.width}
 
+  @doc """
+  Draws the option list into `rect`, always returning exactly `rect.height` strips.
+
+  With `:cols` at `1` the options run down the rect, capped at `rect.height`, and
+  the remaining rows are blank. With more columns the options fill column-major
+  over `ceil(count / cols)` rows, each column `div(rect.width, cols)` wide. The
+  highlight is only drawn while the widget is focused.
+  """
+  @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   def render(state, rect) do
     computed = Computed.for_widget(:radio_set, state)
     bg_style = Computed.to_segment_style(computed)
@@ -119,6 +209,29 @@ defmodule Drafter.Widget.RadioSet do
     end
   end
 
+  @doc """
+  Folds `:options`, `:selected`, `:on_change` and `:visible_height` into `state`
+  and drops every other key.
+
+  New `:options` are normalised. A `:selected` that matches no option keeps the
+  current index; new options without a `:selected` clamp the index to the last
+  option. `:highlighted_index` follows `:selected_index` only when that index
+  actually moved.
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: [{"a", :a}, {"b", :b}]})
+      iex> updated = Drafter.Widget.RadioSet.update(%{selected: :b}, state)
+      iex> {updated.selected_index, updated.highlighted_index}
+      {1, 1}
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: [{"a", :a}, {"b", :b}]})
+      iex> Drafter.Widget.RadioSet.update(%{selected: :missing}, state).selected_index
+      0
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: [{"a", :a}, {"b", :b}], selected: :b})
+      iex> Drafter.Widget.RadioSet.update(%{options: [{"a", :a}]}, state).selected_index
+      0
+  """
+  @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
     raw_options = Map.get(props, :options)
     new_options = if raw_options, do: normalize_options(raw_options), else: state.options
@@ -153,6 +266,39 @@ defmodule Drafter.Widget.RadioSet do
     }
   end
 
+  @doc """
+  Handles the radio set's own events, replacing the dispatch `use Drafter.Widget`
+  would otherwise generate.
+
+  Recognised events:
+
+    * `{:key, :up}` / `{:key, :down}` - move `:highlighted_index`, returning
+      `{:bubble, state}` unchanged at the first and last option
+    * `{:key, :enter}` / `{:key, :" "}` - set `:selected_index` from the highlight
+      and call `:on_change`
+    * `{:mouse, %{type: :mouse_up, x: x, y: y}}` - select the option at those
+      coordinates and call `:on_change`, or `{:noreply, state}` when the click
+      misses every option
+    * `{:focus}` / `{:blur}` - set or clear `:focused`
+
+  Every other event returns `{:noreply, state}`.
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: [{"a", :a}, {"b", :b}]})
+      iex> {:ok, moved} = Drafter.Widget.RadioSet.handle_event({:key, :down}, state)
+      iex> {moved.highlighted_index, moved.selected_index}
+      {1, 0}
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: [{"a", :a}, {"b", :b}]})
+      iex> Drafter.Widget.RadioSet.handle_event({:key, :up}, state) == {:bubble, state}
+      true
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: [{"a", :a}, {"b", :b}]})
+      iex> {:ok, moved} = Drafter.Widget.RadioSet.handle_event({:key, :down}, state)
+      iex> {:ok, chosen} = Drafter.Widget.RadioSet.handle_event({:key, :enter}, moved)
+      iex> chosen.selected_index
+      1
+  """
+  @spec handle_event(term(), t()) :: {:ok, t()} | {:bubble, t()} | {:noreply, t()}
   def handle_event({:key, :up}, %{highlighted_index: 0} = state), do: {:bubble, state}
 
   def handle_event({:key, :up}, state) do
@@ -192,9 +338,18 @@ defmodule Drafter.Widget.RadioSet do
   has no option.
 
   Options fill column-major — the first column top to bottom, then the next — so
-  both `x` and `y` are used to resolve the index when `:cols` exceeds one.
+  both `x` and `y` are used to resolve the index when `:cols` exceeds one. With a
+  single column `x` only has to be non-negative.
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: ["a", "b", "c"]})
+      iex> {Drafter.Widget.RadioSet.option_index_at(state, 0, 1), Drafter.Widget.RadioSet.option_index_at(state, 0, 3)}
+      {1, nil}
+
+      iex> state = Drafter.Widget.RadioSet.mount(%{options: ["a", "b", "c", "d"], cols: 2, width: 40})
+      iex> {Drafter.Widget.RadioSet.option_index_at(state, 25, 1), Drafter.Widget.RadioSet.option_index_at(state, 0, 1)}
+      {3, 1}
   """
-  @spec option_index_at(struct(), integer(), integer()) :: non_neg_integer() | nil
+  @spec option_index_at(t(), integer(), integer()) :: non_neg_integer() | nil
   def option_index_at(state, x, y) do
     cols = max(state.cols, 1)
     rows = rows_per_column(length(state.options), cols)
@@ -217,10 +372,53 @@ defmodule Drafter.Widget.RadioSet do
   defp rows_per_column(0, _cols), do: 0
   defp rows_per_column(count, cols), do: ceil(count / cols)
 
+  @doc """
+  The number of rows the element asks for.
+
+  Returns `opts[:height]` when given, otherwise the length of the positional
+  options list — which is `0` when the options were passed under `opts[:options]`
+  instead.
+
+      iex> Drafter.Widget.RadioSet.preferred_height(["a", "b"], [])
+      2
+
+      iex> Drafter.Widget.RadioSet.preferred_height(nil, options: ["a", "b"])
+      0
+
+      iex> Drafter.Widget.RadioSet.preferred_height(nil, height: 5)
+      5
+  """
+  @spec preferred_height(list() | nil, keyword()) :: non_neg_integer()
   def preferred_height(args, opts), do: Keyword.get(opts, :height, length(args || []))
 
+  @doc """
+  The component tag this widget registers under.
+
+      iex> Drafter.Widget.RadioSet.component_tag()
+      :radio_set
+  """
+  @spec component_tag() :: :radio_set
   def component_tag, do: :radio_set
 
+  @doc """
+  Builds the props map for a `{:radio_set, options, opts}` element.
+
+  `options` is used when it is a non-empty list, otherwise `opts[:options]`,
+  defaulting to `[]`. `:selected` comes from `Drafter.Binding.get_bound_value/3`
+  and `:on_change` is the binding's writer. `:visible_height` falls back to the
+  height of `opts[:__rect__]` and `:width` always comes from its width, ignoring
+  any `:width` in `opts`; the rect itself defaults to `%{width: 40, height: 10}`.
+  The emitted `:classes` key is not read by `mount/1`.
+
+      iex> props = Drafter.Widget.RadioSet.from_component_opts([{"a", :a}], selected: :a)
+      iex> {props.options, props.selected, props.visible_height, props.width, props.cols}
+      {[{"a", :a}], :a, 10, 40, 1}
+
+      iex> opts = [bind: :theme, __app_state__: %{theme: :dark}, options: [{"Dark", :dark}]]
+      iex> Drafter.Widget.RadioSet.from_component_opts(nil, opts).selected
+      :dark
+  """
+  @spec from_component_opts(list() | nil, keyword()) :: Drafter.Widget.props()
   def from_component_opts(options, opts) do
     app_state = Keyword.get(opts, :__app_state__, %{})
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
@@ -242,6 +440,25 @@ defmodule Drafter.Widget.RadioSet do
     }
   end
 
+  @doc """
+  Narrows a re-render to `:options`, `:on_change` and `:classes`, adding
+  `:selected` only when `opts` carries `:bind`.
+
+  `:visible_height`, `:cols` and `:width` are dropped, so they are mount-only
+  through the component tree, and an unbound radio set keeps whatever the user
+  selected.
+
+      iex> props = Drafter.Widget.RadioSet.from_component_opts([{"a", :a}], [])
+      iex> Drafter.Widget.RadioSet.update_props_from_mount(props, %{}, []) |> Map.keys() |> Enum.sort()
+      [:classes, :on_change, :options]
+
+      iex> opts = [bind: :theme, __app_state__: %{theme: :dark}]
+      iex> props = Drafter.Widget.RadioSet.from_component_opts([{"Dark", :dark}], opts)
+      iex> Drafter.Widget.RadioSet.update_props_from_mount(props, %{}, opts).selected
+      :dark
+  """
+  @spec update_props_from_mount(Drafter.Widget.props(), term(), keyword()) ::
+          Drafter.Widget.props()
   def update_props_from_mount(mount_props, _existing_state, opts) do
     base = %{
       options: mount_props.options,

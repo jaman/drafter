@@ -279,7 +279,6 @@ defmodule Drafter.WidgetHierarchyTest do
           %{x: 0, y: 5, width: 10, height: 3}
         )
 
-      # Mouse move event should update hover state
       {hierarchy, _actions} =
         WidgetHierarchy.handle_event(hierarchy, {:mouse, %{type: :move, x: 5, y: 1}})
 
