@@ -34,3 +34,9 @@ drafter-*.tar
 .tool-versions
 *.log*
 tui_debug.log
+
+CLEANUPS_TO_DO.md
+CONTRIBUTING.md
+dev/
+docs/
+priv/
