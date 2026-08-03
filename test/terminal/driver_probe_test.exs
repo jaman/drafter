@@ -14,11 +14,17 @@ defmodule Drafter.Terminal.DriverProbeTest do
 
   setup do
     case Driver.start_link() do
-      {:ok, pid} -> on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+      {:ok, pid} -> on_exit(fn -> stop_quietly(pid) end)
       {:error, {:already_started, _pid}} -> :ok
     end
 
     :ok
+  end
+
+  defp stop_quietly(pid) do
+    GenServer.stop(pid, :normal, 1000)
+  catch
+    :exit, _reason -> :ok
   end
 
   test "a driver with no terminal reports it was never asked" do

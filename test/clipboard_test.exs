@@ -57,10 +57,16 @@ defmodule Drafter.ClipboardTest do
     try do
       fun.()
     after
-      GenServer.stop(comp, :normal, 1000)
-      GenServer.stop(em, :normal, 1000)
-      GenServer.stop(driver, :normal, 1000)
+      Enum.each([comp, em, driver], &stop_quietly/1)
     end
+  end
+
+  # These are start_link'ed from the test process, so they die with it. Teardown
+  # can therefore find them already gone, and must not fail on that.
+  defp stop_quietly(pid) do
+    GenServer.stop(pid, :normal, 1000)
+  catch
+    :exit, _reason -> :ok
   end
 
   describe "osc52/2" do
@@ -154,7 +160,7 @@ defmodule Drafter.ClipboardTest do
     defp subscribed_manager do
       {:ok, manager} = Event.Manager.start_link(name: nil)
       Event.Manager.subscribe_to(manager, self(), :all)
-      on_exit(fn -> if Process.alive?(manager), do: GenServer.stop(manager, :normal, 1000) end)
+      on_exit(fn -> stop_quietly(manager) end)
       manager
     end
 
