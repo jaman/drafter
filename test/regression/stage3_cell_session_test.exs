@@ -2,6 +2,7 @@ defmodule Drafter.Regression.Stage3CellSessionTest do
   use ExUnit.Case, async: false
 
   alias Drafter.CellSession
+  alias Drafter.Draw.Strip
 
   defmodule CounterApp do
     use Drafter.App
@@ -13,7 +14,7 @@ defmodule Drafter.Regression.Stage3CellSessionTest do
     def handle_event(_event, state), do: {:noreply, state}
   end
 
-  defp row_text(strip), do: Enum.map_join(strip.segments, "", & &1.text)
+  defp row_text(strip), do: Strip.to_plain_text(strip)
   defp text(strips), do: Enum.map_join(strips, "\n", &row_text/1)
 
   defp wait_until(fun, tries \\ 200) do

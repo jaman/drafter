@@ -1,4 +1,4 @@
-defmodule Drafter.Examples.Counter do
+defmodule Drafter.TestApps.Counter do
   @moduledoc """
   A simple counter application demonstrating Drafter basics.
 

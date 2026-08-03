@@ -1,8 +1,8 @@
 defmodule Drafter.Integration.CalculatorTest do
   use ExUnit.Case, async: false
 
-  alias Drafter.Examples.Calculator
   alias Drafter.Test, as: TUI
+  alias Drafter.TestApps.Calculator
 
   setup do
     ctx = TUI.start_headless(Calculator)

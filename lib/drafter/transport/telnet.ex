@@ -14,7 +14,7 @@ defmodule Drafter.Transport.Telnet do
 
     * `:port` - TCP port, bound on all interfaces. Default: `2323`.
     * `:mode` - `:isolated` or `:shared`. Default: `:isolated`. `:shared` starts (or
-      joins) the app's `Drafter.Session.SharedState` server.
+      joins) the app's shared-state server.
     * `:mount_props` - map handed to each session's `mount/1`. Default: `%{}`.
 
   Unknown options are carried along and ignored.
@@ -72,10 +72,12 @@ defmodule Drafter.Transport.Telnet do
 
     session_ctx = start_session_services(driver_pid)
     TelnetDriver.setup(driver_pid, session_ctx.event_manager)
+
     session_ctx =
       session_ctx
       |> Map.put(:terminal_env, TelnetDriver.terminal_env(driver_pid))
       |> put_probed_protocol(TelnetDriver.probe(driver_pid))
+
     Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
 
     session_opts = build_session_opts(app_module, mode, mount_props)

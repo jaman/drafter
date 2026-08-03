@@ -1,0 +1,67 @@
+label.title {
+  color: accent;
+  bold: true;
+}
+
+label.subtitle {
+  color: text_primary;
+  bold: true;
+}
+
+label.muted {
+  color: text_muted;
+  dim: true;
+}
+
+label.counter {
+  color: text_primary;
+}
+
+label.counter.highlight {
+  color: accent;
+  bold: true;
+}
+
+button {
+  color: background;
+  background: primary;
+}
+
+button:hover {
+  bold: true;
+}
+
+button.success {
+  background: success;
+  color: background;
+}
+
+button.warning {
+  background: warning;
+  color: background;
+}
+
+button.danger {
+  background: error;
+  color: background;
+}
+
+button.neon {
+  background: #39ff14;
+  color: #000000;
+}
+
+button#reset {
+  background: error;
+  bold: true;
+}
+
+text_input {
+  color: text_primary;
+  background: surface;
+}
+
+text_input:focus {
+  background: panel;
+  bold: true;
+}

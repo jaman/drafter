@@ -509,7 +509,7 @@ defmodule Drafter.Widget.OptionList do
   @spec from_component_opts(list() | nil, keyword()) :: Drafter.Widget.props()
   def from_component_opts(items, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     selected = Keyword.get(opts, :selected)
 

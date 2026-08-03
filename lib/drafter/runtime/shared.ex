@@ -3,7 +3,7 @@ defmodule Drafter.Runtime.Shared do
   Runtime backend for shared multi-user sessions (e.g. an SSH chat served to many clients).
 
   Wraps the `Callback` backend but routes app state changes through a
-  `Drafter.Session.SharedState` server: when the app produces new state, it is pushed to
+  the shared-state server: when the app produces new state, it is pushed to
   the shared server, which broadcasts `{:shared_state_updated, state}` to every connected
   session. Each session merges its per-session `mount_props` over the shared state and
   re-renders, so all clients stay in sync while keeping their own view-local props.

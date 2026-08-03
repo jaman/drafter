@@ -1,5 +1,23 @@
 defmodule Drafter.WidgetHierarchy do
-  @moduledoc false
+  @moduledoc """
+  The mounted widget tree of a running application.
+
+  One of these is built from the element tree `render/1` returns and is what
+  routes events, resolves selectors and remembers where each widget was drawn.
+  `Drafter.Test.get_widget_hierarchy/1` hands the whole struct to a test; the
+  functions here are otherwise called by the framework rather than by an
+  application.
+
+  The fields a test reads most:
+
+    * `:widgets` - every mounted widget by id, each carrying its `:module`,
+      `:state`, `:parent`, `:children` and `:pid`
+    * `:widget_rects` - the rect a widget was last drawn into, by id, as
+      `%{x:, y:, width:, height:}` in zero-based screen cells
+    * `:focused_widget` - the id holding keyboard focus, or `nil`
+    * `:hover_widget` - the id under the pointer, or `nil`
+    * `:root` - the id of the outermost widget
+  """
 
   alias Drafter.Session.Context
   alias Drafter.WidgetServer
@@ -426,21 +444,33 @@ defmodule Drafter.WidgetHierarchy do
   @spec collect_session_pdict() :: %{atom() => pid()}
   def collect_session_pdict, do: Context.capture()
 
+  @doc false
   defdelegate focus_widget(hierarchy, widget_id), to: __MODULE__.Focus
+  @doc false
   defdelegate focus_widget(hierarchy, widget_id, direction), to: __MODULE__.Focus
+  @doc false
   defdelegate cycle_focus(hierarchy), to: __MODULE__.Focus
+  @doc false
   defdelegate cycle_focus_reverse(hierarchy), to: __MODULE__.Focus
 
+  @doc false
   defdelegate handle_event(hierarchy, event), to: __MODULE__.EventRouter
+  @doc false
   defdelegate handle_event_consumed(hierarchy, event), to: __MODULE__.EventRouter
+  @doc false
   defdelegate broadcast_event(hierarchy, event), to: __MODULE__.EventRouter
+  @doc false
   defdelegate send_event_to_widget(hierarchy, widget_id, event), to: __MODULE__.EventRouter
 
+  @doc false
   defdelegate find_widget_at(hierarchy, x, y), to: __MODULE__.HitTest
 
+  @doc false
   defdelegate query_all(hierarchy, selector), to: __MODULE__.Query
+  @doc false
   defdelegate query_one(hierarchy, selector), to: __MODULE__.Query
 
+  @doc false
   defdelegate register_scroll_container(
                 hierarchy,
                 scroll_id,
@@ -450,6 +480,7 @@ defmodule Drafter.WidgetHierarchy do
               ),
               to: __MODULE__.Scroll
 
+  @doc false
   defdelegate register_scroll_container(
                 hierarchy,
                 scroll_id,
@@ -460,15 +491,19 @@ defmodule Drafter.WidgetHierarchy do
               ),
               to: __MODULE__.Scroll
 
+  @doc false
   defdelegate set_widget_scroll_parent(hierarchy, widget_id, scroll_parent_id),
     to: __MODULE__.Scroll
 
+  @doc false
   defdelegate get_widget_scroll_parent(hierarchy, widget_id),
     to: __MODULE__.Scroll
 
+  @doc false
   defdelegate get_scroll_container_info(hierarchy, scroll_id),
     to: __MODULE__.Scroll
 
+  @doc false
   defdelegate update_scroll_container_content(
                 hierarchy,
                 scroll_id,

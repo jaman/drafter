@@ -44,7 +44,7 @@ directly without the supervisor running.
 A widget busy rendering something expensive — a large chart, a wide table — will
 not service a call promptly. Because these servers are reachable from the app
 loop, an unguarded call timeout on the render path would take down the whole
-session. `Drafter.WidgetServer.safe_get_state/2` converts that into a `nil`, so
+session. The widget server converts that into a `nil`, so
 the render path degrades to a stale frame instead.
 
 ### Widget state stays in its server
@@ -207,7 +207,7 @@ mid-resize where the image would lag the text, is skipped.
 ### Image placement carries no bytes
 
 Terminal-graphics bytes are stored once per generation by
-`Drafter.Compositor.put_image/8`, from the widget's async render task, so they
+`Drafter.Compositor.put_image/4`, from the widget's async render task, so they
 never travel through the render loop. `place_image/3` is then a per-frame update
 that only positions the region and marks it visible.
 
@@ -226,7 +226,7 @@ but it reorders existing layouts, so it belongs with a deliberate layering pass.
 The thumb is sized in proportion to the viewport, so it occupies several rows and
 travels a track shortened by its own size (`viewport_height - thumb_size`). Code
 turning a pointer row back into a scroll offset must use
-`Drafter.Widget.Scrollbar.offset_from_row/3`, the exact inverse of `thumb_rows/3`,
+The scrollbar’s `offset_from_row/3`, the exact inverse of its `thumb_rows/3`,
 rather than mapping the row across the full viewport height as though the thumb
 were a single row. The two mappings diverge by up to `thumb_size - 1` rows, and
 the divergence grows the further down the bar the pointer travels.

@@ -14,7 +14,7 @@ defmodule Drafter.Widget.Slider do
       slider(value, opts)
 
   The two-argument form puts `value` into `opts` under `:value`. `:value` and
-  `:on_change` go through `Drafter.Binding`, so `bind: :some_key` reads the value from
+  `:on_change` go through the binding layer, so `bind: :some_key` reads the value from
   that app-state key and writes each new one back.
 
   ## Options
@@ -403,8 +403,7 @@ defmodule Drafter.Widget.Slider do
   @doc """
   Builds the props map for a `{:slider, opts}` element.
 
-  The positional argument is ignored. `:value` comes from
-  `Drafter.Binding.get_bound_value/3`, so `bind: :key` reads it from
+  The positional argument is ignored. `:value` is the bound value for that key, so `bind: :key` reads it from
   `opts[:__app_state__]`, and `:on_change` is the binding's writer. `:class` is
   normalised into `:classes` and `:__app_module__` into `:app_module`.
 
@@ -438,7 +437,7 @@ defmodule Drafter.Widget.Slider do
       thumb_color: Keyword.get(opts, :thumb_color),
       renderer: Keyword.get(opts, :renderer),
       disabled: Keyword.get(opts, :disabled, false),
-      classes: Drafter.Util.normalize_classes(Keyword.get(opts, :class, [])),
+      classes: Drafter.Style.normalize_classes(Keyword.get(opts, :class, [])),
       style: Keyword.get(opts, :style, %{}),
       app_module: Keyword.get(opts, :__app_module__),
       width: Keyword.get(opts, :width, rect.width),

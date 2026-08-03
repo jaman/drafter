@@ -456,7 +456,7 @@ defmodule Drafter.Widget.Button do
     app_module = Keyword.get(opts, :__app_module__)
     disabled = Keyword.get(opts, :disabled, false)
     compact = Keyword.get(opts, :compact, false)
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     on_click = if disabled, do: nil, else: Callback.wrap_0(Keyword.get(opts, :on_click))
 

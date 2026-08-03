@@ -9,7 +9,7 @@ defmodule Drafter.Session.Worker do
   Start a session worker, which owns one session's services and app process.
 
   Starts and links a private `Drafter.Event.Manager`, `Drafter.Compositor`,
-  `Drafter.ThemeManager`, `Drafter.EventHandler` and `Drafter.ScreenManager`, then
+  `Drafter.ThemeManager`, `Drafter.EventHandler` and the screen manager, then
   spawns the app under `Drafter.run_session/3`. The worker stops normally as soon as
   the app process goes down.
 
@@ -20,7 +20,7 @@ defmodule Drafter.Session.Worker do
       Required; missing raises. Linked to the worker.
     * `:mode` - `:isolated` or `:shared`, passed through to the session. Default:
       `:isolated`.
-    * `:shared_state` - pid of a `Drafter.Session.SharedState` server, passed through
+    * `:shared_state` - pid of a shared-state server, passed through
       to the session. Default: `nil`.
     * `:mount_props` - map of mount props, flattened into the session options.
       Default: `%{}`.

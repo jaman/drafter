@@ -420,7 +420,7 @@ defmodule Drafter.Widget.TabbedContent do
   @spec from_component_opts(list() | nil, keyword()) :: Drafter.Widget.props()
   def from_component_opts(tabs, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 80})
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     all_tabs = if is_list(tabs) and tabs != [], do: tabs, else: Keyword.get(opts, :tabs, [])
 

@@ -9,7 +9,7 @@ defmodule Drafter.Screen do
   `c:handle_event/2`, `c:handle_event/3`, `c:on_resume/2`, `c:unmount/1` and
   `keybindings/0`, so a module only writes what it uses.
 
-  Screens are layered. `Drafter.ScreenManager` keeps a stack; a screen pushes a
+  Screens are layered. The screen manager keeps a stack; a screen pushes a
   child, replaces itself, opens a modal, or pops with a value by returning the
   matching tuple from `c:handle_event/2` or `c:handle_event/3` — see `t:result/0`
   for the shapes the runtime dispatches. When a child is popped the parent's
@@ -45,7 +45,7 @@ defmodule Drafter.Screen do
   ## Screen types and their options
 
   The type is chosen with `:type` in the `opts` of `new/3`, and of
-  `Drafter.ScreenManager.push/3` and `replace/3`, which pass `opts` straight
+  `Drafter.App.push_screen/3` and `Drafter.App.replace_screen/3`, which pass `opts` straight
   through. Default `:default`. Any other value raises `FunctionClauseError`.
   Every key below is read once, when the screen is created; the map it produces
   is the `:options` field of `t:t/0`. Sizes are in terminal cells.
@@ -95,7 +95,7 @@ defmodule Drafter.Screen do
     * `:dismissable` - `boolean()`. Default `true`.
 
   These are the options of a screen pushed with `type: :toast`.
-  `Drafter.ScreenManager.show_toast/2` is a different mechanism: it builds no
+  `Drafter.App.show_toast/2` is a different mechanism: it builds no
   screen, keeps its own toast list, and reads only `:variant` (default `:info`),
   `:duration` (default `3000`) and `:position` (default `:bottom_right`) from the
   options given to it.
@@ -178,7 +178,7 @@ defmodule Drafter.Screen do
   @typedoc """
   What `c:handle_event/2` and `c:handle_event/3` may return.
 
-  These are the shapes `Drafter.ScreenManager` dispatches on. Anything else —
+  These are the shapes the screen manager dispatches on. Anything else —
   including the three-element `{:push, module, props}` and
   `{:replace, module, props}`, `{:show_toast, message, opts}`, and
   `{:stop, reason}` — is discarded: the event is passed through to the layer
@@ -206,7 +206,7 @@ defmodule Drafter.Screen do
   @doc """
   Builds the screen's initial state from the props it was pushed with.
 
-  `props` is the map given to `new/3`, `Drafter.ScreenManager.push/3`, or
+  `props` is the map given to `new/3`, `Drafter.App.push_screen/3`, or
   `show_modal/3`. The returned term becomes the `:state` field of `t:t/0` and is
   handed to every other callback. Called once, by `mount_screen/1`, before the
   first render. The generated default returns `%{}`.
@@ -256,7 +256,7 @@ defmodule Drafter.Screen do
   Folds the value a popped child screen returned back into this screen's state.
 
   `result` is the term the child passed to `{:pop, result}`, and `nil` when the
-  child was popped by `Drafter.ScreenManager.pop/1` with no argument. Returns the
+  child was popped by `Drafter.App.pop_screen/1` with no argument. Returns the
   new state; there is no tuple to return. The generated default returns `state`
   unchanged.
 
@@ -318,7 +318,7 @@ defmodule Drafter.Screen do
   One entry on the screen stack.
 
   `:id` is assigned by `new/3` and identifies the screen to
-  `Drafter.ScreenManager`. `:state` is `nil` until `mount_screen/1` runs.
+  the screen manager. `:state` is `nil` until `mount_screen/1` runs.
   `:options` is the type's option map described in the module doc. `:parent_id`
   and `:rect` are filled in by the screen manager, and `:widget_hierarchy` by the
   renderer.

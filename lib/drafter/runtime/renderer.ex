@@ -25,7 +25,7 @@ defmodule Drafter.Runtime.Renderer do
   @doc """
   Render one frame for `app_module` and return the hierarchy to reuse next frame.
 
-  With screens pushed on `Drafter.ScreenManager`, the screens are rendered and
+  With screens pushed on the screen manager, the screens are rendered and
   `existing_hierarchy` is returned untouched. With toasts but no screens, the app's
   hierarchy is rebuilt first so the toast composites over it. Otherwise the app is
   rendered directly, reusing `existing_hierarchy` when the app state hash and layout

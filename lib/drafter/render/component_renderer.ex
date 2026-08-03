@@ -658,7 +658,7 @@ defmodule Drafter.ComponentRenderer do
     end
   end
 
-  defp normalize_classes(classes), do: Drafter.Util.normalize_classes(classes)
+  defp normalize_classes(classes), do: Drafter.Style.normalize_classes(classes)
 
   defp dispatch_via_registry(hierarchy, tag, args, opts, rect, ctx, parent_id, id_counter) do
     case Drafter.Widget.Registry.lookup(tag) do

@@ -1,8 +1,8 @@
 defmodule Drafter.Integration.ScreenTextTest do
   use ExUnit.Case, async: false
 
-  alias Drafter.Examples.Counter
   alias Drafter.Test, as: TUI
+  alias Drafter.TestApps.Counter
 
   setup do
     ctx = TUI.start_headless(Counter, %{}, size: {44, 8})

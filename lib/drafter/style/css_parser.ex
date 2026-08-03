@@ -16,7 +16,7 @@ defmodule Drafter.Style.CSSParser do
   A property name is mapped to a style key. `background-color` and `background` both
   give `:background`; `text-align` and `text_align` both give `:text_align`. Any
   other name becomes an atom of that exact spelling through
-  `Drafter.Util.normalize_class/1`, so an unknown property is a key rather than an
+  `Drafter.Style.normalize_class/1`, so an unknown property is a key rather than an
   error. `Drafter.Style.new/1` then drops the keys that are not style properties
   when the rule is added to the stylesheet.
 
@@ -30,7 +30,7 @@ defmodule Drafter.Style.CSSParser do
   - `rgba(r, g, b, a)` — an `{:rgba, {r, g, b}, alpha}` triple, `alpha` a float
   - a run of digits — an integer
   - digits, a dot and digits — a float
-  - anything else — `Drafter.Util.normalize_class/1`, giving an atom
+  - anything else — `Drafter.Style.normalize_class/1`, giving an atom
 
   A value that is not a colour but looks like one, such as `#ff00`, falls through to
   the atom case rather than failing.
@@ -293,7 +293,7 @@ defmodule Drafter.Style.CSSParser do
   }
 
   defp normalize_property_key(key) do
-    Map.get(@property_key_map, key) || Drafter.Util.normalize_class(key)
+    Map.get(@property_key_map, key) || Drafter.Style.normalize_class(key)
   end
 
   defp parse_value(value_str) do
@@ -325,7 +325,7 @@ defmodule Drafter.Style.CSSParser do
         String.to_float(value_str)
 
       true ->
-        Drafter.Util.normalize_class(value_str)
+        Drafter.Style.normalize_class(value_str)
     end
   end
 

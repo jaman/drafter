@@ -3,8 +3,8 @@ defmodule Drafter.Style do
   Color and style utilities for widget rendering.
 
   Provides RGB color manipulation (lighten, darken, blend, interpolate),
-  type definitions shared across the rendering pipeline, and ANSI escape
-  sequence helpers.
+  type definitions shared across the rendering pipeline, ANSI escape
+  sequence helpers, and normalisation of the `:class` option every widget takes.
   """
 
   alias Drafter.Style.CSSParser
@@ -109,6 +109,48 @@ defmodule Drafter.Style do
     |> Enum.filter(fn {k, _v} -> k in @valid_properties end)
     |> Map.new()
   end
+
+  @doc """
+  The atom form of a single CSS class name.
+
+  An atom is returned as given. A string becomes the existing atom of that name
+  where there is one, and a new atom otherwise, so a class named only in a
+  stylesheet still resolves.
+
+      iex> Drafter.Style.normalize_class(:primary)
+      :primary
+
+      iex> Drafter.Style.normalize_class("primary")
+      :primary
+
+  """
+  @spec normalize_class(String.t() | atom()) :: atom()
+  def normalize_class(class) when is_atom(class), do: class
+
+  def normalize_class(class) when is_binary(class) do
+    String.to_existing_atom(class)
+  rescue
+    ArgumentError -> String.to_atom(class)
+  end
+
+  @doc """
+  The atom list form of a widget's `:class` option.
+
+  Accepts a list, a single class, a string or an atom, and always returns a list.
+
+      iex> Drafter.Style.normalize_classes(["primary", :large])
+      [:primary, :large]
+
+      iex> Drafter.Style.normalize_classes("primary")
+      [:primary]
+
+      iex> Drafter.Style.normalize_classes([])
+      []
+
+  """
+  @spec normalize_classes([String.t() | atom()] | String.t() | atom()) :: [atom()]
+  def normalize_classes(classes) when is_list(classes), do: Enum.map(classes, &normalize_class/1)
+  def normalize_classes(class), do: normalize_classes([class])
 
   @doc """
   Merges `override` onto `base`, with `override` winning on conflicts.

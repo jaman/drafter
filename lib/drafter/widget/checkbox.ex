@@ -12,7 +12,7 @@ defmodule Drafter.Widget.Checkbox do
       checkbox(label, opts)
 
   The positional argument becomes `:label`. The checked state goes through
-  `Drafter.Binding`: passing `bind: :some_key` reads it from that app-state key
+  the binding layer: passing `bind: :some_key` reads it from that app-state key
   and writes the new value back on every toggle, and `:on_change` is built from
   the same binding.
 
@@ -264,7 +264,7 @@ defmodule Drafter.Widget.Checkbox do
   def from_component_opts(label, opts) do
     app_state = Keyword.get(opts, :__app_state__, %{})
     checked = Drafter.Binding.get_bound_value(opts, app_state, Keyword.get(opts, :checked, false))
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     %{
       label: label,

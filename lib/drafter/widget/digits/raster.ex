@@ -3,7 +3,7 @@ defmodule Drafter.Widget.Digits.Raster do
   Rasterises `Drafter.Widget.Digits.Bitmap` glyphs into terminal cells.
 
   Three packings put multiple pixels in one cell: `:braille` (2×4), `:quadrant`
-  (2×2), and `:half` (1×2). `Drafter.Widget.Chart.Pixels` supplies the cell
+  (2×2), and `:half` (1×2). The chart pixel packer supplies the cell
   characters. See the [large text guide](large_text.md) for how the packings
   compare.
 

@@ -50,7 +50,7 @@ defmodule Drafter.Widget.Sparkline do
     * `:style` - `t:map/0` of style overrides passed to the theme computation.
       Default `%{}`.
     * `:class` - theme class atom or list of them, normalised by
-      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      `Drafter.Style.normalize_classes/1` and reaching `mount/1` as `:classes`.
       Default `[]`.
     * `:height` - `t:pos_integer/0` read only by `preferred_height/2`, never by
       `mount/1`. Default `3`.
@@ -307,7 +307,7 @@ defmodule Drafter.Widget.Sparkline do
   """
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(data, opts) do
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     all_data =
       if is_list(data) and data != [] and not Keyword.keyword?(data) do

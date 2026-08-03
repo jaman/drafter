@@ -120,7 +120,7 @@ defmodule Drafter.App do
   `keybinding {:q, [:ctrl]}` clause and a hand-written `{:key, :q, [:ctrl]}` clause
   are both unreachable. `Ctrl+C` is *not* reserved and does reach the module.
 
-  **A non-empty `Drafter.ScreenManager` stack takes every event.** After a
+  **A non-empty screen stack takes every event.** After a
   `{:push, ...}`, `{:replace, ...}` or `{:show_modal, ...}` the root application
   module's `handle_event/2` is not called at all; input goes to the screen stack.
   Its `keybinding/3` clauses are dormant until the last screen pops.
@@ -182,7 +182,7 @@ defmodule Drafter.App do
     * `{:pop, result}` — see `pop_screen/1`.
     * `{:push, screen_module, props, opts}` and
       `{:replace, screen_module, props, opts}` — push a screen onto, or replace the
-      top of, the `Drafter.ScreenManager` stack.
+      top of, the screen stack.
 
   Any other term returned from `handle_event/3` is offered to the handlers
   registered with `Drafter.ActionRegistry`; see `Drafter.ActionHandler`. An
@@ -315,7 +315,7 @@ defmodule Drafter.App do
   codepoints above 126 arrive as `{:char, codepoint}`.
 
   This callback does **not** see every event. `Ctrl+Q` stops the loop first; a
-  non-empty `Drafter.ScreenManager` stack takes the event instead; and whenever a
+  non-empty screen stack takes the event instead; and whenever a
   widget holds focus the widget hierarchy is offered the event before this callback
   and anything it consumes never arrives. See "Where a key is handled" in
   `Drafter.App`.
@@ -501,7 +501,7 @@ defmodule Drafter.App do
 
     * `{:q, [:ctrl]}` never fires. `Ctrl+Q` stops the loop before any callback runs.
     * No keybinding on the root application module fires while the
-      `Drafter.ScreenManager` stack is non-empty. Bind the key on the screen module
+      screen stack is non-empty. Bind the key on the screen module
       that is on top instead.
     * With a widget focused — which is the normal case, since the first focusable
       widget in the tree is focused on the initial render — the hierarchy sees the
@@ -588,6 +588,8 @@ defmodule Drafter.App do
     * `:class` - an atom or list of atoms matched by CSS selectors. Default `[]`;
       reaches the widget as `:classes`.
 
+  ## Examples
+
       iex> label("Ready")
       {:label, "Ready", []}
 
@@ -621,6 +623,8 @@ defmodule Drafter.App do
     * `:style` - `map()` of style attributes. Default `%{}`.
     * `:class` - an atom or list of atoms matched by CSS selectors. Default `[]`.
 
+  ## Examples
+
       iex> button("Save", on_click: :save, variant: :primary)
       {:button, "Save", [on_click: :save, variant: :primary]}
   """
@@ -646,6 +650,8 @@ defmodule Drafter.App do
       `boolean()`. Default `nil`.
     * `:style` - `map()` of style attributes. Default `%{}`.
     * `:class` - an atom or list of atoms. Default `[]`.
+
+  ## Examples
 
       iex> checkbox("Enable logging", checked: true, on_change: :toggle_logging)
       {:checkbox, "Enable logging", [checked: true, on_change: :toggle_logging]}
@@ -827,6 +833,8 @@ defmodule Drafter.App do
     * `:track_color` / `:fill_color` / `:thumb_color` - `{r, g, b}` overrides.
     * `:renderer` - `:text` (default), `:braille`, or a graphics protocol atom, which
       draws the track through `french_curve`.
+
+  ## Examples
 
       iex> slider(value: 0.5, label: "Gain", on_change: :set_gain)
       {:slider, [value: 0.5, label: "Gain", on_change: :set_gain]}
@@ -1036,6 +1044,8 @@ defmodule Drafter.App do
       into the tuple unchanged and raises `FunctionClauseError` when the tree is
       rendered — the renderer has no clause for a third direction.
 
+  ## Examples
+
       iex> container([label("a")], layout: :horizontal)
       {:layout, :horizontal, [{:label, "a", []}], [layout: :horizontal]}
 
@@ -1122,6 +1132,8 @@ defmodule Drafter.App do
     * `:class` - an atom or list of atoms. Default `[]`; reaches the widget as
       `:classes`.
 
+  ## Examples
+
       iex> card(["3 files changed"], title: "Summary")
       {:card, ["3 files changed"], [title: "Summary"]}
   """
@@ -1146,6 +1158,8 @@ defmodule Drafter.App do
     * `:color` - `{r, g, b}` for the lit segments. Default `{0, 150, 255}`.
     * `:bg_data`, `:bg_min`, `:bg_max` - background sparkline data and its range.
       Defaults `nil`, `0`, and `nil`.
+
+  ## Examples
 
       iex> digits("12:04", align: :center)
       {:digits, "12:04", [align: :center]}
@@ -1292,6 +1306,8 @@ defmodule Drafter.App do
     * `:orientation` - `:vertical` (default) or `:horizontal`.
     * `:style` - `map()` of style attributes. Default `%{}`.
     * `:class` - an atom or list of atoms. Default `[]`.
+
+  ## Examples
 
       iex> sparkline([1, 4, 2, 8], summary: true)
       {:sparkline, [1, 4, 2, 8], [summary: true]}
@@ -1663,7 +1679,7 @@ defmodule Drafter.App do
 
     * `:bindings` - a list of `{key_label, hint}` tuples to show. Default `nil`,
       which reads the active screen's `keybindings/0` — the app module's when no
-      screen is on the `Drafter.ScreenManager` stack — i.e. the hints registered by
+      screen is on the screen stack — i.e. the hints registered by
       `keybinding/3`, and `[]` when the module defines none.
     * `:separator` - `String.t()` placed between entries. Default `" "`.
     * `:style` - `map()` of style attributes for the hint text. Default `nil`.
@@ -1797,7 +1813,7 @@ defmodule Drafter.App do
   end
 
   @doc """
-  Pops the top screen off the `Drafter.ScreenManager` stack.
+  Pops the top screen off the screen stack.
 
   Returns `{:pop, result}`, which both `handle_event/2` and `handle_event/3`
   dispatch. `result` (default `nil`) is delivered to the revealed screen's
@@ -1840,7 +1856,7 @@ defmodule Drafter.App do
   Returns `{:show_modal, screen_module, props, opts}`, which both `handle_event/2`
   and `handle_event/3` dispatch. `props` (default `%{}`) is the map handed to the
   modal's `mount/1`; `opts` (default `[]`) is passed to
-  `Drafter.ScreenManager.show_modal/3` and carries the modal's `:title`, `:width`,
+  `Drafter.App.show_modal/3` and carries the modal's `:title`, `:width`,
   `:height`, and `:border`.
 
       iex> show_modal(ConfirmModal, %{}, title: "Confirm", width: 45, height: 10)
@@ -1888,7 +1904,7 @@ defmodule Drafter.App do
 
   Returns `{:show_toast, message, opts}`, which both `handle_event/2` and
   `handle_event/3` dispatch. `message` is a `String.t()`; `opts` (default `[]`) is
-  passed to `Drafter.ScreenManager.show_toast/2`, which documents the keys it reads.
+  passed to `Drafter.App.show_toast/2`, which documents the keys it reads.
 
       iex> show_toast("Saved", duration: 2000)
       {:show_toast, "Saved", [duration: 2000]}
@@ -1903,7 +1919,7 @@ defmodule Drafter.App do
   `handle_event/3` receives `:dismissed` as its data.
 
   Identical to `pop_screen(:dismissed)`; it pops whatever is on top of the
-  `Drafter.ScreenManager` stack, modal or not.
+  screen stack, modal or not.
 
       iex> dismiss_modal()
       {:pop, :dismissed}

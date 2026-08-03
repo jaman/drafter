@@ -40,7 +40,7 @@ defmodule Drafter.Widget.MaskedInput do
     * `:style` - `t:map/0` of style overrides passed to the theme computation.
       Default `%{}`.
     * `:class` - theme class atom or list of them, normalised by
-      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      `Drafter.Style.normalize_classes/1` and reaching `mount/1` as `:classes`.
       Default `[]`.
     * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`. Every editing
       key binding requires it.
@@ -411,7 +411,7 @@ defmodule Drafter.Widget.MaskedInput do
   """
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     %{
       mask: Keyword.get(opts, :mask),

@@ -1,4 +1,4 @@
-defmodule Drafter.Examples.Calculator do
+defmodule Drafter.TestApps.Calculator do
   @moduledoc false
   use Drafter.App
 

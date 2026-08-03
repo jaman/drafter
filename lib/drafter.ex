@@ -1156,7 +1156,7 @@ defmodule Drafter do
       so input from any client re-renders all of them. Anything other than `:shared`
       is treated as `:isolated`. This is not `run/2`'s `:mode`, which selects a chart
       renderer.
-    * `:shared_state` - the pid of the `Drafter.Session.SharedState` server. Default
+    * `:shared_state` - the pid of the shared-state server. Default
       `nil`. Required when `:mode` is `:shared` and ignored otherwise; a `:shared`
       session without it raises.
     * `:scroll_optimization` - `boolean()`, default `true`. As in `run/2`.

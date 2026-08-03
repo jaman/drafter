@@ -44,8 +44,8 @@ defmodule Drafter.Test.Harness do
   Start a headless app and every service it needs, returning a test context.
 
   Starts an unnamed `Drafter.Event.Manager`, `Drafter.Compositor`,
-  `Drafter.ThemeManager`, `Drafter.EventHandler` and `Drafter.ScreenManager` plus the
-  named `Drafter.Test.HeadlessDriver`, links them to the caller, and spawns the app
+  `Drafter.ThemeManager`, `Drafter.EventHandler` and the screen manager plus the
+  named Drafter.Test.HeadlessDriver, links them to the caller, and spawns the app
   loop with the session's pids copied into its process dictionary. `props` is passed
   to the app's `mount/1` and defaults to `%{}`.
 

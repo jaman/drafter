@@ -615,6 +615,8 @@ defmodule Drafter.Terminal.ANSI do
       `:move` events arrive with no button held. When `false` only button presses,
       releases and drags are reported.
 
+  ## Examples
+
       iex> Drafter.Terminal.ANSI.enable_mouse()
       "\\e[?1003h\\e[?1006h"
 

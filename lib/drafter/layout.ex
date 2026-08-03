@@ -59,7 +59,7 @@ defmodule Drafter.Layout do
   How tall a component would like to be, in cells.
 
   Container components sum their children plus their own chrome; a registered widget
-  is asked through `Drafter.Widget.Registry`. `hierarchy` supplies live widget state
+  is asked through the widget registry. `hierarchy` supplies live widget state
   where a widget's height depends on it, and defaults to `nil`. Anything unrecognised
   is `1`.
   """

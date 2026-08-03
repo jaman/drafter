@@ -9,7 +9,7 @@ defmodule Drafter.BuiltinActionHandler do
   `{:ok, state}` and `{:noreply, state}` replace the accumulated state.
   `{:show_modal, screen, props, opts}`, `{:show_toast, message, opts}`,
   `{:push, screen, props, opts}`, `{:pop, result}` and
-  `{:replace, screen, props, opts}` drive `Drafter.ScreenManager` and leave the state
+  `{:replace, screen, props, opts}` drive the screen manager and leave the state
   alone. Everything else is `:unhandled`.
   """
   @impl true

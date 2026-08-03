@@ -293,12 +293,12 @@ defmodule Drafter.Widget.Chart do
         }
 
   @doc """
-  Draws several series into one set of strips. See `Drafter.Widget.Chart.MultiSeries`.
+  Draws several series into one set of strips. See the multi-series chart renderer.
   """
   defdelegate render_multi_series(data_series, width, height, opts), to: MultiSeries, as: :render
 
   @doc """
-  Draws a multi-row bar chart from a flat value list. See `Drafter.Widget.Chart.Bar`.
+  Draws a multi-row bar chart from a flat value list. See the bar chart renderer.
   """
   defdelegate render_tall_bar_chart(data, height, opts), to: Bar
 
@@ -519,7 +519,7 @@ defmodule Drafter.Widget.Chart do
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(data, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 80, height: 20})
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     all_data = if is_list(data), do: data, else: Keyword.get(opts, :data, [])
 

@@ -22,7 +22,7 @@ defmodule Drafter.ActionRegistry do
   @doc """
   Reset the calling process's handler list to `extra_handlers` plus the built-in one.
 
-  `extra_handlers` are checked before `Drafter.BuiltinActionHandler` and default to
+  `extra_handlers` are checked before the built-in action handler and default to
   `[]`. Any handlers already registered in this process are discarded.
   """
   @spec init() :: :ok
@@ -63,7 +63,7 @@ defmodule Drafter.ActionRegistry do
 
   Stops at the first handler returning `{:ok, new_state}` and returns that state.
   Returns `acc_state` unchanged when every handler returns `:unhandled`. In a process
-  where nothing has been registered, only `Drafter.BuiltinActionHandler` is consulted.
+  where nothing has been registered, only the built-in action handler is consulted.
   """
   @spec dispatch(term(), term()) :: term()
   def dispatch(action, acc_state) do

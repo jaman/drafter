@@ -15,6 +15,7 @@ An Elixir Terminal User Interface framework inspired by Python's Textual. Build 
 - **Animation Support** - Smooth property animations with easing functions
 - **Remote TUI** - Serve apps over SSH or Telnet with isolated or shared sessions (see [Remote TUI](guides/remote_tui.md))
 - **Headless Testing** - Drive an app from ExUnit with no terminal and assert on the rendered screen (see [Testing](#testing))
+- **Embeddable** - Run an app against an in-memory cell grid instead of a terminal and render the rows yourself (see [Embedding](#embedding))
 - **Minimal Dependencies** - Elixir implementation with NIF-based terminal I/O
 
 ## Requirements
@@ -200,7 +201,7 @@ from `render/1`.
 #### Display Widgets
 - `label(text, opts)` - Text display
 - `markdown(content, opts)` - Markdown rendering
-- `digits(value, opts)` - Large ASCII art numbers
+- `digits(value, opts)` - Large ASCII art numbers (see [Formatting numbers](#formatting-numbers))
 - `sparkline(data, opts)` - Mini inline charts
 - `chart(data, opts)` - Line, bar, and area charts
 - `pie_chart(data, opts)` - Pie chart
@@ -709,6 +710,60 @@ send and the assertion after it need no sleep between them.
 The three assertion helpers are macros, so `import Drafter.Test` or
 `require Drafter.Test` before calling them.
 
+## Embedding
+
+`Drafter.CellSession` runs an app against an in-memory cell grid rather than a
+terminal, and hands you the composited screen as rows. Use it when something other
+than a terminal is doing the drawing — a web front end, a notebook cell, a pane
+inside another application — or when a host wants to own input and output itself.
+
+```elixir
+session = Drafter.CellSession.start(MyApp, size: {80, 24})
+
+Drafter.CellSession.take_cells(session)   # [%Drafter.Draw.Strip{}, ...] one per row
+Drafter.CellSession.take_text(session)    # the same screen as plain text
+Drafter.CellSession.feed_input(session, {:key, :enter})
+Drafter.CellSession.resize(session, 100, 30)
+Drafter.CellSession.close(session)
+```
+
+- `take_cells(session)` - the full grid as `Drafter.Draw.Strip` structs, one per
+  screen row, each a list of styled segments. This is what a host renders
+- `take_cells_diff(session)` - only the rows that changed since the last call, as
+  `{row_index, strip}` tuples, with an updated session. Redraw those rows alone
+  rather than the whole grid
+- `take_lines(session)` / `take_text(session)` - the screen as plain text, styling
+  dropped and trailing blanks trimmed. The same view `Drafter.Test.screen_lines/1`
+  gives, for logging or asserting rather than rendering
+- `feed_input(session, event)` - inject an input event: `{:key, key}`,
+  `{:char, codepoint}`, `{:mouse, map}`
+- `resize(session, columns, rows)` - resize the surface; the app re-renders
+- `close(session)` - release the processes the session owns
+
+Each session owns unnamed services, so many run concurrently in one node without
+colliding. `start/2` also takes `:shared` — a shared-state server pid — to join an
+existing multi-user session; every other option is passed to `mount/1` as a prop.
+
+## Formatting numbers
+
+`Drafter.Format` turns numbers into the short strings a `digits` readout has room
+for. It is a plain helper — call it in `render/1`, nothing calls it for you.
+
+```elixir
+digits(Drafter.Format.compact(1_240_000))          # "1.2M"
+digits(Drafter.Format.bytes(1_048_576))            # "1MB"
+digits(Drafter.Format.percent(0.42, as_ratio: true))  # "42%"
+```
+
+- `compact(number)` - a magnitude suffix, `k`/`M`/`B`/`T`. Below 1000 there is no
+  suffix; a fractional result keeps one decimal place
+- `bytes(number)` - a byte count in powers of 1024, suffixed `B`, `KB`, `MB`, `GB`
+  or `TB`
+- `percent(number, opts)` - a percentage. `as_ratio: true` treats the input as
+  `0.0..1.0`; `:decimals` sets the precision
+
+`examples/spark/03_digits.exs` switches between all three against live values.
+
 ## Syntax Highlighting
 
 Drafter supports syntax highlighting via the [`tree-sitter`](https://tree-sitter.github.io/tree-sitter/) CLI. This is entirely optional — if you don't need it, no setup is required.
@@ -797,13 +852,11 @@ elixir examples/reducer/04_counter.exs
 elixir run_examples.exs
 ```
 
-Examples that are compiled into the library can be run via `mix run`:
+Two of them cover styling and layout rather than a widget:
 
 ```bash
-mix run -e "Drafter.run(Drafter.Examples.ScreenDemo)"
-mix run -e "Drafter.run(Drafter.Examples.DeclarativeSandbox)"
-mix run -e "Drafter.run(Drafter.Examples.ThemeSandbox)"
-mix run -e "Drafter.run(Drafter.Examples.ChartDemo)"
+elixir examples/spark/33_css_styling.exs
+elixir examples/spark/34_breakpoints.exs
 ```
 
 ## Guides
@@ -812,6 +865,7 @@ mix run -e "Drafter.run(Drafter.Examples.ChartDemo)"
 - [Remote TUI](guides/remote_tui.md) - serve an app over SSH or Telnet
 - [Large Text](guides/large_text.md) - the `digits` font catalogue, how the fonts are built, and how to choose between them
 - [Design Notes](guides/design_notes.md) - why the internals are built the way they are; background for anyone changing them
+- [Contributing](CONTRIBUTING.md) - source layout, house style, and what to run before opening a pull request
 
 ## Keyboard Shortcuts
 

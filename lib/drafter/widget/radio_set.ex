@@ -13,7 +13,7 @@ defmodule Drafter.Widget.RadioSet do
       radio_set(options, opts)
 
   The positional `options` list is used when non-empty, falling back to
-  `opts[:options]`. `:selected` and `:on_change` go through `Drafter.Binding`, so
+  `opts[:options]`. `:selected` and `:on_change` go through the binding layer, so
   passing `bind: :some_key` reads the current selection from that app-state key
   and writes the new one back on change. `:visible_height` and `:width` default
   to the rect the parent allocated, and a `:width` given in `opts` is ignored.
@@ -404,7 +404,7 @@ defmodule Drafter.Widget.RadioSet do
   Builds the props map for a `{:radio_set, options, opts}` element.
 
   `options` is used when it is a non-empty list, otherwise `opts[:options]`,
-  defaulting to `[]`. `:selected` comes from `Drafter.Binding.get_bound_value/3`
+  defaulting to `[]`. `:selected` comes from the bound value
   and `:on_change` is the binding's writer. `:visible_height` falls back to the
   height of `opts[:__rect__]` and `:width` always comes from its width, ignoring
   any `:width` in `opts`; the rect itself defaults to `%{width: 40, height: 10}`.
@@ -422,7 +422,7 @@ defmodule Drafter.Widget.RadioSet do
   def from_component_opts(options, opts) do
     app_state = Keyword.get(opts, :__app_state__, %{})
     rect = Keyword.get(opts, :__rect__, %{width: 40, height: 10})
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     all_options =
       if is_list(options) and options != [], do: options, else: Keyword.get(opts, :options, [])

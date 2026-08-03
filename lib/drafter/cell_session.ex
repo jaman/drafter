@@ -39,7 +39,7 @@ defmodule Drafter.CellSession do
   Options:
 
     * `:size` — `{columns, rows}` of the virtual surface, default `{80, 24}`
-    * `:shared` — a `Drafter.Session.SharedState` pid to join an existing
+    * `:shared` — a shared-state server pid to join an existing
       multi-user session; omit for a session with private state
 
   Every other option is passed to the app's `mount/1` as a mount prop.
@@ -88,6 +88,34 @@ defmodule Drafter.CellSession do
   @doc "Return the full current cell grid: one `Strip` per row."
   @spec take_cells(t()) :: [Strip.t()]
   def take_cells(%__MODULE__{compositor: comp}), do: Compositor.get_buffer(comp)
+
+  @doc """
+  Return the current screen as plain text, one string per row.
+
+  Styling is dropped and trailing blanks are trimmed, so a row is its content and
+  an empty row is `""`. The list is always as long as the surface is tall.
+
+      ["hello world", "second line", "", "", "", ""]
+
+  This is the same view `Drafter.Test.screen_lines/1` gives of a headless app, for
+  asserting on what is displayed rather than rendering it.
+  """
+  @spec take_lines(t()) :: [String.t()]
+  def take_lines(%__MODULE__{} = session) do
+    session
+    |> take_cells()
+    |> Enum.map(&String.trim_trailing(Strip.to_plain_text(&1)))
+  end
+
+  @doc """
+  Return the current screen as one string, rows joined by newlines.
+
+  As `take_lines/1`, which documents the per-row form.
+  """
+  @spec take_text(t()) :: String.t()
+  def take_text(%__MODULE__{} = session) do
+    session |> take_lines() |> Enum.join("\n")
+  end
 
   @doc """
   Return the rows that changed since the previous diff (or first call) as

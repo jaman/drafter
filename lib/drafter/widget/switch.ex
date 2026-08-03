@@ -16,7 +16,7 @@ defmodule Drafter.Widget.Switch do
       switch(value, opts)
 
   The two-argument form puts `value` into `opts` under `:value`; there is no
-  positional prop. `:enabled` and `:on_change` go through `Drafter.Binding`, so
+  positional prop. `:enabled` and `:on_change` go through the binding layer, so
   passing `bind: :some_key` reads the current state from that app-state key and
   writes the new one back when the switch settles. `:width` and `:height`
   default to the rect the parent allocated.
@@ -31,8 +31,7 @@ defmodule Drafter.Widget.Switch do
       Default `nil`.
     * `:on_change` - the app callback name fired once the animation settles, with
       the new boolean as its data. Default `nil`. Through the element this is set
-      to the one-argument function `Drafter.Binding.create_bound_callback/2`
-      returns, which the switch passes on as a callback name rather than calling.
+      to the one-argument function the framework builds, which the switch passes on as a callback name rather than calling.
     * `:size` - `:normal | :small | :compact`. Default `:normal`, an 8-column track
       with a 4-column thumb; `:small` is 6 and 2, `:compact` is 4 and 2. Any other
       value is treated as `:normal`.
@@ -259,6 +258,8 @@ defmodule Drafter.Widget.Switch do
       lets it finish; one that disagrees cancels it and snaps to that state. Absent,
       it defaults to the animation's destination, so the animation continues.
 
+  ## Examples
+
       iex> state = Drafter.Widget.Switch.mount(%{})
       iex> updated = Drafter.Widget.Switch.update(%{enabled: true, label: "On"}, state)
       iex> {updated.state, updated.slider_position, updated.label}
@@ -378,8 +379,7 @@ defmodule Drafter.Widget.Switch do
   @doc """
   Builds the props map for a `{:switch, opts}` element.
 
-  The positional argument is ignored. `:enabled` comes from
-  `Drafter.Binding.get_bound_value/3`, so `bind: :key` reads it from
+  The positional argument is ignored. `:enabled` is the bound value for that key, so `bind: :key` reads it from
   `opts[:__app_state__]` and plain `enabled:` is used otherwise, defaulting to
   `false`. `:on_change` is the binding's writer, a one-argument function or `nil`.
   `:width` and `:height` fall back to `opts[:__rect__]`, itself defaulting to

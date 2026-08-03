@@ -83,7 +83,7 @@ defmodule Drafter.ContentRenderer do
   defp render_label(text, opts, rect) do
     alias Drafter.Style.Computed
 
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     computed = Computed.for_widget(:label, %{classes: classes}, [])
     fg = computed[:color] || {200, 200, 200}
@@ -99,7 +99,7 @@ defmodule Drafter.ContentRenderer do
     alias Drafter.Style.Computed
 
     button_type = Keyword.get(opts, :type, :default)
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     computed = Computed.for_widget(:button, %{type: button_type, classes: classes}, [])
     fg = computed[:color] || {255, 255, 255}

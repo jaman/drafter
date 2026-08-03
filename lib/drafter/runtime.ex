@@ -22,7 +22,7 @@ defmodule Drafter.Runtime do
   @typedoc """
   What a backend returns from `c:handle_input/3` and `c:handle_message/4`.
 
-  `Drafter.EventResult.normalize/2` turns any of these into `{state, actions, control}`,
+  `Drafter.EventResult.parse/2` turns any of these into `{state, actions, control}`,
   so a backend may return a bare state, `{:ok, state}`, `{:ok, state, actions}`,
   `{:noreply, state}`, `:handled`, `:unhandled`, or `{:stop, reason}`.
   """

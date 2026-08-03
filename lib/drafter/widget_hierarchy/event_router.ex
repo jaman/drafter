@@ -2,7 +2,7 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
   @moduledoc """
   Routes an event through a widget hierarchy and collects the actions it produced.
 
-  `handle_event/2` is the entry point. Mouse events go to `Drafter.WidgetHierarchy.Mouse`,
+  `handle_event/2` is the entry point. Mouse events go to the mouse router,
   which picks a widget by position. Everything else is treated as a key event and is
   handled in one of three ways:
 
@@ -28,7 +28,7 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
   Actions returned by widgets are gathered in the order they were produced and
   returned alongside the updated hierarchy.
 
-  A widget backed by a process is asked through `Drafter.WidgetServer`; one without a
+  A widget backed by a process is asked through the widget's process; one without a
   process has its module's `handle_event/2` called directly, and the result is
   normalised by `Drafter.EventResult.parse/2`.
   """
@@ -327,7 +327,7 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
   @doc """
   Ask one widget to handle `event`, in whichever way that widget is backed.
 
-  A widget with a process is asked through `Drafter.WidgetServer`, which owns its
+  A widget with a process is asked through the widget's process, which owns its
   state; the cached copy in the hierarchy is returned unchanged. A widget without
   one has its module's `handle_event/2` called and the return normalised by
   `Drafter.EventResult.parse/2`.

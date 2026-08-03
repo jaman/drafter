@@ -32,7 +32,7 @@ defmodule Drafter.Widget do
 
   `component_tag/0` and `from_component_opts/2` are what let the widget appear in a
   component tree as `{:counter, count: 3}`; they belong to
-  `Drafter.Widget.Registry`, not to this behaviour. Without them a widget is still
+  the widget registry, not to this behaviour. Without them a widget is still
   usable as `{MyWidgets.Counter, %{count: 3}}`.
 
   ## `use Drafter.Widget` options
@@ -387,7 +387,7 @@ defmodule Drafter.Widget do
   gets `state` back unchanged, so state the props do not describe — scroll offset,
   cursor and drag positions — survives.
 
-  Both the in-hierarchy path and `Drafter.WidgetServer` go through this, so a widget
+  Both the in-hierarchy path and the widget's process go through this, so a widget
   behaves the same whether or not it runs in its own process.
   """
   @spec apply_props(module(), map(), state()) :: state()

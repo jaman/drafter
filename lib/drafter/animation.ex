@@ -50,7 +50,7 @@ defmodule Drafter.Animation do
   @doc """
   Start the animation server, registered under this module's name.
 
-  One runs per node, started by `Drafter.Application`. `opts` are accepted and
+  One runs per node, started by the Drafter application supervisor. `opts` are accepted and
   discarded; the tick rate is fixed at 60 fps.
   """
   @spec start_link(keyword()) :: GenServer.on_start()

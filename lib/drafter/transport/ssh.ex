@@ -12,7 +12,7 @@ defmodule Drafter.Transport.SSH do
     * `:port` - TCP port. Default: `2222`.
     * `:ip` - interface address tuple to bind. Default: `{127, 0, 0, 1}`.
     * `:mode` - `:isolated` or `:shared`. Default: `:isolated`. `:shared` starts the
-      app's `Drafter.Session.SharedState` server before the daemon.
+      app's shared-state server before the daemon.
     * `:auth` - `[{username, password}]` pairs, or `:anonymous` to accept anything.
       Default: `[{"admin", "admin"}]`.
     * `:system_dir` - host-key directory. Default: `drafter_ssh` under the system

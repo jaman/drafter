@@ -222,7 +222,7 @@ defmodule Drafter.Widget.Log do
   """
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     %{
       lines: Keyword.get(opts, :lines, []),

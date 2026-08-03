@@ -1,7 +1,7 @@
-defmodule Drafter.Examples.CalculatorTest do
+defmodule Drafter.TestApps.CalculatorTest do
   use ExUnit.Case, async: false
 
-  alias Drafter.Examples.Calculator
+  alias Drafter.TestApps.Calculator
 
   setup do
     Drafter.AppRegistry.ensure_table()

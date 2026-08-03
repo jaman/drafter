@@ -409,7 +409,7 @@ defmodule Drafter.Widget.ProgressBar do
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
     rect = Keyword.get(opts, :__rect__, %{width: 50, height: 1})
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     %{
       progress: Keyword.get(opts, :progress, 0.0),

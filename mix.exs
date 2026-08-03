@@ -4,7 +4,7 @@ defmodule Drafter.MixProject do
   def project do
     [
       app: :drafter,
-      version: "0.3.0",
+      version: "0.2.11",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:elixir_make | Mix.compilers()],
@@ -17,11 +17,13 @@ defmodule Drafter.MixProject do
       consolsdate_protocols: true,
       source_url: "https://github.com/jaman/drafter",
       homepage_url: "https://github.com/jaman/drafter",
+      plumb: [readme: :exact],
       docs: [
         main: "Drafter",
         extras: [
           "README.md",
           "CHANGELOG.md",
+          "CONTRIBUTING.md",
           "guides/remote_tui.md": [title: "Remote TUI"],
           "guides/writing_widgets.md": [title: "Writing Widgets & Libraries"],
           "guides/large_text.md": [title: "Large Text"],
@@ -29,7 +31,15 @@ defmodule Drafter.MixProject do
         ],
         groups_for_modules: [
           "Remote Servers": [Drafter.Server],
-          Core: [Drafter, Drafter.App, Drafter.Widget, Drafter.WidgetLibrary, Drafter.Screen],
+          Core: [
+            Drafter,
+            Drafter.App,
+            Drafter.Widget,
+            Drafter.Widget.Trait,
+            Drafter.WidgetLibrary,
+            Drafter.Screen,
+            Drafter.Layout
+          ],
           Events: [
             Drafter.Event,
             Drafter.Event.Object,
@@ -39,15 +49,26 @@ defmodule Drafter.MixProject do
             Drafter.Theme,
             Drafter.ThemeManager,
             Drafter.Color,
+            Drafter.Style,
             Drafter.SkinManager,
             Drafter.CharacterSet
           ],
+          Terminal: [
+            Drafter.Clipboard,
+            Drafter.CharacterWidth,
+            Drafter.Terminal.Probe,
+            Drafter.Pty
+          ],
+          Sessions: [Drafter.Session.Context, Drafter.CellSession],
+          Utilities: [Drafter.Format, Drafter.Validation, Drafter.Text, Drafter.ScrollMath],
           Drawing: [Drafter.Draw.Segment, Drafter.Draw.Strip, Drafter.Draw.Canvas],
           "Display Widgets": [
             Drafter.Widget.Label,
             Drafter.Widget.Markdown,
             Drafter.Widget.CodeView,
             Drafter.Widget.Digits,
+            Drafter.Widget.Digits.Font,
+            Drafter.Widget.Digits.Figlet,
             Drafter.Widget.ProgressBar,
             Drafter.Widget.LoadingIndicator,
             Drafter.Widget.Sparkline,
@@ -66,6 +87,7 @@ defmodule Drafter.MixProject do
             Drafter.Widget.TextArea,
             Drafter.Widget.Checkbox,
             Drafter.Widget.Switch,
+            Drafter.Widget.Slider,
             Drafter.Widget.RadioSet,
             Drafter.Widget.SelectionList,
             Drafter.Widget.MaskedInput,
@@ -93,7 +115,7 @@ defmodule Drafter.MixProject do
             Drafter.Widget.TabbedContent,
             Drafter.Widget.SplitPaneDivider
           ],
-          Testing: [Drafter.Test, Drafter.Test.Harness],
+          Testing: [Drafter.Test, Drafter.Test.Harness, Drafter.WidgetHierarchy],
           Animation: [Drafter.Animation]
         ]
       ]
@@ -117,6 +139,7 @@ defmodule Drafter.MixProject do
       {:spark, "~> 2.6"},
       {:french_curve, github: "jaman/french_curve"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:plumb, "~> 0.1", only: :dev, runtime: false},
       {:phoenix_pubsub, "~> 2.1"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
@@ -125,7 +148,8 @@ defmodule Drafter.MixProject do
   defp package do
     [
       maintainers: ["Drafter"],
-      files: ~w(lib c_src guides Makefile mix.exs .formatter.exs README.md CHANGELOG.md),
+      files:
+        ~w(lib c_src guides Makefile mix.exs .formatter.exs README.md CHANGELOG.md CONTRIBUTING.md),
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/jaman/drafter"}
     ]

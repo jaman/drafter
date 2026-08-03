@@ -12,7 +12,7 @@ defmodule Drafter.Widget.TextInput do
 
       text_input(opts)
 
-  There is no positional argument. The value goes through `Drafter.Binding`:
+  There is no positional argument. The value goes through the binding layer:
   passing `bind: :some_key` seeds the text from that app-state key and writes
   every keystroke back to it. `:width` is always the allocated rect width less
   two columns for the border.
@@ -29,8 +29,7 @@ defmodule Drafter.Widget.TextInput do
       `Drafter.get_widget_value/1`. Default: none.
     * `:on_change` - `({String.t(), validation_result()} -> term())` called on every
       keystroke, cursor move and selection change. Default `nil`. Through the
-      element it is built by `Drafter.Binding.create_text_input_callback/1`, which
-      returns `nil` when neither `:bind` nor `:on_change` is given. An exception it
+      element it is built by the framework, which returns `nil` when neither `:bind` nor `:on_change` is given. An exception it
       raises is swallowed.
     * `:on_submit` - atom event name or
       `({String.t(), validation_result()} -> term())` called when `enter` is
@@ -53,7 +52,7 @@ defmodule Drafter.Widget.TextInput do
     * `:style` - `t:map/0` of style overrides passed to the theme computation.
       Default `%{}`.
     * `:class` - theme class atom or list of them, normalised by
-      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      `Drafter.Style.normalize_classes/1` and reaching `mount/1` as `:classes`.
       Default `[]`.
     * `:max_length` - `t:pos_integer/0` cap on the number of characters. Default
       `nil`, no cap. Read by `mount/1` and `update/2` only; the `text_input/1`
@@ -800,8 +799,7 @@ defmodule Drafter.Widget.TextInput do
   @doc """
   Builds the props map for a `{:text_input, opts}` element.
 
-  The positional argument is ignored. `:text` comes from
-  `Drafter.Binding.get_bound_value/3`, so `bind: :key` seeds it from
+  The positional argument is ignored. `:text` is the bound value for that key, so `bind: :key` seeds it from
   `opts[:__app_state__]` and plain `value:` is used otherwise, defaulting to `""`.
   `:width` is the width of `opts[:__rect__]` less two border columns, with the rect
   defaulting to `%{width: 2}`. `:on_change` is the binding's writer and `:on_submit`
@@ -827,7 +825,7 @@ defmodule Drafter.Widget.TextInput do
     keep_focus = Keyword.get(opts, :keep_focus, false)
     widget_id = Keyword.get(opts, :__widget_id__)
     session_pid = self()
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
     on_submit_fn = build_submit_fn(on_submit, keep_focus, session_pid, widget_id)
 
     %{

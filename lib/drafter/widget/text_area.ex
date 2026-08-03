@@ -13,7 +13,7 @@ defmodule Drafter.Widget.TextArea do
 
       text_area(opts)
 
-  There is no positional argument. The text goes through `Drafter.Binding`:
+  There is no positional argument. The text goes through the binding layer:
   passing `bind: :some_key` seeds the content from that app-state key and writes
   every edit back to it, and `:on_change` is built from the same binding.
   `:width` and `:height` are always taken from the rect the parent allocated.
@@ -26,8 +26,7 @@ defmodule Drafter.Widget.TextArea do
     * `:placeholder` - `t:String.t/0` hint shown while the content is empty and the
       widget unfocused. Default `""`.
     * `:on_change` - `(String.t() -> term())` called with the full text after every
-      edit. Default `nil`. Through the element it comes from
-      `Drafter.Binding.create_bound_callback/2`. An exception it raises is
+      edit. Default `nil`. Through the element it is built by the framework. An exception it raises is
       swallowed.
     * `:max_lines` - `t:pos_integer/0` cap on the number of lines. Default `nil`,
       unlimited.
@@ -708,8 +707,7 @@ defmodule Drafter.Widget.TextArea do
   @doc """
   Builds the props map for a `{:text_area, opts}` element.
 
-  The positional argument is ignored. `:text` comes from
-  `Drafter.Binding.get_bound_value/3`, so `bind: :key` seeds it from
+  The positional argument is ignored. `:text` is the bound value for that key, so `bind: :key` seeds it from
   `opts[:__app_state__]` and plain `value:` is used otherwise, defaulting to `""`.
   `:on_change` is the binding's writer. `:width` and `:height` always come from
   `opts[:__rect__]`, itself defaulting to `%{width: 40, height: 6}`, and a

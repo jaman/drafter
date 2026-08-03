@@ -14,7 +14,9 @@ defmodule Drafter.Terminal.ProbeTest do
   defp terminal(chunks) do
     {:ok, agent} = Agent.start_link(fn -> {[], chunks} end)
 
-    write = fn data -> Agent.update(agent, fn {w, r} -> {[IO.iodata_to_binary(data) | w], r} end) end
+    write = fn data ->
+      Agent.update(agent, fn {w, r} -> {[IO.iodata_to_binary(data) | w], r} end)
+    end
 
     read = fn _timeout ->
       Agent.get_and_update(agent, fn

@@ -32,7 +32,7 @@ defmodule Drafter.Widget.Meter do
     * `:style` - `t:map/0`. Default `%{}`. Held on the state and never read by
       `render/2`, which uses fixed track and text colours.
     * `:class` - theme class atom or list of them, normalised by
-      `Drafter.Util.normalize_classes/1` and reaching `mount/1` as `:classes`.
+      `Drafter.Style.normalize_classes/1` and reaching `mount/1` as `:classes`.
       Default `[]`. Held on the state and never read by `render/2`.
 
   `update/2` accepts every key above plus `:app_module`. Through the component tree
@@ -225,7 +225,7 @@ defmodule Drafter.Widget.Meter do
   """
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
-    classes = Drafter.Util.normalize_classes(Keyword.get(opts, :class, []))
+    classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
 
     %{
       value: Keyword.get(opts, :value, 0.0),

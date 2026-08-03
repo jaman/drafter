@@ -392,7 +392,7 @@ defmodule Drafter.Test do
       The whole tree is walked from here through `:children`.
     * `:widgets` - id to `%{module:, state:, parent:, children:, order:, pid:}`.
       `:state` is the widget's own state term, `:pid` is set only for a widget
-      running in its own `Drafter.WidgetServer`, and `:order` is its position
+      running in its own process, and `:order` is its position
       among its siblings.
     * `:widget_rects` - id to `%{x:, y:, width:, height:}` in absolute screen
       cells. A widget that was not laid out has no entry.
