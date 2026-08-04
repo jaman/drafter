@@ -35,6 +35,8 @@ defmodule Drafter.Pty do
 
   alias Drafter.Terminal.TermiosNif
 
+  @sigkill 9
+
   defstruct [:control, :io, :master, :slave, :slave_path]
 
   @type t :: %__MODULE__{
@@ -135,13 +137,48 @@ defmodule Drafter.Pty do
   Closes both ports and releases both descriptors. Releasing the last descriptor
   makes the kernel send `SIGHUP` to the session, ending the program if it is still
   running. Safe to call more than once; the handle is unusable afterwards.
+
+  ## Options
+
+    * `:kill_after` — milliseconds to wait before sending `SIGKILL` to the
+      program's process group, for a program that ignores `SIGHUP`. Omitted by
+      default, which sends nothing further. The signal goes to the group, so
+      children the program started go with it, and is skipped if the group has
+      already gone.
+
+  Background jobs a shell placed in their own process groups are not reached,
+  which is also true of the terminal emulator you are reading this in.
+
+      Drafter.Pty.close(pty, kill_after: 2_000)
+
   """
-  @spec close(t()) :: :ok
-  def close(%__MODULE__{} = pty) do
+  @spec close(t(), keyword()) :: :ok
+  def close(%__MODULE__{} = pty, opts \\ []) do
+    os_pid = pty |> os_pid() |> pid_or_nil()
+
     close_port(pty.io)
     close_port(pty.control)
     TermiosNif.close_fd(pty.slave)
     TermiosNif.close_fd(pty.master)
+
+    escalate(os_pid, Keyword.get(opts, :kill_after))
+  end
+
+  defp pid_or_nil({:ok, pid}), do: pid
+  defp pid_or_nil(:error), do: nil
+
+  defp escalate(nil, _after_ms), do: :ok
+  defp escalate(_os_pid, nil), do: :ok
+
+  defp escalate(os_pid, after_ms) when is_integer(after_ms) and after_ms >= 0 do
+    Kernel.spawn(fn ->
+      Process.sleep(after_ms)
+
+      if TermiosNif.killpg(os_pid, 0) == :ok do
+        TermiosNif.killpg(os_pid, @sigkill)
+      end
+    end)
+
     :ok
   end
 

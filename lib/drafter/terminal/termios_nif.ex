@@ -174,4 +174,18 @@ defmodule Drafter.Terminal.TermiosNif do
   """
   @spec close_fd(integer()) :: :ok | {:error, binary()}
   def close_fd(_fd), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Send `signal` to the process group led by `pid`.
+
+  `pid` is a process group leader's id, which for a program started by
+  `Drafter.Pty.spawn/2` is the program's own pid — it is made a session and group
+  leader. Signalling the group reaches the children it started as well.
+
+  Signal `0` delivers nothing and reports only whether the group still exists,
+  giving `{:error, "No such process"}` when it does not. A `pid` of zero or less
+  raises `ArgumentError` rather than signalling the caller's own group.
+  """
+  @spec killpg(pos_integer(), non_neg_integer()) :: :ok | {:error, binary()}
+  def killpg(_pid, _signal), do: :erlang.nif_error(:nif_not_loaded)
 end

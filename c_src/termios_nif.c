@@ -251,6 +251,27 @@ static ERL_NIF_TERM close_fd(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]
     return atom_ok;
 }
 
+/* Signals the process group led by pid. Signal 0 delivers nothing and reports
+   only whether the group is still there. */
+static ERL_NIF_TERM killpg_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    int pid;
+    int sig;
+
+    if (!enif_get_int(env, argv[0], &pid) || !enif_get_int(env, argv[1], &sig)) {
+        return enif_make_badarg(env);
+    }
+
+    if (pid <= 0) {
+        return enif_make_badarg(env);
+    }
+
+    if (killpg(pid, sig) == -1) {
+        return make_errno(env);
+    }
+
+    return atom_ok;
+}
+
 static ErlNifFunc nif_funcs[] = {
     {"disable_flow_control", 0, disable_flow_control},
     {"enable_flow_control", 0, enable_flow_control},
@@ -263,7 +284,8 @@ static ErlNifFunc nif_funcs[] = {
     {"get_winsize", 1, get_winsize_fd},
     {"set_winsize", 5, set_winsize},
     {"open_pty", 2, open_pty},
-    {"close_fd", 1, close_fd}
+    {"close_fd", 1, close_fd},
+    {"killpg", 2, killpg_nif}
 };
 
 ERL_NIF_INIT(Elixir.Drafter.Terminal.TermiosNif, nif_funcs, load, NULL, NULL, NULL)

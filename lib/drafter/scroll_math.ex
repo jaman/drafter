@@ -141,6 +141,94 @@ defmodule Drafter.ScrollMath do
     round(ratio * max_offset) |> max(0) |> min(max_offset)
   end
 
+  @doc """
+  The window a bottom-anchored viewport shows, as `{first_index, count}`.
+
+  `offset` counts rows back from the bottom, so `0` is the newest `viewport_size`
+  rows. Content shorter than the viewport gives the whole of it. This is the form
+  a widget rendering virtual rows wants: it never materialises the rows outside
+  the window.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.visible_range(0, 100, 10)
+      {90, 10}
+
+      iex> Drafter.ScrollMath.visible_range(5, 100, 10)
+      {85, 10}
+
+      iex> Drafter.ScrollMath.visible_range(0, 4, 10)
+      {0, 4}
+
+      iex> Drafter.ScrollMath.visible_range(999, 100, 10)
+      {0, 10}
+
+  """
+  @spec visible_range(integer(), non_neg_integer(), pos_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  def visible_range(offset, content_size, viewport_size) do
+    offset = clamp(offset, content_size, viewport_size)
+    count = min(viewport_size, content_size)
+    first = max(0, content_size - offset - count)
+
+    {first, count}
+  end
+
+  @doc """
+  Move a bottom-anchored offset by `delta` rows, clamped to the content.
+
+  A positive `delta` scrolls back into history, a negative one towards the newest
+  row.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.scroll_by(0, 3, 100, 10)
+      3
+
+      iex> Drafter.ScrollMath.scroll_by(3, -5, 100, 10)
+      0
+
+      iex> Drafter.ScrollMath.scroll_by(0, 999, 100, 10)
+      90
+
+  """
+  @spec scroll_by(integer(), integer(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  def scroll_by(offset, delta, content_size, viewport_size) do
+    clamp(offset + delta, content_size, viewport_size)
+  end
+
+  @doc """
+  Move a bottom-anchored offset by whole viewports.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.page(0, 1, 100, 10)
+      10
+
+      iex> Drafter.ScrollMath.page(30, -2, 100, 10)
+      10
+
+  """
+  @spec page(integer(), integer(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  def page(offset, pages, content_size, viewport_size) do
+    scroll_by(offset, pages * viewport_size, content_size, viewport_size)
+  end
+
+  @doc """
+  The offset showing the oldest content.
+
+  ## Examples
+
+      iex> Drafter.ScrollMath.to_oldest(100, 10)
+      90
+
+      iex> Drafter.ScrollMath.to_oldest(4, 10)
+      0
+
+  """
+  @spec to_oldest(non_neg_integer(), pos_integer()) :: non_neg_integer()
+  def to_oldest(content_size, viewport_size), do: max(0, content_size - viewport_size)
+
   defp end_anchored_range(total, scroll_offset, viewport_size) do
     end_index = total - scroll_offset
     start_index = max(0, end_index - viewport_size)
