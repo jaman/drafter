@@ -38,9 +38,11 @@ ssh -p 2222 alice@localhost
 | `:port` | `2222` | TCP port to listen on |
 | `:ip` | `{127, 0, 0, 1}` | Interface to bind (use `{0, 0, 0, 0}` for all interfaces) |
 | `:mode` | `:isolated` | `:isolated` or `:shared` |
-| `:auth` | `[{"admin", "admin"}]` | `[{username, password}]` tuples for password authentication |
+| `:auth` | `[{"admin", "admin"}]` | `[{username, password}]` tuples, `{username, password, props}` triples, `{:accounts, server}`, or `:anonymous` |
 | `:system_dir` | auto-generated | Path to directory containing SSH host keys |
 | `:mount_props` | `%{}` | Map merged into `props` passed to `mount/1` for every session |
+| `:tunnel` | `false` | `true` accepts `ssh -R` reverse forwards from clients |
+| `:register_as` | `"new"` | With `auth: {:accounts, server}`, the username that opens the registration form |
 
 ### SSH host keys
 
@@ -69,6 +71,59 @@ def mount(props) do
   %{username: props.username, messages: []}
 end
 ```
+
+### Accounts and self-registration
+
+For a server where people create their own accounts, start a `Drafter.Accounts` store
+and hand it to the daemon:
+
+```elixir
+{:ok, accounts} = Drafter.Accounts.start_link(path: "/var/lib/game/accounts.bin")
+
+{:ok, _pid} = Drafter.Server.start_ssh(MyApp,
+  port: 2222,
+  auth: {:accounts, accounts},
+  register_as: "new"
+)
+```
+
+A player who has no account connects as the registration user with any password:
+
+```bash
+ssh -p 2222 new@host
+```
+
+They get a form asking for a username and a password, and once it is accepted the
+session continues into `MyApp` under the new name, with `props.username` set. From
+then on they connect as themselves. Passwords are stored as PBKDF2 hashes; an unknown
+name costs the same to refuse as a wrong password; a peer address is locked out after
+five failures in fifteen minutes; and a connection is dropped after three failures.
+
+Each account has a `props` map the application owns — `Drafter.Accounts.put_props/3`
+sets it, and it is merged into the session's mount props at login.
+
+### Held keys
+
+An app declared with `use Drafter.App, key_release: true` asks each client's terminal
+for the kitty keyboard protocol. Where the terminal supports it (kitty, Ghostty,
+WezTerm, foot, Alacritty, iTerm2 3.5+), every key press is followed by
+`{:key_down, key, modifiers}` and every release arrives as `{:key_up, key, modifiers}`,
+which is what a game that steers by held keys needs. `{:key_release_support, true}`
+is delivered once the terminal confirms, and `Drafter.Session.Context.key_release?/0`
+answers the same question later. The `{:key, ...}` events are unchanged either way.
+
+### Sound through a reverse tunnel
+
+With `tunnel: true`, a client can forward a port on the server back to its own
+machine:
+
+```bash
+ssh -p 2222 -R 24713:localhost:4713 alice@host
+```
+
+Anything the server connects to on `127.0.0.1:24713` reaches the client's
+`localhost:4713`. Keep the port the client chose in its account props so the app knows
+where to send.
 
 ### Shared chat example
 

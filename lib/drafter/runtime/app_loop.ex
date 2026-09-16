@@ -7,6 +7,8 @@ defmodule Drafter.Runtime.AppLoop do
   """
 
   alias Drafter.{Compositor, Event, RenderCache, SkinManager, Terminal, ThemeManager}
+  require Logger
+
   alias Drafter.Runtime
   alias Drafter.Runtime.FrameClock
   alias Drafter.Runtime.Renderer
@@ -82,6 +84,7 @@ defmodule Drafter.Runtime.AppLoop do
     Terminal.Driver.drain_pending_input()
     Drafter.Event.Manager.drain_queue()
     drain_stale_events()
+    Terminal.Driver.query_terminal()
     adopt_probed_protocol()
     Compositor.clear_screen()
 
@@ -150,6 +153,22 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
 
+  defp dispatch_loop_msg(
+         {:tui_event, {:key_release_support, supported?} = event},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
+    Context.put_key_release(supported?)
+    handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
+  end
+
+  defp dispatch_loop_msg(
+         {:tui_event, {:cell_size, size} = event},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
+    Context.put_cell_size(size)
+    handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
+  end
+
   defp dispatch_loop_msg({:tui_event, event}, {app_module, app_state, rect, timers, wh, ss}) do
     if Drafter.Trace.enabled?(),
       do: Drafter.Trace.log_sync(["I ", Drafter.Trace.ts(), " ", inspect(event), "\n"])
@@ -186,6 +205,13 @@ defmodule Drafter.Runtime.AppLoop do
     new_state = Map.put(app_state, key, value)
     {_, new_wh} = immediate_render(app_module, new_state, rect, wh)
     app_event_loop(app_module, new_state, rect, timers, new_wh, ss)
+  end
+
+  defp dispatch_loop_msg({:set_refresh_rate, rate}, {app_module, app_state, rect, timers, wh, ss}) do
+    interval = parse_refresh_rate(rate)
+    Process.put(:frame_interval_ms, interval)
+    Drafter.AppRegistry.set_frame_interval(interval)
+    app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
   defp dispatch_loop_msg({:theme_change, name}, {app_module, app_state, rect, timers, wh, ss}) do
@@ -237,7 +263,7 @@ defmodule Drafter.Runtime.AppLoop do
       if new_state === app_state do
         app_event_loop(app_module, app_state, rect, timers, wh, ss)
       else
-        {_, new_wh} = Renderer.render_app(app_module, new_state, rect, wh)
+        {_, new_wh} = timer_render(app_module, new_state, rect, wh)
         app_event_loop(app_module, new_state, rect, timers, new_wh, ss)
       end
     end
@@ -264,6 +290,16 @@ defmodule Drafter.Runtime.AppLoop do
          {app_module, app_state, rect, timers, wh, ss}
        ) do
     new_wh = if wh, do: Drafter.WidgetHierarchy.focus_widget(wh, widget_id), else: wh
+    Process.put(:render_cache_layout_dirty, true)
+    {_, updated_wh} = immediate_render(app_module, app_state, rect, new_wh)
+    app_event_loop(app_module, app_state, rect, timers, updated_wh, ss)
+  end
+
+  defp dispatch_loop_msg(
+         {:blur_widget, widget_id},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
+    new_wh = if wh, do: Drafter.WidgetHierarchy.blur_widget(wh, widget_id), else: wh
     Process.put(:render_cache_layout_dirty, true)
     {_, updated_wh} = immediate_render(app_module, app_state, rect, new_wh)
     app_event_loop(app_module, app_state, rect, timers, updated_wh, ss)
@@ -305,7 +341,7 @@ defmodule Drafter.Runtime.AppLoop do
        ) do
     drain_widget_render_notifications()
     Process.put(:render_cache_layout_dirty, true)
-    if wh, do: Renderer.render_hierarchy(wh, rect)
+    if wh && not Process.get(:render_deferred, false), do: Renderer.render_hierarchy(wh, rect)
     app_event_loop(app_module, app_state, rect, timers, wh, ss)
   end
 
@@ -521,6 +557,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp dispatch_loop_msg(:deferred_render, {app_module, app_state, rect, timers, wh, ss}) do
     Process.delete(:render_deferred)
+    Process.delete(:hierarchy_stale)
     Process.put(:last_render_ms, System.monotonic_time(:millisecond))
     {_, new_wh} = Renderer.render_app(app_module, app_state, rect, wh)
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
@@ -564,7 +601,9 @@ defmodule Drafter.Runtime.AppLoop do
     handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
   end
 
-  defp dispatch_loop_msg(:shutdown, _ctx), do: :ok
+  defp dispatch_loop_msg(:shutdown, {app_module, app_state, rect, timers, wh, ss}) do
+    handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
+  end
 
   defp dispatch_loop_msg(other, {app_module, app_state, rect, timers, wh, ss}) do
     new_state = maybe_on_message(app_module, other, app_state)
@@ -635,10 +674,11 @@ defmodule Drafter.Runtime.AppLoop do
          app_state,
          screen_rect,
          timers,
-         widget_hierarchy,
+         stale_hierarchy,
          session_stack,
          event
        ) do
+    widget_hierarchy = current_hierarchy(app_module, app_state, screen_rect, stale_hierarchy)
     already_routed? = widget_hierarchy != nil and widget_hierarchy.focused_widget != nil
 
     {new_hierarchy, actions, widget_consumed} =
@@ -648,6 +688,7 @@ defmodule Drafter.Runtime.AppLoop do
         {widget_hierarchy, [], false}
       end
 
+    app_state = apply_bound_updates(app_state)
     raw_mouse_event? = match?({:mouse, _}, event)
 
     if widget_consumed do
@@ -672,6 +713,23 @@ defmodule Drafter.Runtime.AppLoop do
         event,
         already_routed?
       )
+    end
+  end
+
+  defp current_hierarchy(app_module, app_state, screen_rect, hierarchy) do
+    if Process.get(:hierarchy_stale) do
+      Process.delete(:hierarchy_stale)
+      Renderer.rebuild_hierarchy(app_module, app_state, screen_rect, hierarchy)
+    else
+      hierarchy
+    end
+  end
+
+  defp apply_bound_updates(app_state) do
+    receive do
+      {:bound_state_update, key, value} -> apply_bound_updates(Map.put(app_state, key, value))
+    after
+      0 -> app_state
     end
   end
 
@@ -885,8 +943,9 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
   end
 
-  defp handle_stop(reason, _app_module, _app_state, _screen_rect, timers, widget_hierarchy, []) do
+  defp handle_stop(reason, app_module, app_state, _screen_rect, timers, widget_hierarchy, []) do
     Drafter.Trace.log_sync(["Q stop_start ", Drafter.Trace.ts(), "\n"])
+    unmount(app_module, app_state)
     cleanup_timers(timers)
     Drafter.Trace.log_sync(["Q timers_done ", Drafter.Trace.ts(), "\n"])
     Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
@@ -896,8 +955,8 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp handle_stop(
          _reason,
-         _app_module,
-         _app_state,
+         app_module,
+         app_state,
          screen_rect,
          timers,
          widget_hierarchy,
@@ -907,6 +966,7 @@ defmodule Drafter.Runtime.AppLoop do
       hd(session_stack)
 
     Drafter.Trace.log_sync(["Q pop_start ", Drafter.Trace.ts(), "\n"])
+    unmount(app_module, app_state)
     cleanup_timers(timers)
     Drafter.WidgetHierarchy.stop_all_servers(widget_hierarchy)
     Drafter.Trace.log_sync(["Q pop_servers_stopped ", Drafter.Trace.ts(), "\n"])
@@ -1061,6 +1121,14 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
+  defp unmount(app_module, app_state) do
+    Runtime.for_app(app_module).unmount(app_module, app_state)
+  rescue
+    error -> Logger.error("unmount of #{inspect(app_module)} raised #{Exception.message(error)}")
+  catch
+    kind, reason -> Logger.error("unmount of #{inspect(app_module)} #{kind}: #{inspect(reason)}")
+  end
+
   defp cleanup_timers(timers) do
     Enum.each(timers, fn {_id, timer_ref} ->
       :timer.cancel(timer_ref)
@@ -1196,12 +1264,21 @@ defmodule Drafter.Runtime.AppLoop do
 
     interval = parse_refresh_rate(rate)
     Process.put(:frame_interval_ms, interval)
+    Process.put(:frame_pacing, app_frame_pacing(app_module))
     Drafter.AppRegistry.set_frame_interval(interval)
     Process.delete(:last_render_ms)
     Process.delete(:render_deferred)
   end
 
   defp parse_refresh_rate(rate), do: FrameClock.interval_for(rate)
+
+  defp app_frame_pacing(app_module) do
+    if function_exported?(app_module, :__frame_pacing__, 0) do
+      app_module.__frame_pacing__()
+    else
+      :animations
+    end
+  end
 
   defp collect_pending_intervals do
     pending = Process.delete(:pending_intervals) || []
@@ -1213,11 +1290,16 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp immediate_render(app_module, app_state, screen_rect, hierarchy) do
-    if pending_messages?() do
-      schedule_coalesced_render()
-      {nil, hierarchy}
-    else
-      do_render(app_module, app_state, screen_rect, hierarchy)
+    cond do
+      Process.get(:frame_pacing) == :always ->
+        throttled_render(app_module, app_state, screen_rect, hierarchy)
+
+      pending_messages?() ->
+        schedule_coalesced_render()
+        {nil, hierarchy}
+
+      true ->
+        do_render(app_module, app_state, screen_rect, hierarchy)
     end
   end
 
@@ -1230,6 +1312,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp do_render(app_module, app_state, screen_rect, hierarchy) do
     Process.delete(:coalesced_render_scheduled)
+    Process.delete(:hierarchy_stale)
     Process.put(:last_render_ms, System.monotonic_time(:millisecond))
     Process.delete(:render_deferred)
 
@@ -1258,6 +1341,14 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
+  defp timer_render(app_module, app_state, screen_rect, hierarchy) do
+    if Process.get(:frame_pacing) == :always do
+      throttled_render(app_module, app_state, screen_rect, hierarchy)
+    else
+      Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
+    end
+  end
+
   defp throttled_render(app_module, app_state, screen_rect, hierarchy) do
     case Process.get(:frame_interval_ms) do
       nil ->
@@ -1270,9 +1361,11 @@ defmodule Drafter.Runtime.AppLoop do
         if now - last >= interval do
           Process.put(:last_render_ms, now)
           Process.delete(:render_deferred)
+          Process.delete(:hierarchy_stale)
           Renderer.render_app(app_module, app_state, screen_rect, hierarchy)
         else
           schedule_deferred_render_if_needed(interval - (now - last))
+          Process.put(:hierarchy_stale, true)
           {[], hierarchy}
         end
     end

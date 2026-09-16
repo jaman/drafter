@@ -35,7 +35,7 @@ defmodule Drafter.Terminal.Driver do
   use GenServer
 
   alias Drafter.Event
-  alias Drafter.Terminal.{ANSI, InputBuffer, Probe, TermiosNif}
+  alias Drafter.Terminal.{ANSI, InputBuffer, KittyKeyboard, Probe, Reports, TermiosNif}
 
   defstruct [
     :shell_pid,
@@ -43,6 +43,8 @@ defmodule Drafter.Terminal.Driver do
     :terminal_mode,
     buffer: %InputBuffer{},
     mouse_enabled: false,
+    key_release: false,
+    queries: [],
     alt_screen: false,
     raw_mode: false,
     size: {80, 24},
@@ -66,6 +68,7 @@ defmodule Drafter.Terminal.Driver do
           terminal_mode: terminal_mode(),
           buffer: InputBuffer.t(),
           mouse_enabled: boolean(),
+          key_release: boolean(),
           alt_screen: boolean(),
           raw_mode: boolean(),
           size: {pos_integer(), pos_integer()}
@@ -102,9 +105,11 @@ defmodule Drafter.Terminal.Driver do
   Put the terminal into TUI mode.
 
   Enters raw mode, switches to the alternate screen, hides the cursor, clears it,
-  and enables mouse and bracketed-paste reporting. `mouse_opts` defaults to `[]`
-  and is passed to `Drafter.Terminal.ANSI.enable_mouse/1`, whose only key is
-  `:hover`.
+  and enables mouse and bracketed-paste reporting. `opts` defaults to `[]`; its
+  `:hover` key is passed to `Drafter.Terminal.ANSI.enable_mouse/1`, and
+  `key_release: true` turns on the kitty keyboard protocol with
+  `Drafter.Terminal.KittyKeyboard.push/0` and asks the terminal whether it took,
+  so key presses are followed by `:key_down` and releases arrive as `:key_up`.
 
   Terminal size is measured again on success, and `SIGWINCH` starts being watched.
   On a system where the signal cannot be watched, size is polled instead and a
@@ -114,14 +119,15 @@ defmodule Drafter.Terminal.Driver do
   untouched. Input reading does not begin here; call `start_input/0`.
   """
   @spec setup(keyword()) :: :ok | {:error, term()}
-  def setup(mouse_opts \\ []) do
-    GenServer.call(__MODULE__, {:setup, mouse_opts})
+  def setup(opts \\ []) do
+    GenServer.call(__MODULE__, {:setup, opts})
   end
 
   @doc """
   Restore the terminal to the state it was in before `setup/1`.
 
-  Disables bracketed paste and mouse reporting, shows the cursor, leaves the
+  Disables bracketed paste, mouse reporting and the kitty keyboard protocol when
+  `setup/1` turned it on, shows the cursor, leaves the
   alternate screen, restores the saved terminal mode and stops the stdin reader.
   Safe to call when `setup/1` was never called or already undone.
 
@@ -180,6 +186,17 @@ defmodule Drafter.Terminal.Driver do
   def start_input do
     GenServer.call(__MODULE__, :start_input)
   end
+
+  @doc """
+  Write the terminal queries `setup/1` was given: the kitty keyboard query for
+  `key_release: true` and the cell size query for `cell_size: true`.
+
+  Call after `start_input/0` and after the last `drain_pending_input/0`; the replies
+  arrive as input events. Writes nothing when there are no queries or they were already
+  sent.
+  """
+  @spec query_terminal() :: :ok
+  def query_terminal, do: GenServer.call(__MODULE__, :query_terminal)
 
   @doc """
   The graphics protocol this terminal answered the startup probe with.
@@ -247,8 +264,8 @@ defmodule Drafter.Terminal.Driver do
   end
 
   @impl GenServer
-  def handle_call({:setup, mouse_opts}, _from, state) do
-    case setup_terminal(state, mouse_opts) do
+  def handle_call({:setup, opts}, _from, state) do
+    case setup_terminal(state, opts) do
       {:ok, new_state} ->
         {:reply, :ok, new_state}
 
@@ -275,6 +292,14 @@ defmodule Drafter.Terminal.Driver do
     drain_stdin_messages()
     flush_os_stdin_buffer()
     {:reply, :ok, %{state | buffer: InputBuffer.reset(state.buffer)}}
+  end
+
+  def handle_call(:query_terminal, _from, %__MODULE__{queries: []} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call(:query_terminal, _from, state) do
+    if state.raw_mode, do: write_synchronously(state.queries)
+    {:reply, :ok, %{state | queries: []}}
   end
 
   def handle_call(:start_input, _from, state) do
@@ -305,7 +330,7 @@ defmodule Drafter.Terminal.Driver do
   @impl GenServer
   def handle_cast({:write, data}, state) do
     if state.raw_mode do
-      IO.write(data)
+      write_synchronously(data)
     end
 
     {:noreply, state}
@@ -313,7 +338,7 @@ defmodule Drafter.Terminal.Driver do
 
   def handle_cast({:enable_mouse, opts}, state) do
     if state.raw_mode and not state.mouse_enabled do
-      IO.write(ANSI.enable_mouse(opts))
+      write_synchronously(ANSI.enable_mouse(opts))
       {:noreply, %{state | mouse_enabled: true}}
     else
       {:noreply, state}
@@ -322,7 +347,7 @@ defmodule Drafter.Terminal.Driver do
 
   def handle_cast({:disable_mouse, opts}, state) do
     if state.raw_mode and state.mouse_enabled do
-      IO.write(ANSI.disable_mouse(opts))
+      write_synchronously(ANSI.disable_mouse(opts))
       {:noreply, %{state | mouse_enabled: false}}
     else
       {:noreply, state}
@@ -379,7 +404,8 @@ defmodule Drafter.Terminal.Driver do
     :ok
   end
 
-  defp setup_terminal(state, mouse_opts) do
+  defp setup_terminal(state, opts) do
+    key_release = Keyword.get(opts, :key_release, false)
     shell_pid = :shell.start_interactive({:noshell, :raw})
 
     case enter_terminal_mode() do
@@ -388,12 +414,13 @@ defmodule Drafter.Terminal.Driver do
         setup_signal_handling()
         setup_exit_handler()
 
-        IO.write([
+        write_synchronously([
           ANSI.enter_alt_screen(),
           ANSI.hide_cursor(),
           ANSI.clear_screen(),
-          ANSI.enable_mouse(mouse_opts),
-          "\e[?2004h"
+          ANSI.enable_mouse(opts),
+          "\e[?2004h",
+          keyboard_protocol_on(key_release)
         ])
 
         new_state = %{
@@ -404,6 +431,10 @@ defmodule Drafter.Terminal.Driver do
             raw_mode: true,
             alt_screen: true,
             mouse_enabled: true,
+            key_release: key_release,
+            queries:
+              keyboard_query(key_release) ++ cell_size_query(Keyword.get(opts, :cell_size, false)),
+            buffer: InputBuffer.new(key_release: key_release),
             size: detect_terminal_size()
         }
 
@@ -468,11 +499,23 @@ defmodule Drafter.Terminal.Driver do
     end
   end
 
+  defp keyboard_protocol_on(true), do: [KittyKeyboard.push()]
+  defp keyboard_protocol_on(false), do: []
+
+  defp keyboard_query(true), do: [KittyKeyboard.query()]
+  defp keyboard_query(false), do: []
+
+  defp cell_size_query(true), do: [Reports.cell_size_query()]
+  defp cell_size_query(false), do: []
+
+  defp keyboard_protocol_off(true), do: [KittyKeyboard.pop()]
+  defp keyboard_protocol_off(false), do: []
+
   defp cleanup_terminal(state) do
     TermiosNif.set_tui_inactive()
 
     if state.raw_mode do
-      cleanup_sequences = []
+      cleanup_sequences = keyboard_protocol_off(state.key_release)
 
       cleanup_sequences = cleanup_sequences ++ ["\e[?2004l"]
 
@@ -506,6 +549,7 @@ defmodule Drafter.Terminal.Driver do
       | raw_mode: false,
         alt_screen: false,
         mouse_enabled: false,
+        key_release: false,
         shell_pid: nil,
         stdin_reader_pid: nil,
         terminal_mode: nil

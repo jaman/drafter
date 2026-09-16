@@ -67,10 +67,12 @@ defmodule Drafter.Pty do
     * `:cd` — working directory for the program, default the caller's
 
   Returns `{:ok, handle}`. `{:error, :helper_missing}` means the `pty_spawn` helper
-  is not in `priv`; `{:error, reason}` from the pty allocation means no
-  pseudoterminal was available, and carries the `strerror` text as a binary. The
-  calling process becomes the owner of both ports and must call `close/1` when
-  finished.
+  is not in `priv`; `{:error, {:nif_unavailable, reason}}` means the native library
+  did not load, and carries the text from
+  `Drafter.Terminal.TermiosNif.load_error/0`; `{:error, reason}` from the pty
+  allocation means no pseudoterminal was available, and carries the `strerror` text
+  as a binary. The calling process becomes the owner of both ports and must call
+  `close/1` when finished.
 
   A program that cannot be executed is still reported as a successful spawn; the
   failure arrives as an exit status on the control port.
@@ -80,7 +82,8 @@ defmodule Drafter.Pty do
     cols = Keyword.get(opts, :cols, 80)
     rows = Keyword.get(opts, :rows, 24)
 
-    with {:ok, {master, slave, slave_path}} <- TermiosNif.open_pty(cols, rows),
+    with nil <- unavailable(),
+         {:ok, {master, slave, slave_path}} <- TermiosNif.open_pty(cols, rows),
          {:ok, helper} <- helper_path() do
       control =
         Port.open({:spawn_executable, helper}, port_options(helper, slave_path, program, opts))
@@ -143,8 +146,8 @@ defmodule Drafter.Pty do
     * `:kill_after` — milliseconds to wait before sending `SIGKILL` to the
       program's process group, for a program that ignores `SIGHUP`. Omitted by
       default, which sends nothing further. The signal goes to the group, so
-      children the program started go with it, and is skipped if the group has
-      already gone.
+      children the program started go with it. A group that has already gone
+      takes the signal harmlessly.
 
   Background jobs a shell placed in their own process groups are not reached,
   which is also true of the terminal emulator you are reading this in.
@@ -164,6 +167,13 @@ defmodule Drafter.Pty do
     escalate(os_pid, Keyword.get(opts, :kill_after))
   end
 
+  defp unavailable do
+    case TermiosNif.load_error() do
+      nil -> nil
+      reason -> {:error, {:nif_unavailable, reason}}
+    end
+  end
+
   defp pid_or_nil({:ok, pid}), do: pid
   defp pid_or_nil(:error), do: nil
 
@@ -173,10 +183,7 @@ defmodule Drafter.Pty do
   defp escalate(os_pid, after_ms) when is_integer(after_ms) and after_ms >= 0 do
     Kernel.spawn(fn ->
       Process.sleep(after_ms)
-
-      if TermiosNif.killpg(os_pid, 0) == :ok do
-        TermiosNif.killpg(os_pid, @sigkill)
-      end
+      TermiosNif.killpg(os_pid, @sigkill)
     end)
 
     :ok

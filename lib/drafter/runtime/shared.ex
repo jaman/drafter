@@ -81,6 +81,11 @@ defmodule Drafter.Runtime.Shared do
 
   def on_message(app, msg, state), do: Callback.on_message(app, msg, state)
 
+  @doc "Delegates to `Drafter.Runtime.Callback.unmount/2`."
+  @impl true
+  @spec unmount(module(), term()) :: :ok
+  def unmount(app, state), do: Callback.unmount(app, state)
+
   @doc "Delegates to `Drafter.Runtime.Callback.scroll_active/2`."
   @impl true
   @spec scroll_active(module(), term()) :: term()

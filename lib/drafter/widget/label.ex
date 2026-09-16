@@ -16,7 +16,10 @@ defmodule Drafter.Widget.Label do
   ## Options
 
     * `:text` - `t:String.t/0` to render. Default `""`. Supplied positionally
-      through the `label/2` element. A `"\\n"` splits it into one strip per line
+      through the `label/2` element. A `"\\n"` splits it into one strip per line.
+      A list of `{text, style}` runs instead draws one line of those pieces side by
+      side, each in its own style over the label's; the widget's `:text` is then the
+      runs' text joined
     * `:style` - `t:map/0` of style properties, e.g. `%{fg: {255, 100, 0},
       bold: true}`. Default `%{}`
     * `:align` - text alignment: `:left` (default), `:center`, `:right`
@@ -50,6 +53,7 @@ defmodule Drafter.Widget.Label do
   alias Drafter.Style.Computed
 
   defstruct text: "",
+            runs: nil,
             style: %{},
             align: :left,
             variant: :default,
@@ -104,8 +108,11 @@ defmodule Drafter.Widget.Label do
   @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
   def mount(props) do
+    {text, runs} = text_and_runs(Map.get(props, :text, ""))
+
     %__MODULE__{
-      text: Map.get(props, :text, ""),
+      text: text,
+      runs: runs,
       style: Map.get(props, :style, %{}),
       align: Map.get(props, :align, :left),
       variant: Map.get(props, :variant, :default),
@@ -138,13 +145,30 @@ defmodule Drafter.Widget.Label do
 
     bg_style = %{fg: segment_style[:fg], bg: segment_style[:bg]}
 
-    if String.length(state.text) == 0 do
-      [Strip.new([Segment.new(String.duplicate(" ", rect.width), bg_style)])]
-    else
-      state.text
-      |> String.split("\n")
-      |> Enum.map(&render_label_line(&1, segment_style, bg_style, state.align, rect.width))
+    cond do
+      state.runs != nil ->
+        [render_runs(state.runs, segment_style, bg_style, state.align, rect.width)]
+
+      String.length(state.text) == 0 ->
+        [Strip.new([Segment.new(String.duplicate(" ", rect.width), bg_style)])]
+
+      true ->
+        state.text
+        |> String.split("\n")
+        |> Enum.map(&render_label_line(&1, segment_style, bg_style, state.align, rect.width))
     end
+  end
+
+  defp text_and_runs(runs) when is_list(runs), do: {Enum.map_join(runs, &elem(&1, 0)), runs}
+  defp text_and_runs(text), do: {text, nil}
+
+  defp render_runs(runs, segment_style, bg_style, align, width) do
+    segments =
+      for {text, style} <- runs,
+          text != "",
+          do: Segment.new(text, Map.merge(segment_style, style))
+
+    align_strip(Strip.new(segments), align, width, bg_style)
   end
 
   @doc """
@@ -163,7 +187,7 @@ defmodule Drafter.Widget.Label do
   def update(props, state) do
     Enum.reduce(props, state, fn {key, value}, acc ->
       case key do
-        :text -> %{acc | text: value}
+        :text -> with({text, runs} <- text_and_runs(value), do: %{acc | text: text, runs: runs})
         :style -> %{acc | style: value}
         :align -> %{acc | align: value}
         :variant -> %{acc | variant: value}

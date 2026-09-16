@@ -50,14 +50,30 @@ defmodule Drafter.App do
     * `:mouse_hover` - `boolean()`. `true` (default) puts the terminal into hover
       tracking mode for this app. `false` cuts mouse event volume for apps with no
       hover effects.
+    * `:key_release` - `boolean()`, default `false`. `true` turns on the kitty
+      keyboard protocol for this app's sessions where the terminal supports it:
+      every key press is followed by `{:key_down, key, modifiers}`, every release
+      arrives as `{:key_up, key, modifiers}`, and `{:key_release_support, true}` is
+      delivered once the terminal confirms it will report releases — `false` from a
+      terminal that speaks the protocol without them. The `{:key, ...}` events are
+      unchanged.
+      See `Drafter.Terminal.KittyKeyboard` for the key names.
+    * `:cell_size` - `boolean()`, default `false`. `true` asks each session's terminal
+      how many pixels a cell is; the answer arrives as `{:cell_size, {width, height}}`
+      and `Drafter.Session.Context.cell_size/0` keeps it. Widgets placing images at
+      pixel offsets need it.
+    * `:frame_pacing` - `:animations` (default) or `:always`. `:always` draws at
+      most once per `c:refresh_rate/0` interval whatever caused the change, so a
+      burst of events or timer ticks becomes one frame; `:animations` paces only
+      animation frames and draws every other change as it happens.
     * `:runtime` - the runtime backend: a module, or the shorthand `:callback`,
       `:reducer`, or `:shared`. Default `Drafter.Runtime.Callback`, the
       `mount`/`render`/`handle_event` style described here. See `Drafter.Runtime`.
 
-  No other key is read; an unknown one is silently ignored. Each of these four is
+  No other key is read; an unknown one is silently ignored. Each of these is
   exposed on the module as `__css_path__/0`, `__inline_styles__/0`,
-  `__mouse_hover__/0`, and `__runtime__/0`, which the loop calls and which are not
-  overridable.
+  `__mouse_hover__/0`, `__key_release__/0`, `__cell_size__/0`, `__frame_pacing__/0`, and
+  `__runtime__/0`, which the loop calls and which are not overridable.
 
   `use Drafter.App` imports this module, so every element constructor
   (`vertical/2`, `label/2`, `button/2`, …) and the `keybinding/3` macro are
@@ -415,6 +431,9 @@ defmodule Drafter.App do
       @css_path Keyword.get(unquote(opts), :css_path)
       @inline_styles Keyword.get(unquote(opts), :styles, %{})
       @mouse_hover Keyword.get(unquote(opts), :mouse_hover, true)
+      @key_release Keyword.get(unquote(opts), :key_release, false)
+      @cell_size Keyword.get(unquote(opts), :cell_size, false)
+      @frame_pacing Keyword.get(unquote(opts), :frame_pacing, :animations)
       @runtime_backend Keyword.get(unquote(opts), :runtime, Drafter.Runtime.Callback)
       @keybinding_hints []
 
@@ -428,6 +447,9 @@ defmodule Drafter.App do
       def __css_path__, do: @css_path
       def __inline_styles__, do: @inline_styles
       def __mouse_hover__, do: @mouse_hover
+      def __key_release__, do: @key_release
+      def __cell_size__, do: @cell_size
+      def __frame_pacing__, do: @frame_pacing
       def __runtime__, do: @runtime_backend
       def __theme__(action) when action == :get, do: Drafter.ThemeManager.get_current_theme()
 
@@ -595,8 +617,15 @@ defmodule Drafter.App do
 
       iex> label("Count: 3", style: %{bold: true}, align: :center)
       {:label, "Count: 3", [style: %{bold: true}, align: :center]}
+
+  `text` may instead be a list of `{text, style}` runs, drawn side by side on one line as
+  one widget, each run in its own style over the label's:
+
+      iex> label([{"ok ", %{fg: :green}}, {"3 failed", %{fg: :red}}])
+      {:label, [{"ok ", %{fg: :green}}, {"3 failed", %{fg: :red}}], []}
   """
-  @spec label(String.t(), opts()) :: {:label, String.t(), opts()}
+  @spec label(String.t() | [{String.t(), map()}], opts()) ::
+          {:label, String.t() | [{String.t(), map()}], opts()}
   def label(text, opts \\ []) do
     {:label, text, opts}
   end

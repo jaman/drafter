@@ -26,6 +26,13 @@ defmodule Drafter.Terminal.ANSI do
     * `{:mouse, payload}` — see below.
     * `{:bracketed_paste, text}` — the content between `ESC [ 200~` and `ESC [ 201~`,
       undecoded and with the delimiters stripped.
+    * `{:key_down, key, modifiers}`, `{:key_up, key, modifiers}` and
+      `{:key_release_support, boolean}` — reports in the kitty keyboard protocol,
+      which a terminal sends only after a driver has turned it on; the support event
+      is `true` only when the terminal will report releases. See
+      `Drafter.Terminal.KittyKeyboard`.
+    * `{:cell_size, {width, height}}` — the terminal's answer, in pixels, to
+      `Drafter.Terminal.Reports.cell_size_query/0`.
 
   Control characters `\\x01`..`\\x1a` decode as `{:key, letter, [:ctrl]}`, except
   `\\x09` which is `{:key, :tab}` and `\\x0a`/`\\x0d` which are both `{:key, :enter}`.
@@ -49,6 +56,11 @@ defmodule Drafter.Terminal.ANSI do
   `ESC P`, `ESC ]`, `ESC ^`, `ESC _` or `ESC X` and closed by a string terminator
   (`ESC \\`, or `BEL` for OSC). These are consumed and produce no event. A buffer
   ending inside one is treated as incomplete.
+
+  A complete CSI sequence (`ESC [`, parameter and intermediate bytes `0x20`..`0x3F`,
+  a final byte `0x40`..`0x7E`) that no key, mouse or report parser reads is consumed
+  the same way. `ESC [` with no final byte yet is incomplete; on flush it is the
+  escape key followed by `[`.
 
   The release report for a scroll button — buttons `64`..`67` with a final `m` —
   is consumed the same way, since the press already carried the scroll.
@@ -93,6 +105,12 @@ defmodule Drafter.Terminal.ANSI do
           | {:char, char()}
           | {:mouse, mouse_payload()}
           | {:bracketed_paste, binary()}
+          | {:key_down, KittyKeyboard.key(), modifiers()}
+          | {:key_up, KittyKeyboard.key(), modifiers()}
+          | {:key_release_support, boolean()}
+          | {:cell_size, {pos_integer(), pos_integer()}}
+
+  alias Drafter.Terminal.{KittyKeyboard, Reports}
 
   @string_openers ~c"_P]X^"
 
@@ -223,9 +241,22 @@ defmodule Drafter.Terminal.ANSI do
 
       iex> Drafter.Terminal.ANSI.parse_sequence(<<0xC3>>)
       {[], <<0xC3>>}
+
+  Reports in the kitty keyboard protocol are read whatever the options, producing
+  the events `Drafter.Terminal.KittyKeyboard` describes. With `key_release: true`,
+  which a driver passes once it has turned that protocol on, every key press in a
+  legacy encoding is also followed by its `{:key_down, key, modifiers}`:
+
+      iex> Drafter.Terminal.ANSI.parse_sequence("\\e[A", key_release: true)
+      {[{:key, :up}, {:key_down, :up, []}], ""}
+
+  ## Options
+
+    * `:key_release` - `boolean()`, default `false`.
   """
-  @spec parse_sequence(binary()) :: {[event()], binary()}
-  def parse_sequence(buffer), do: do_parse(buffer, [], :partial)
+  @spec parse_sequence(binary(), keyword()) :: {[event()], binary()}
+  def parse_sequence(buffer, opts \\ []),
+    do: do_parse(buffer, [], {:partial, Keyword.get(opts, :key_release, false)})
 
   @doc """
   Parse an input buffer, resolving any trailing ambiguity instead of retaining it.
@@ -245,9 +276,12 @@ defmodule Drafter.Terminal.ANSI do
 
       iex> Drafter.Terminal.ANSI.flush_sequence(<<0xC3>>)
       {[], <<0xC3>>}
+
+  Takes the same `:key_release` option as `parse_sequence/2`.
   """
-  @spec flush_sequence(binary()) :: {[event()], binary()}
-  def flush_sequence(buffer), do: do_parse(buffer, [], :flush)
+  @spec flush_sequence(binary(), keyword()) :: {[event()], binary()}
+  def flush_sequence(buffer, opts \\ []),
+    do: do_parse(buffer, [], {:flush, Keyword.get(opts, :key_release, false)})
 
   defp do_parse("", events, _mode), do: {Enum.reverse(events), ""}
 
@@ -264,25 +298,30 @@ defmodule Drafter.Terminal.ANSI do
     end
   end
 
-  defp resolve_incomplete_paste(buffer, _partial, events, :partial) do
+  defp resolve_incomplete_paste(buffer, _partial, events, {:partial, _}) do
     {Enum.reverse(events), buffer}
   end
 
-  defp resolve_incomplete_paste(_buffer, partial, events, :flush) do
+  defp resolve_incomplete_paste(_buffer, partial, events, {:flush, _}) do
     {Enum.reverse([{:bracketed_paste, partial} | events]), ""}
   end
 
-  defp parse_sequence_match(buffer, events, mode) do
-    if mode == :partial and incomplete_sequence?(buffer) do
+  defp parse_sequence_match(buffer, events, {completeness, _} = mode) do
+    if completeness == :partial and incomplete_sequence?(buffer) do
       {Enum.reverse(events), buffer}
     else
-      case find_longest_match(buffer) do
+      case find_longest_match(buffer, mode) do
         {:ignore, rest} -> do_parse(rest, events, mode)
-        {event, rest} -> do_parse(rest, [event | events], mode)
+        {:reports, reports, rest} -> do_parse(rest, Enum.reverse(reports, events), mode)
+        {event, rest} -> do_parse(rest, with_key_down(event, mode) ++ events, mode)
         :no_match -> parse_sequence_char(buffer, events, mode)
       end
     end
   end
+
+  defp with_key_down({:key, _} = event, {_, true}), do: [KittyKeyboard.key_down(event), event]
+  defp with_key_down({:key, _, _} = event, {_, true}), do: [KittyKeyboard.key_down(event), event]
+  defp with_key_down(event, _mode), do: [event]
 
   @doc """
   Whether the buffer ends in a control sequence that has not fully arrived.
@@ -329,7 +368,7 @@ defmodule Drafter.Terminal.ANSI do
 
   defp parse_sequence_char(<<char::utf8, rest::binary>>, events, mode)
        when char >= 32 and char <= 126 do
-    do_parse(rest, [{:key, printable_key(char)} | events], mode)
+    do_parse(rest, with_key_down({:key, printable_key(char)}, mode) ++ events, mode)
   end
 
   defp parse_sequence_char(<<char::utf8, rest::binary>>, events, mode) do
@@ -340,9 +379,19 @@ defmodule Drafter.Terminal.ANSI do
     {Enum.reverse(events), incomplete}
   end
 
+  @doc """
+  The key atom for a printable ASCII codepoint, as `{:key, atom}` events carry it.
+
+      iex> Drafter.Terminal.ANSI.printable_key(?a)
+      :a
+
+      iex> Drafter.Terminal.ANSI.printable_key(?\\s)
+      :" "
+  """
+  @spec printable_key(32..126) :: key()
   for char <- 32..126 do
     key = String.to_atom(<<char::utf8>>)
-    defp printable_key(unquote(char)), do: unquote(key)
+    def printable_key(unquote(char)), do: unquote(key)
   end
 
   @paste_start "\e[200~"
@@ -363,12 +412,44 @@ defmodule Drafter.Terminal.ANSI do
 
   defp parse_bracketed_paste(_buffer), do: :no_match
 
-  defp find_longest_match(buffer) do
+  defp find_longest_match(buffer, mode) do
     case parse_mouse_event(buffer) do
       {mouse_event, rest} -> {mouse_event, rest}
-      :no_match -> parse_string_sequence(buffer) || match_key_sequence(buffer)
+      :no_match -> parse_string_sequence(buffer) || report_or_table(buffer, mode)
     end
   end
+
+  defp report_or_table(buffer, {_, key_release}) do
+    case KittyKeyboard.parse(buffer, key_release) do
+      {reports, rest} -> {:reports, reports, rest}
+      :no_match -> terminal_report_or_table(buffer)
+    end
+  end
+
+  defp terminal_report_or_table(buffer) do
+    case Reports.parse(buffer) do
+      {reports, rest} -> {:reports, reports, rest}
+      :no_match -> table_or_unknown_csi(buffer)
+    end
+  end
+
+  defp table_or_unknown_csi(buffer) do
+    case match_key_sequence(buffer) do
+      {{:key, :escape}, <<"[", after_bracket::binary>>} -> unknown_csi(after_bracket)
+      match -> match
+    end
+  end
+
+  defp unknown_csi(after_bracket) do
+    case csi_final(after_bracket) do
+      {:ok, rest} -> {:ignore, rest}
+      :none -> {{:key, :escape}, <<"[", after_bracket::binary>>}
+    end
+  end
+
+  defp csi_final(<<byte, rest::binary>>) when byte >= 0x20 and byte <= 0x3F, do: csi_final(rest)
+  defp csi_final(<<byte, rest::binary>>) when byte >= 0x40 and byte <= 0x7E, do: {:ok, rest}
+  defp csi_final(_bytes), do: :none
 
   defp parse_string_sequence(<<"\e", opener, rest::binary>>) when opener in @string_openers do
     case string_terminator(rest) do

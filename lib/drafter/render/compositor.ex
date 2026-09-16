@@ -5,14 +5,18 @@ defmodule Drafter.Compositor do
   The screen buffer is a list of `Drafter.Draw.Strip`, one per row, each padded to the
   screen width. `render_strips/3` blits strips into it at a cell position; the frame is
   written on the next `:render_frame` message, and only rows whose cache key changed are
-  sent. Frames are wrapped in synchronized-update markers unless `DRAFTER_NO_SYNC` is set.
+  sent, wrapped in synchronized-update markers unless `DRAFTER_NO_SYNC` is set. Every
+  byte for the terminal goes through the session's `Drafter.Render.Writer`. While text
+  handed to it is still unwritten no new frame is written, so a link that cannot keep up
+  sees fewer, complete frames, the rows changed meanwhile merged into one diff; a frame's
+  image bytes follow its text and are written only while no newer image has arrived.
 
       Drafter.Compositor.render_strips([Drafter.Draw.Strip.from_text("hello")], 2, 0)
 
   One compositor exists per session and is resolved through `Drafter.Session.Context`
   under the `:compositor` key, so the module-level functions address the caller's own
-  session. Output goes to the session's terminal driver, or, for the local terminal,
-  straight to `/dev/tty` unless `DRAFTER_NO_PACED_WRITE` is set.
+  session. The writer's sink is the session's terminal driver, or, for the local
+  terminal, `/dev/tty` unless `DRAFTER_NO_PACED_WRITE` is set.
 
   A resize arrives as `{:tui_event, {:resize, {cols, rows}}}` from the event manager;
   the buffer is rebuilt empty at the new size and the whole screen is marked dirty.
@@ -22,8 +26,9 @@ defmodule Drafter.Compositor do
   Terminal-graphics bytes live outside the cell grid. A widget registers them with
   `put_image/4`, positions them with `place_image/3` and withdraws them with
   `clear_image/1`. Images are drawn after the text of a frame, and are redrawn when
-  their bytes or position changed or when a text row beneath them was rewritten. An
-  image whose rectangle does not fit entirely on screen is not drawn at all.
+  their bytes or position changed. A text row an image lies on is written around the
+  image, the cells it covers left alone, so text changing beside an image never touches
+  it. An image whose rectangle does not fit entirely on screen is not drawn at all.
 
   Stamps order concurrent generations: a `put_image/4` whose `stamp` is not greater
   than the highest stamp already accepted for that id is discarded. `clear_image/1`
@@ -34,13 +39,15 @@ defmodule Drafter.Compositor do
   use GenServer
 
   alias Drafter.Draw.Strip
+
+  @behind_poll_ms 4
   alias Drafter.{Event, Terminal}
   alias Drafter.Session.Context
 
   defstruct [
     :terminal_driver,
     :event_manager,
-    :paced_tty,
+    :writer,
     screen_buffer: [],
     rendered_buffer: [],
     dirty_regions: [],
@@ -296,10 +303,12 @@ defmodule Drafter.Compositor do
 
     empty_buffer = create_empty_buffer(width, height)
 
+    {:ok, writer} = Drafter.Render.Writer.start_link(sink_for(terminal_driver))
+
     state = %__MODULE__{
       terminal_driver: terminal_driver,
       event_manager: event_manager,
-      paced_tty: open_paced_tty(terminal_driver),
+      writer: writer,
       screen_buffer: empty_buffer,
       dirty_regions: [],
       screen_size: {width, height},
@@ -340,8 +349,11 @@ defmodule Drafter.Compositor do
 
   def handle_cast({:put_image, id, paint, clear, placement}, state) do
     if stale_stamp?(state.image_stamps, id, placement.stamp) do
+      trace_paint(id, "stale")
       {:noreply, state}
     else
+      trace_paint(id, "stored")
+
       base =
         Map.get(state.image_regions, id, %{
           x: 0,
@@ -408,7 +420,7 @@ defmodule Drafter.Compositor do
   end
 
   def handle_cast({:write_raw, data}, state) do
-    write_output(state, data)
+    Drafter.Render.Writer.write(state.writer, data)
     {:noreply, state}
   end
 
@@ -458,21 +470,27 @@ defmodule Drafter.Compositor do
   end
 
   def handle_info(:render_frame, state) do
-    if Enum.empty?(state.dirty_regions) and state.pending_image_clears == [] and
-         not images_pending?(state) do
-      {:noreply, %{state | rendering: false}}
-    else
-      {new_rendered, new_painted} = render_to_terminal(state)
+    cond do
+      Enum.empty?(state.dirty_regions) and state.pending_image_clears == [] and
+          not images_pending?(state) ->
+        {:noreply, %{state | rendering: false}}
 
-      {:noreply,
-       %{
-         state
-         | rendered_buffer: new_rendered,
-           painted_images: new_painted,
-           dirty_regions: [],
-           pending_image_clears: [],
-           rendering: false
-       }}
+      Drafter.Render.Writer.behind?(state.writer) ->
+        Process.send_after(self(), :render_frame, @behind_poll_ms)
+        {:noreply, state}
+
+      true ->
+        {new_rendered, new_painted} = render_to_terminal(state)
+
+        {:noreply,
+         %{
+           state
+           | rendered_buffer: new_rendered,
+             painted_images: new_painted,
+             dirty_regions: [],
+             pending_image_clears: [],
+             rendering: false
+         }}
     end
   end
 
@@ -481,12 +499,10 @@ defmodule Drafter.Compositor do
   end
 
   @impl GenServer
-  def terminate(_reason, %__MODULE__{paced_tty: tty}) when tty != nil do
-    :file.close(tty)
+  def terminate(_reason, %__MODULE__{writer: writer}) do
+    Drafter.Render.Writer.flush(writer)
     :ok
   end
-
-  def terminate(_reason, _state), do: :ok
 
   defp resize_event?({:resize, _}), do: true
   defp resize_event?(_), do: false
@@ -576,68 +592,41 @@ defmodule Drafter.Compositor do
   end
 
   defp render_to_terminal(state) do
-    {text_rows, changed_lines} = build_terminal_output(state.screen_buffer, state.rendered_buffer)
+    covers = covers(state.image_regions, state.painted_images, state.screen_size)
+    text_rows = build_terminal_output(state.screen_buffer, state.rendered_buffer, covers)
 
     {image_rows, new_painted} =
       build_image_output(
         state.image_regions,
         state.painted_images,
-        changed_lines,
         state.screen_size
       )
 
     image_block = Enum.reverse(state.pending_image_clears) ++ image_rows
-    output = compose_output(text_rows, image_block)
+    output = compose_output(text_rows)
 
     if output != [] do
       trace_frame(text_rows, image_rows)
-      traced_write(state, output, changed_lines)
+      Drafter.Render.Writer.write(state.writer, output)
+    end
+
+    if image_block != [] do
+      Drafter.Render.Writer.write_image(state.writer, [
+        image_block,
+        Terminal.ANSI.cursor_to(1, 1),
+        Terminal.ANSI.hide_cursor()
+      ])
     end
 
     {state.screen_buffer, new_painted}
   end
 
-  defp traced_write(state, output, changed_lines) do
-    if Drafter.Trace.enabled?() do
-      bytes = IO.iodata_length(output)
-      t0 = System.monotonic_time(:microsecond)
-      write_output(state, output)
-      t1 = System.monotonic_time(:microsecond)
-
-      Drafter.Trace.log([
-        "W ",
-        Drafter.Trace.ts(),
-        " lines=",
-        Integer.to_string(length(changed_lines)),
-        " bytes=",
-        Integer.to_string(bytes),
-        " write_us=",
-        Integer.to_string(t1 - t0),
-        "\n"
-      ])
-    else
-      write_output(state, output)
-    end
+  defp sink_for(Terminal.Driver) do
+    driver = fn bytes -> driver_write(Terminal.Driver, bytes) end
+    if paced_write?(), do: {:tty, driver}, else: driver
   end
 
-  defp write_output(%__MODULE__{paced_tty: tty}, output) when tty != nil do
-    :file.write(tty, output)
-  end
-
-  defp write_output(%__MODULE__{terminal_driver: driver}, output) do
-    driver_write(driver, output)
-  end
-
-  defp open_paced_tty(Terminal.Driver) do
-    if paced_write?() do
-      case :file.open(~c"/dev/tty", [:write, :raw, :binary]) do
-        {:ok, tty} -> tty
-        {:error, _} -> nil
-      end
-    end
-  end
-
-  defp open_paced_tty(_driver), do: nil
+  defp sink_for(driver), do: fn bytes -> driver_write(driver, bytes) end
 
   defp paced_write?, do: System.get_env("DRAFTER_NO_PACED_WRITE") in [nil, ""]
 
@@ -663,32 +652,66 @@ defmodule Drafter.Compositor do
     end
   end
 
-  defp build_terminal_output(screen_buffer, rendered_buffer) do
+  defp build_terminal_output(screen_buffer, rendered_buffer, covers) do
     prev_tuple = List.to_tuple(rendered_buffer)
     prev_count = tuple_size(prev_tuple)
 
-    {rows, changed} =
-      screen_buffer
-      |> Enum.with_index()
-      |> Enum.reduce({[], []}, fn {strip, line_index}, {rows, changed} ->
-        prev_strip = if line_index < prev_count, do: elem(prev_tuple, line_index), else: nil
+    screen_buffer
+    |> Enum.with_index()
+    |> Enum.reduce([], fn {strip, line_index}, rows ->
+      prev_strip = if line_index < prev_count, do: elem(prev_tuple, line_index), else: nil
 
-        if prev_strip && prev_strip.cache_key == strip.cache_key do
-          {rows, changed}
-        else
-          {[[Terminal.ANSI.cursor_to(1, line_index + 1), Strip.to_ansi(strip)] | rows],
-           [line_index | changed]}
-        end
-      end)
-
-    {Enum.reverse(rows), changed}
+      if prev_strip && prev_strip.cache_key == strip.cache_key do
+        rows
+      else
+        Enum.reverse(row_output(strip, line_index, covers)) ++ rows
+      end
+    end)
+    |> Enum.reverse()
   end
 
-  defp build_image_output(image_regions, painted, changed_lines, screen_size) do
-    changed_set = MapSet.new(changed_lines)
+  defp row_output(strip, line_index, covers) do
+    spans =
+      covers
+      |> Enum.filter(fn {top, bottom, _left, _cols} ->
+        line_index >= top and line_index <= bottom
+      end)
+      |> Enum.map(fn {_top, _bottom, left, cols} -> {left, left + cols} end)
+      |> Enum.sort()
 
+    {segments, from} =
+      Enum.reduce(spans, {[], 0}, fn {left, right}, {segments, from} ->
+        {segment(strip, line_index, from, left) ++ segments, max(from, right)}
+      end)
+
+    Enum.reverse(segment(strip, line_index, from, Strip.width(strip)) ++ segments)
+  end
+
+  defp segment(_strip, _line_index, from, to) when to <= from, do: []
+
+  defp segment(strip, line_index, 0, to) when to >= strip.width,
+    do: [[Terminal.ANSI.cursor_to(1, line_index + 1), Strip.to_ansi(strip)]]
+
+  defp segment(strip, line_index, from, to),
+    do: [
+      [
+        Terminal.ANSI.cursor_to(from + 1, line_index + 1),
+        Strip.to_ansi(Strip.slice(strip, from, to - from))
+      ]
+    ]
+
+  defp covers(image_regions, painted, screen_size) do
+    for {id, region} <- image_regions,
+        paintable?(region, screen_size),
+        not needs_paint?(region, Map.get(painted, id)) do
+      top = region.y + region.dy
+      {top, top + region.rows - 1, region.x + region.dx, region.cols}
+    end
+  end
+
+  defp build_image_output(image_regions, painted, screen_size) do
     Enum.reduce(image_regions, {[], painted}, fn {id, region}, {rows, painted_acc} ->
-      if should_paint?(region, Map.get(painted_acc, id), changed_set, screen_size) do
+      if should_paint?(region, Map.get(painted_acc, id), screen_size) do
         paint_region(id, region, rows, painted_acc)
       else
         {rows, painted_acc}
@@ -696,9 +719,24 @@ defmodule Drafter.Compositor do
     end)
   end
 
-  defp should_paint?(region, painted, changed_set, screen_size) do
-    paintable?(region, screen_size) and
-      (needs_paint?(region, painted) or image_overlaps?(region, changed_set))
+  defp should_paint?(region, painted, screen_size) do
+    paintable = paintable?(region, screen_size)
+
+    if not paintable and region.bytes != nil and Drafter.Trace.enabled?() do
+      Drafter.Trace.log([
+        "P ",
+        Drafter.Trace.ts(),
+        " unpaintable visible=",
+        inspect(region.visible),
+        " at=",
+        inspect({region.x + region.dx, region.y + region.dy, region.cols, region.rows}),
+        " screen=",
+        inspect(screen_size),
+        "\n"
+      ])
+    end
+
+    paintable and needs_paint?(region, painted)
   end
 
   defp paint_region(id, region, rows, painted_acc) do
@@ -727,29 +765,21 @@ defmodule Drafter.Compositor do
   defp needs_paint?(region, {version, pos}),
     do: region.version != version or {region.x, region.y} != pos
 
-  defp image_overlaps?(region, changed_set) do
-    top = region.y + region.dy
-    Enum.any?(top..(top + region.rows - 1)//1, &MapSet.member?(changed_set, &1))
-  end
-
   defp image_rect(region) do
     %{x: region.x + region.dx, y: region.y + region.dy, width: region.cols, height: region.rows}
   end
 
-  defp compose_output([], []), do: []
+  defp compose_output([]), do: []
 
-  defp compose_output(text_rows, image_block) do
-    synced_text(text_rows) ++
-      image_block ++ [Terminal.ANSI.cursor_to(1, 1), Terminal.ANSI.hide_cursor()]
+  defp compose_output(text_rows) do
+    synced(text_rows ++ [Terminal.ANSI.cursor_to(1, 1), Terminal.ANSI.hide_cursor()])
   end
 
-  defp synced_text([]), do: []
-
-  defp synced_text(text_rows) do
+  defp synced(output) do
     if System.get_env("DRAFTER_NO_SYNC") in [nil, ""] do
-      [Terminal.ANSI.sync_start()] ++ text_rows ++ [Terminal.ANSI.sync_end()]
+      [Terminal.ANSI.sync_start()] ++ output ++ [Terminal.ANSI.sync_end()]
     else
-      text_rows
+      output
     end
   end
 

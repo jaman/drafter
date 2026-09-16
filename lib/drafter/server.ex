@@ -39,14 +39,18 @@ defmodule Drafter.Server do
   Starts an SSH server hosting `app_module`, linked to the caller.
 
   `app_module` is a module that does `use Drafter.App`. Returns `{:ok, pid}` for the
-  listener, or `{:error, reason}`. The listener runs until it is stopped; each client
-  that connects gets its own session process.
+  listener — `{:ok, [pid]}` when `:ip` is a list — or `{:error, reason}`; `stop_ssh/1`
+  takes either. The listener runs until it is stopped; each client that connects gets
+  its own session process.
 
   ## Options
 
     * `:port` - TCP port. Default `2222`.
-    * `:ip` - the interface to bind, as an address tuple. Default `{127, 0, 0, 1}`,
-      which accepts only local connections.
+    * `:ip` - what to bind: an IPv4 or IPv6 address tuple, `{0, 0, 0, 0}` for every
+      IPv4 interface, `{0, 0, 0, 0, 0, 0, 0, 0}` for every IPv6 interface, `:any` for
+      both families on every interface, or a list of these — say two of a machine's
+      six addresses — each bound by a daemon of its own on the same port. Default
+      `{127, 0, 0, 1}`, which accepts only local connections.
     * `:mode` - `:isolated` (default) gives each client its own app state; `:shared`
       runs every client against one shared state.
     * `:auth` - `[{username, password}]` tuples for password authentication, or the
@@ -58,12 +62,21 @@ defmodule Drafter.Server do
     * `:mount_props` - `map()` handed to each session's `mount/1`. Default `%{}`.
       The authenticated username is added to it under `:username` as a string, so
       every SSH session's mount props carry that key whether or not you set it.
+      An `:auth` entry of the form `{username, password, props}` merges its `props`
+      map in as well, for that user only.
+    * `:tunnel` - `boolean()`, default `false`. `true` accepts `ssh -R` from
+      clients: the daemon listens on the port the client names and forwards each
+      connection to it back over the ssh connection.
 
   """
-  @spec start_ssh(module(), keyword()) :: {:ok, pid()} | {:error, term()}
+  @spec start_ssh(module(), keyword()) :: {:ok, pid() | [pid()]} | {:error, term()}
   def start_ssh(app_module, opts \\ []) do
     Transport.SSH.start_link(app_module, opts)
   end
+
+  @doc "Stops what `start_ssh/2` returned: one listener, or every listener of a list."
+  @spec stop_ssh(pid() | [pid()]) :: :ok
+  def stop_ssh(listener), do: Transport.SSH.stop(listener)
 
   @doc """
   Starts a Telnet server hosting `app_module`, linked to the caller.

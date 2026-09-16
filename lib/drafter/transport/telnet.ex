@@ -71,14 +71,13 @@ defmodule Drafter.Transport.Telnet do
     :ok = :inet.setopts(socket, [{:active, true}])
 
     session_ctx = start_session_services(driver_pid)
-    TelnetDriver.setup(driver_pid, session_ctx.event_manager)
+    Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
+    TelnetDriver.setup(driver_pid, session_ctx.event_manager, Drafter.terminal_opts(app_module))
 
     session_ctx =
       session_ctx
       |> Map.put(:terminal_env, TelnetDriver.terminal_env(driver_pid))
       |> put_probed_protocol(TelnetDriver.probe(driver_pid))
-
-    Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
 
     session_opts = build_session_opts(app_module, mode, mount_props)
 

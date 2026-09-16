@@ -198,5 +198,24 @@ defmodule Drafter.Terminal.ANSIParseTest do
       assert {events, ""} = ANSI.flush_sequence("\e_Gi=1;O")
       assert events != []
     end
+
+    test "a control sequence no table knows produces no events" do
+      for reply <- ["\e[?62;4c", "\e[4;300;900t", "\e[?2026;2$y", "\e[>1;4000;27c"] do
+        assert {[], ""} = ANSI.parse_sequence(reply, key_release: true), inspect(reply)
+        assert {[], ""} = feed_in_chunks(reply, 1), inspect(reply)
+      end
+    end
+
+    test "keys typed around an unknown control sequence still arrive" do
+      assert {[{:key, :a}, {:key, :b}], ""} = ANSI.parse_sequence("a\e[?62;4cb")
+    end
+
+    test "an unknown control sequence still missing its final byte is held" do
+      assert {[], "\e[?62;4"} = ANSI.parse_sequence("\e[?62;4")
+    end
+
+    test "escape then a bracket resolve as two keys on flush" do
+      assert {[{:key, :escape}, {:key, :"["}], ""} = ANSI.flush_sequence("\e[")
+    end
   end
 end

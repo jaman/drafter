@@ -77,6 +77,11 @@ defmodule Drafter.Runtime.Reducer do
       else: Callback.timer(app, timer_id, state)
   end
 
+  @doc "Delegates to `Drafter.Runtime.Callback.unmount/2`."
+  @impl true
+  @spec unmount(module(), term()) :: :ok
+  def unmount(app, state), do: Callback.unmount(app, state)
+
   @doc "Passes an out-of-band process message to the app's `update/2` verbatim."
   @impl true
   @spec on_message(module(), term(), term()) :: term()

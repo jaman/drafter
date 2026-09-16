@@ -3,6 +3,48 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [Unreleased]
+
+### Added
+
+- **Key release events** — `use Drafter.App, key_release: true` turns on the kitty keyboard protocol in the terminal of every session of that app, locally and over SSH and telnet. A press is then followed by `{:key_down, key, modifiers}`, a release arrives as `{:key_up, key, modifiers}`, and `{:key_release_support, true}` is delivered once the terminal confirms it speaks the protocol; `Drafter.Session.Context.key_release?/0` reports the same. `key` is the unshifted key, so a press and its release name the same thing. The `{:key, ...}` stream is unchanged, and an app that does not opt in sees exactly what it saw before. `Drafter.Terminal.KittyKeyboard` holds the sequences and the parser.
+- **`use Drafter.App, frame_pacing: :always`** — draws at most once per `refresh_rate/0` interval whatever caused the change, so a burst of events or timer ticks becomes one frame showing the latest state. The default `:animations` paces only animation frames, as before.
+- **`Drafter.Accounts`** — a file-backed account store with PBKDF2 password hashes, per-account props, case-insensitive unique names, an equal cost for unknown names and wrong passwords, and a per-peer lockout after repeated failures. `Drafter.Server.start_ssh/2` takes `auth: {:accounts, server}` to check logins against it, and with `register_as: "new"` (the default) a client connecting as that user is shown `Drafter.Accounts.RegisterApp`, creates an account, and continues straight into the app under the new name. An account's props are merged into its sessions' mount props.
+- **`Drafter.Server.start_ssh/2` takes `tunnel: true`** to accept `ssh -R` reverse forwards, and `auth:` entries of the form `{username, password, props}` whose map is merged into that user's mount props.
+- **`use Drafter.App, cell_size: true`** — asks each session's terminal how many pixels a cell is (`CSI 16 t`); the answer arrives as `{:cell_size, {width, height}}` and `Drafter.Session.Context.cell_size/0` keeps it. `Drafter.Terminal.Reports` holds the query and its parser.
+- **`Drafter.blur/1`** — takes focus away from a widget and keeps it away: a render no longer re-focuses the first focusable widget after an explicit blur, until something is focused again by the app, a click, or Tab.
+- **`Drafter.set_refresh_rate/1`** — changes a running app's refresh rate; pacing and tick-based image throttles follow from the next frame.
+- **`image_priority:` on any widget with an `image/3` callback** — the scheduler priority its image tasks run at (`:low`, `:normal`, `:high`), alongside the existing `image_throttle:`. The default stays `:low`, or `DRAFTER_GEN_PRIORITY`.
+- **`Drafter.terminal_opts/1`** — the `:mouse_hover`, `:key_release` and `:cell_size` settings an app module declares, as transports read them.
+- **The accounts file is text** — one Erlang term per account, read by `:file.consult/1`; a binary file from before is read and rewritten as text.
+- **`start_ssh`'s `:ip` says exactly what to bind** — an address, `{0, 0, 0, 0}` for every IPv4 interface, `{0, 0, 0, 0, 0, 0, 0, 0}` for every IPv6 one, `:any` for both families, or a list of these bound by one daemon each on the same port (`{:ok, [pid]}`; `Drafter.Server.stop_ssh/1` stops either shape). A host reachable over IPv6 whose daemon was IPv4-only refused clients that resolved it to the IPv6 address.
+- **`Drafter.Accounts` numbers its accounts and takes `default_props:`** — a function from an account's number (0, 1, 2, … in registration order; a file from before numbering is numbered in name order when loaded) to props every account has unless its own say otherwise, so a server can hand each account something of its own, such as a port.
+- **`label/2` takes runs** — a list of `{text, style}` pieces drawn side by side on one line as one widget, each in its own style over the label's; a line of many colours no longer needs a `horizontal` of many labels.
+
+### Changed
+
+- **SSH and telnet drivers write synchronously.** A frame is handed to the connection before the next is composed, so a client that cannot keep up sees fewer, complete frames instead of a growing backlog.
+- **Key replies sent before the app loop starts are kept.** A session subscribes to its event manager before the terminal probe, so answers that arrive during the probe reach the app.
+- **The telnet driver parses what arrived during the probe at once** rather than at the next keypress.
+
+### Fixed
+
+- **Release support is claimed only when the terminal reports event types.** Any reply to the kitty keyboard query counted as "releases are reported", so a terminal that speaks the protocol without event types (bit 2 of its flags) — Alacritty — left apps waiting for `key_up` events that never came, and held keys stuck. The reply's flags are read now; `{:key_release_support, false}` says the terminal answered without them.
+- **Text beside an image no longer tears it.** A changed row an image lies on is written around the image, the cells it covers left alone, instead of over it with the image re-sent afterwards — on iTerm2 and sixel the rewrite erased a band of the image until the resend arrived, a flicker on every text change beside it, and the resend itself was the cost of a whole image per text change.
+- **`unmount/1` is called** — once, with the app's last state, on every way an app stops: `{:stop, reason}` from a callback, the global quit key, the runtime's `:shutdown`, and a linked process exiting. It was documented and never called.
+- **An arrow key with nothing focused reaches the app.** It used to focus the first focusable widget — a chat log or an input the app never asked to focus — and vanish. `Drafter.blur/1` now keeps focus away even when the widget it names is not focused or not drawn yet, and `Drafter.focus/1` on a widget not drawn yet takes effect once it appears. `scrollable/2`'s `focusable: false` is honoured, as its docs said.
+- **A refused password is a denial, not an "Internal error".** With `auth: {:accounts, _}`, a wrong password or an unknown user crashed the daemon's password check on its first refusal (the failure count started as `:undefined`), so the client was disconnected with `Internal error` instead of `Permission denied, please try again`; only a correct password on the first try ever got in.
+- **An SSH session ends when its input does** — a dropped connection reaches the app as `:shutdown`, as a dropped telnet connection already did, so the app's `unmount/1` runs and nothing it started (sound, world connections) outlives the session.
+
+- **Bound values are current for the next event.** A `bind:` update is applied before the following event is handled, so an app-level handler reading bound state after a burst of keystrokes sees all of them.
+- **A focused text input no longer swallows keys it cannot type.** `:escape`, function keys and other named keys bubble to the app instead of being dropped.
+- **A lone Escape over SSH is delivered** after the input buffer's flush interval rather than waiting for the next byte.
+- **SSH session cleanup writes to the session's channel**, not the server's `/dev/tty`, so mouse tracking and the keyboard protocol are turned off in the client's terminal.
+- **The local driver writes every control sequence straight to `/dev/tty`.** Setup, mouse toggles, terminal queries and app writes no longer go through the BEAM stdio server, where they waited behind the stdin reader's blocking read until the terminal happened to send a byte; the graphics probe's queries therefore reach the terminal before the probe's deadline in every terminal, not only in those that answer something else first.
+- **Terminal queries are sent after the local driver's stdin drains.** The kitty keyboard and cell size queries are written by `Drafter.Terminal.Driver.query_terminal/0` once input starts, so their replies are no longer discarded with the stale bytes a local session flushes before its first frame; `key_release?/0` and `cell_size/0` are answered in local sessions as they were over ssh.
+- **A control sequence the parser does not know is consumed**, not delivered as the escape key followed by its bytes. A terminal's reply to a query drafter did not ask, or asked after a probe had finished, no longer reads as `Esc` plus typed characters.
+- **Every byte for the terminal goes through `Drafter.Render.Writer`**, one process per session, so no escape sequence is ever cut by another write; a frame's image bytes follow its text, outside the synchronized update, and never block the compositor: a terminal slow to accept an image (iTerm2 decodes each inline image before reading further) delays neither text nor input handling, and while it is busy only the newest image is kept for it. Trace lines `V` record each image write.
+
 ## [0.3.0] - 2026-08-03
 
 Upgrading from 0.2.x: see **Removed** and the first three **Changed** entries. An
@@ -11,7 +53,8 @@ needs no source changes; a custom widget that paints images or declares traits d
 
 ### Added
 
-- **`Drafter.Pty.close/2` takes `:kill_after`** — milliseconds to wait before sending `SIGKILL` to the program's process group, for a program that ignores the `SIGHUP` that releasing the descriptors sends. The signal goes to the group, so children the program started go with it, and is skipped if the group has already gone. `close/1` sends nothing further.
+- **`Drafter.Pty.close/2` takes `:kill_after`** — milliseconds to wait before sending `SIGKILL` to the program's process group, for a program that ignores the `SIGHUP` that releasing the descriptors sends. The signal goes to the group, so children the program started go with it. `close/1` sends nothing further.
+- **`Drafter.Terminal.TermiosNif.load_error/0`** — why the native library is not in use, or `nil` when it loaded, carrying the path that was tried and the runtime's reason for refusing it. The loader leaves the Elixir fallbacks in place rather than stopping the module from loading, so a load failure otherwise showed up only as `:nif_not_loaded` at a later call. `Drafter.Pty.spawn/2` now returns `{:error, {:nif_unavailable, reason}}` in that case instead of raising.
 - **`Drafter.ScrollMath.visible_range/3`, `scroll_by/4`, `page/4` and `to_oldest/2`** — the operations a widget rendering virtual rows needs, so a large row set is windowed without materialising what falls outside it.
 - **`slider(opts)` widget** — a draggable value slider with a track, a fill and a thumb. Arrow keys move one step, `PageUp`/`PageDown` ten, `Home`/`End` jump to the ends of the range, and a press or drag anywhere on the track moves the thumb there (the gesture keeps tracking once the pointer leaves the widget). Supports `min`/`max`/`step`, `bind:` two-way binding, `on_change`, a label and a formatted readout that reserves the widest value in the range so the track never shifts, `:disabled`, per-part colour overrides, and `:horizontal` / `:vertical` orientation. An integer range keeps integer values; any other range works in floats rounded to the decimals the step implies. `Drafter.get_widget_value/1` and `set_widget_value/2` read and write its number.
 - **Slider rendering through `french_curve`** — `renderer: :braille` draws the rounded track and disc thumb as braille cells, and a graphics protocol (`:auto`, `:pixel`, `:kitty`, `:iterm2`, `:sixel`) transmits it as a picture, falling back to braille where the terminal has none. The default `:text` renderer draws characters from the active skin, which now carries a `slider` glyph group.

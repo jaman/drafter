@@ -88,6 +88,39 @@ defmodule Drafter.Transport.SSHSessionTest do
     :ssh.close(conn)
   end
 
+  defp reachable?(address, port) do
+    case :gen_tcp.connect(address, port, [], 1_000) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        true
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  test "each :ip choice binds what it says: a family's every interface, both families, or the addresses listed" do
+    v4 = {127, 0, 0, 1}
+    v6 = {0, 0, 0, 0, 0, 0, 0, 1}
+
+    for {ip, expect_v4, expect_v6} <- [
+          {{0, 0, 0, 0}, true, false},
+          {{0, 0, 0, 0, 0, 0, 0, 0}, false, true},
+          {:any, true, true},
+          {[v4, v6], true, true},
+          {[v6], false, true}
+        ] do
+      port = 39_000 + :rand.uniform(900)
+      {:ok, daemon} = Drafter.Server.start_ssh(Echo, port: port, ip: ip)
+      Process.sleep(200)
+      assert reachable?(v4, port) == expect_v4, "ip: #{inspect(ip)} over IPv4"
+      assert reachable?(v6, port) == expect_v6, "ip: #{inspect(ip)} over IPv6"
+      :ok = Drafter.Server.stop_ssh(daemon)
+      Process.sleep(100)
+      refute reachable?(v4, port) or reachable?(v6, port)
+    end
+  end
+
   test "a clean disconnect leaves no loop behind", %{port: port} do
     {conn, channel} = open(port)
 

@@ -203,8 +203,9 @@ defmodule Drafter do
       always returns to its parent. Set `false` when embedding a run in a
       longer-lived VM so the caller regains control.
 
-  `:mouse_hover` is not an option here: hover tracking is enabled from the app
-  module, with `use Drafter.App, mouse_hover: false`.
+  `:mouse_hover`, `:key_release` and `:frame_pacing` are not options here: they
+  are set on the app module, as `use Drafter.App, mouse_hover: false` or
+  `use Drafter.App, key_release: true`.
 
       Drafter.run(MyApp, props: %{user_id: 7}, refresh_rate: "60fps", log: "/tmp/app.log")
   """
@@ -218,10 +219,8 @@ defmodule Drafter do
         _ = Drafter.Logging.setup(opts)
         Drafter.Trace.stamp_on_exit()
 
-        mouse_hover = app_mouse_hover(app_module)
-
         result =
-          with :ok <- start_system(mouse_hover: mouse_hover),
+          with :ok <- start_system(terminal_opts(app_module)),
                :ok <- maybe_start_tree_sitter(opts),
                :ok <- register_widget_libraries(opts),
                :ok <- run_app(app_module, opts) do
@@ -278,7 +277,7 @@ defmodule Drafter do
       {Drafter.Widget.Label, %{text: "wins"}}
 
   """
-  @spec label(String.t(), keyword()) :: {Label, map()}
+  @spec label(String.t() | [{String.t(), map()}], keyword()) :: {Label, map()}
   def label(text, opts \\ []) do
     props = opts |> Map.new() |> Map.put_new(:text, text)
     {Label, props}
@@ -648,6 +647,21 @@ defmodule Drafter do
   end
 
   @doc """
+  Take focus away from the widget with `widget_id`, if it has it.
+
+  The widget is sent a blur and nothing is focused afterwards, so key events reach the
+  application until something is focused again by the app, a click, or Tab; a render
+  in between does not focus the first focusable widget. That holds when the widget is
+  not focused, or not drawn yet, so an app may blur an input on the screen it is about
+  to show. Call from within a callback of the running app.
+  """
+  @spec blur(widget_id()) :: :ok
+  def blur(widget_id) do
+    send(self(), {:blur_widget, widget_id})
+    :ok
+  end
+
+  @doc """
   The current primary value of the widget with `widget_id`.
 
   The value is not a per-widget-type lookup: it is read out of whatever state the
@@ -893,6 +907,19 @@ defmodule Drafter do
   @spec set_theme(String.t()) :: :ok
   def set_theme(theme_name) when is_binary(theme_name) do
     Drafter.ThemeManager.set_theme(theme_name)
+  end
+
+  @doc """
+  Change the running app's refresh rate.
+
+  `rate` is anything `refresh_rate/0` may return: `"30fps"`, a millisecond interval, or
+  `:unlimited`. Takes effect from the next frame; widgets whose image throttle is given in
+  ticks follow it. Call from the app process. Asynchronous, always `:ok`.
+  """
+  @spec set_refresh_rate(String.t() | pos_integer() | :unlimited) :: :ok
+  def set_refresh_rate(rate) do
+    send(self(), {:set_refresh_rate, rate})
+    :ok
   end
 
   @doc """
@@ -1261,6 +1288,7 @@ defmodule Drafter do
     Drafter.Widget.Registry.scan_and_register()
 
     mouse_opts = [hover: Keyword.get(opts, :mouse_hover, true)]
+    driver_opts = mouse_opts ++ Keyword.take(opts, [:key_release, :cell_size])
 
     with {:ok, em_pid} <- ensure_started(Event.Manager.start_link()),
          {:ok, _} <- ensure_started(Terminal.Driver.start_link()),
@@ -1276,17 +1304,38 @@ defmodule Drafter do
       Process.put(:drafter_event_handler, eh_pid)
       Process.put(:drafter_skin_manager, skin_pid)
       Process.put(:drafter_mouse_opts, mouse_opts)
-      Terminal.Driver.setup(mouse_opts)
+      Terminal.Driver.setup(driver_opts)
     end
   end
 
-  defp app_mouse_hover(app_module) do
+  @doc """
+  The terminal settings an app module declares with `use Drafter.App`.
+
+  A keyword with `:mouse_hover` (default `true`), `:key_release` (default `false`) and
+  `:cell_size` (default `false`), read from the module's `__mouse_hover__/0`,
+  `__key_release__/0` and `__cell_size__/0` when it defines them. Transports pass this
+  to their driver's setup.
+  """
+  @spec terminal_opts(module()) :: [
+          mouse_hover: boolean(),
+          key_release: boolean(),
+          cell_size: boolean()
+        ]
+  def terminal_opts(app_module) do
     Code.ensure_loaded(app_module)
 
-    if function_exported?(app_module, :__mouse_hover__, 0) do
-      app_module.__mouse_hover__()
+    [
+      mouse_hover: app_setting(app_module, :__mouse_hover__, true),
+      key_release: app_setting(app_module, :__key_release__, false),
+      cell_size: app_setting(app_module, :__cell_size__, false)
+    ]
+  end
+
+  defp app_setting(app_module, function, default) do
+    if function_exported?(app_module, function, 0) do
+      apply(app_module, function, [])
     else
-      true
+      default
     end
   end
 

@@ -39,6 +39,14 @@ defmodule Drafter.Runtime.Callback do
   @spec on_message(module(), term(), term()) :: term()
   def on_message(app, msg, state), do: maybe(app, :on_message, [msg, state], state)
 
+  @doc "Calls the app's `unmount/1` if it defines one."
+  @impl true
+  @spec unmount(module(), term()) :: :ok
+  def unmount(app, state) do
+    maybe(app, :unmount, [state], :ok)
+    :ok
+  end
+
   @doc "Calls the app's `on_scroll_active/1` if it defines one, otherwise returns `state` unchanged."
   @impl true
   @spec scroll_active(module(), term()) :: term()

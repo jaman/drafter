@@ -35,6 +35,8 @@ defmodule Drafter.WidgetHierarchy do
     :preferred_sizes,
     hidden_widgets: MapSet.new(),
     event_consumed: false,
+    focus_cleared: false,
+    pending_focus: nil,
     widget_overflow: %{}
   ]
 
@@ -448,6 +450,8 @@ defmodule Drafter.WidgetHierarchy do
   defdelegate focus_widget(hierarchy, widget_id), to: __MODULE__.Focus
   @doc false
   defdelegate focus_widget(hierarchy, widget_id, direction), to: __MODULE__.Focus
+  @doc false
+  defdelegate blur_widget(hierarchy, widget_id), to: __MODULE__.Focus
   @doc false
   defdelegate cycle_focus(hierarchy), to: __MODULE__.Focus
   @doc false

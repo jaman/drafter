@@ -6,6 +6,19 @@ defmodule Drafter.Widget.TextInputTest do
 
   defdelegate setup_session_pdict(ctx), to: Drafter.Test.SessionSetup
 
+  describe "named keys while focused" do
+    test "a key with no glyph bubbles rather than being swallowed" do
+      state = %{TextInput.mount(%{}) | focused: true}
+      assert {:bubble, ^state} = TextInput.handle_event({:key, :escape}, state)
+      assert {:bubble, ^state} = TextInput.handle_event({:key, :f5}, state)
+    end
+
+    test "a glyph key is still inserted" do
+      state = %{TextInput.mount(%{}) | focused: true}
+      assert {:ok, %{text: "a"}} = TextInput.handle_event({:key, :a}, state)
+    end
+  end
+
   describe "mount/1" do
     test "defaults text to empty string" do
       state = TextInput.mount(%{})

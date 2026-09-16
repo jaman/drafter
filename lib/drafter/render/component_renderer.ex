@@ -112,6 +112,9 @@ defmodule Drafter.ComponentRenderer do
 
   defp restore_focus(hierarchy, previous_focus, hidden_ids) do
     cond do
+      hierarchy.pending_focus && Map.has_key?(hierarchy.widgets, hierarchy.pending_focus) ->
+        WidgetHierarchy.focus_widget(hierarchy, hierarchy.pending_focus)
+
       previous_focus && Map.has_key?(hierarchy.widgets, previous_focus) &&
           not MapSet.member?(hidden_ids, previous_focus) ->
         %{hierarchy | focused_widget: previous_focus}
@@ -119,7 +122,7 @@ defmodule Drafter.ComponentRenderer do
       previous_focus && MapSet.member?(hidden_ids, previous_focus) ->
         focus_first_or_clear(hierarchy)
 
-      hierarchy.focused_widget == nil ->
+      hierarchy.focused_widget == nil and not hierarchy.focus_cleared ->
         focus_first_or_nil(hierarchy)
 
       true ->
@@ -734,6 +737,7 @@ defmodule Drafter.ComponentRenderer do
     |> maybe_add_opt(opts, :buffer)
     |> maybe_add_opt(opts, :refresh)
     |> maybe_add_opt(opts, :image_throttle)
+    |> maybe_add_opt(opts, :image_priority)
   end
 
   defp maybe_add_opt(acc, opts, key) do

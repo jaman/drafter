@@ -26,7 +26,8 @@ defmodule Drafter.WidgetServer do
     image_stamp: 0,
     last_image_ms: nil,
     image_retry_ref: nil,
-    image_throttle_ms: 50
+    image_throttle_ms: 50,
+    image_priority: :low
   ]
 
   @doc """
@@ -48,6 +49,9 @@ defmodule Drafter.WidgetServer do
       Default: `:on_demand`.
     * `:image_throttle` - minimum gap between image renders, as milliseconds or
       `{n, :tick}`. Default: `{2, :tick}`.
+    * `:image_priority` - the scheduler priority image tasks run at, `:low`, `:normal`
+      or `:high`. Default: `DRAFTER_GEN_PRIORITY` when set to `normal` or `high`,
+      else `:low`.
 
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -248,7 +252,8 @@ defmodule Drafter.WidgetServer do
       data_channel: data_channel,
       auto_buffer: auto_buffer?(opts),
       image_throttle_ms:
-        resolve_throttle(Keyword.get(opts, :image_throttle, @default_image_throttle))
+        resolve_throttle(Keyword.get(opts, :image_throttle, @default_image_throttle)),
+      image_priority: Keyword.get(opts, :image_priority, gen_priority())
     }
 
     strips = module.render(widget_state, rect)
@@ -684,11 +689,10 @@ defmodule Drafter.WidgetServer do
     end
   end
 
-  defp spawn_image_task(%{module: module, state: widget_state, id: id}, rect, stamp) do
+  defp spawn_image_task(%{module: module, state: widget_state, id: id} = state, rect, stamp) do
     parent = self()
     ctx = session_context()
-
-    priority = gen_priority()
+    priority = state.image_priority
 
     spawn(fn ->
       Process.flag(:priority, priority)
@@ -707,19 +711,36 @@ defmodule Drafter.WidgetServer do
   end
 
   defp store_image(id, {paint, clear, %{dx: _, dy: _, cols: _, rows: _} = placement}, stamp) do
+    trace_image(id, [
+      "put stamp=",
+      Integer.to_string(stamp),
+      " bytes=",
+      Integer.to_string(IO.iodata_length(paint))
+    ])
+
     Drafter.Compositor.put_image(id, paint, clear, Map.put(placement, :stamp, stamp))
   end
 
-  defp store_image(id, _other, _stamp) do
+  defp store_image(id, other, _stamp) do
+    trace_image(id, ["clear result=", inspect(other, limit: 5)])
     Drafter.Compositor.clear_image(id)
   end
 
   defp safe_image(module, widget_state, rect, id) do
     module.image(widget_state, rect, id)
   rescue
-    _ -> nil
+    error ->
+      trace_image(id, ["raised ", Exception.format(:error, error, __STACKTRACE__)])
+      nil
   catch
-    _, _ -> nil
+    kind, reason ->
+      trace_image(id, ["caught ", Exception.format(kind, reason, __STACKTRACE__)])
+      nil
+  end
+
+  defp trace_image(id, message) do
+    if Drafter.Trace.enabled?(),
+      do: Drafter.Trace.log(["G ", Drafter.Trace.ts(), " ", inspect(id), " ", message, "\n"])
   end
 
   defp session_context, do: Context.capture()

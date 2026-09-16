@@ -22,12 +22,13 @@ $(PRIV_DIR):
 	mkdir -p $(PRIV_DIR)
 
 $(NIF_SO): $(NIF_SRC) | $(PRIV_DIR)
-	$(CC) $(CFLAGS) -I$(ERTS_INCLUDE_DIR) -o $@ $< $(LDFLAGS)
+	$(CC) $(CFLAGS) -I$(ERTS_INCLUDE_DIR) -o $@.tmp $< $(LDFLAGS) && mv -f $@.tmp $@
 
 $(PTY_SPAWN): $(PTY_SPAWN_SRC) | $(PRIV_DIR)
-	$(CC) -O2 -o $@ $<
+	$(CC) -O2 -o $@.tmp $< && mv -f $@.tmp $@
 
 clean:
-	rm -f $(NIF_SO) $(PTY_SPAWN)
+	rm -f $(NIF_SO) $(PTY_SPAWN) $(PRIV_DIR)/*.tmp
+	rm -rf $(PRIV_DIR)/*.tmp.dSYM
 
 .PHONY: all clean

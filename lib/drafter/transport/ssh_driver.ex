@@ -3,14 +3,16 @@ defmodule Drafter.Transport.SSHDriver do
 
   use GenServer
 
-  alias Drafter.Terminal.{ANSI, Driver, InputBuffer, Probe}
+  alias Drafter.Terminal.{ANSI, InputBuffer, KittyKeyboard, Probe, Reports}
 
   defstruct [
     :event_manager,
     :size,
+    :session,
     buffer: %InputBuffer{},
     raw_mode: false,
     mouse_enabled: false,
+    key_release: false,
     probing: false,
     probe_replies: "",
     probe_result: :unprobed,
@@ -24,8 +26,9 @@ defmodule Drafter.Transport.SSHDriver do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @spec setup(pid(), pid()) :: :ok
-  def setup(server, event_manager), do: GenServer.call(server, {:setup, event_manager})
+  @spec setup(pid(), pid(), keyword()) :: :ok
+  def setup(server, event_manager, opts \\ []),
+    do: GenServer.call(server, {:setup, event_manager, opts})
 
   @spec cleanup(pid()) :: :ok
   def cleanup(server), do: GenServer.call(server, :cleanup)
@@ -45,7 +48,7 @@ defmodule Drafter.Transport.SSHDriver do
   end
 
   @spec write(pid(), iodata()) :: :ok
-  def write(server, data), do: GenServer.cast(server, {:write, data})
+  def write(server, data), do: GenServer.call(server, {:driver_write, data}, :infinity)
 
   @spec get_size(pid()) :: {pos_integer(), pos_integer()}
   def get_size(server), do: GenServer.call(server, :get_size)
@@ -55,20 +58,25 @@ defmodule Drafter.Transport.SSHDriver do
     gl = Keyword.fetch!(opts, :group_leader)
     Process.group_leader(self(), gl)
     size = detect_size()
-    {:ok, %__MODULE__{size: size, buffer: InputBuffer.new()}}
+
+    {:ok,
+     %__MODULE__{size: size, buffer: InputBuffer.new(), session: Keyword.get(opts, :session)}}
   end
 
   @impl GenServer
-  def handle_call({:setup, event_manager}, _from, state) do
+  def handle_call({:setup, event_manager, opts}, _from, state) do
     :io.setopts([:binary, {:encoding, :unicode}, {:echo, false}])
     size = detect_size()
+    key_release = Keyword.get(opts, :key_release, false)
 
     IO.write([
       ANSI.enter_alt_screen(),
       ANSI.clear_screen(),
       ANSI.cursor_to(1, 1),
       ANSI.hide_cursor(),
-      ANSI.enable_mouse()
+      ANSI.enable_mouse(),
+      keyboard_protocol_on(key_release),
+      cell_size_query(Keyword.get(opts, :cell_size, false))
     ])
 
     driver_pid = self()
@@ -85,6 +93,8 @@ defmodule Drafter.Transport.SSHDriver do
          size: size,
          raw_mode: true,
          mouse_enabled: true,
+         key_release: key_release,
+         buffer: InputBuffer.new(key_release: key_release),
          probing: true
      }}
   end
@@ -101,14 +111,20 @@ defmodule Drafter.Transport.SSHDriver do
 
   def handle_call(:cleanup, _from, state) do
     if state.raw_mode do
-      Driver.write_synchronously([
+      IO.write([
+        keyboard_protocol_off(state.key_release),
         ANSI.disable_mouse(),
         ANSI.show_cursor(),
         ANSI.exit_alt_screen()
       ])
     end
 
-    {:reply, :ok, %{state | raw_mode: false, mouse_enabled: false}}
+    {:reply, :ok, %{state | raw_mode: false, mouse_enabled: false, key_release: false}}
+  end
+
+  def handle_call({:driver_write, data}, _from, state) do
+    if state.raw_mode, do: IO.write(data)
+    {:reply, :ok, state}
   end
 
   def handle_call(:get_size, _from, state) do
@@ -120,16 +136,6 @@ defmodule Drafter.Transport.SSHDriver do
   end
 
   @impl GenServer
-  def handle_cast({:write, data}, state) do
-    if state.raw_mode, do: IO.write(data)
-    {:noreply, state}
-  end
-
-  def handle_cast({:driver_write, data}, state) do
-    if state.raw_mode, do: IO.write(data)
-    {:noreply, state}
-  end
-
   def handle_cast({:set_event_manager, em_pid}, state) do
     {:noreply, %{state | event_manager: em_pid}}
   end
@@ -149,6 +155,11 @@ defmodule Drafter.Transport.SSHDriver do
     {events, buffer} = InputBuffer.feed(state.buffer, data)
     emit_events(state.event_manager, events)
     {:noreply, %{state | buffer: buffer}}
+  end
+
+  def handle_info(:stdin_closed, %{session: session} = state) do
+    if is_pid(session), do: send(session, :shutdown)
+    {:noreply, %{state | session: nil}}
   end
 
   def handle_info(:probe_deadline, %__MODULE__{probing: true} = state) do
@@ -180,6 +191,15 @@ defmodule Drafter.Transport.SSHDriver do
     Enum.each(events, &GenServer.cast(event_manager, {:event, &1}))
   end
 
+  defp keyboard_protocol_on(true), do: [KittyKeyboard.push(), KittyKeyboard.query()]
+  defp keyboard_protocol_on(false), do: []
+
+  defp cell_size_query(true), do: [Reports.cell_size_query()]
+  defp cell_size_query(false), do: []
+
+  defp keyboard_protocol_off(true), do: [KittyKeyboard.pop()]
+  defp keyboard_protocol_off(false), do: []
+
   defp finish_probe(state) do
     {protocol, leftover} = Probe.resolve(state.probe_replies)
     Enum.each(state.probe_waiters, &GenServer.reply(&1, {:ok, protocol}))
@@ -207,90 +227,14 @@ defmodule Drafter.Transport.SSHDriver do
   defp stdin_reader(driver_pid) do
     case IO.binread(:stdio, 1) do
       :eof ->
-        :ok
+        send(driver_pid, :stdin_closed)
 
       {:error, _} ->
-        send(driver_pid, {:stdin, "\x03"})
-        stdin_reader(driver_pid)
-
-      "\e" ->
-        read_escape_sequence(driver_pid, "\e")
+        send(driver_pid, :stdin_closed)
 
       data when is_binary(data) ->
         send(driver_pid, {:stdin, data})
         stdin_reader(driver_pid)
-    end
-  end
-
-  defp read_escape_sequence(driver_pid, buffer) do
-    receive do
-      :escape_timeout ->
-        send(driver_pid, {:stdin, buffer})
-        stdin_reader(driver_pid)
-    after
-      0 ->
-        case IO.binread(:stdio, 1) do
-          :eof ->
-            send(driver_pid, {:stdin, buffer})
-
-          {:error, _} ->
-            send(driver_pid, {:stdin, buffer})
-            stdin_reader(driver_pid)
-
-          "[" ->
-            read_csi_sequence(driver_pid, buffer <> "[")
-
-          char when is_binary(char) ->
-            send(driver_pid, {:stdin, buffer <> char})
-            stdin_reader(driver_pid)
-        end
-    end
-  end
-
-  defp read_csi_sequence(driver_pid, buffer) do
-    case IO.binread(:stdio, 1) do
-      :eof ->
-        send(driver_pid, {:stdin, buffer})
-
-      {:error, _} ->
-        send(driver_pid, {:stdin, buffer})
-        stdin_reader(driver_pid)
-
-      char when is_binary(char) ->
-        new_buf = buffer <> char
-
-        cond do
-          String.match?(char, ~r/[a-zA-Z~]/) ->
-            send(driver_pid, {:stdin, new_buf})
-            stdin_reader(driver_pid)
-
-          char == "<" ->
-            read_sgr_mouse_sequence(driver_pid, new_buf)
-
-          true ->
-            read_csi_sequence(driver_pid, new_buf)
-        end
-    end
-  end
-
-  defp read_sgr_mouse_sequence(driver_pid, buffer) do
-    case IO.binread(:stdio, 1) do
-      :eof ->
-        send(driver_pid, {:stdin, buffer})
-
-      {:error, _} ->
-        send(driver_pid, {:stdin, buffer})
-        stdin_reader(driver_pid)
-
-      char when is_binary(char) ->
-        new_buf = buffer <> char
-
-        if char in ["M", "m"] do
-          send(driver_pid, {:stdin, new_buf})
-          stdin_reader(driver_pid)
-        else
-          read_sgr_mouse_sequence(driver_pid, new_buf)
-        end
     end
   end
 

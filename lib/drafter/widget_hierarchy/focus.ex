@@ -15,10 +15,19 @@ defmodule Drafter.WidgetHierarchy.Focus do
     focus_widget(hierarchy, widget_id, :down)
   end
 
+  @doc """
+  Give `widget_id` the focus, blurring whatever had it. A widget not drawn yet is
+  focused as soon as a render puts it on screen.
+  """
   @spec focus_widget(WidgetHierarchy.t(), WidgetHierarchy.widget_id(), :up | :down) ::
           WidgetHierarchy.t()
+  def focus_widget(hierarchy, widget_id, _direction)
+      when not is_map_key(hierarchy.widgets, widget_id) do
+    %{hierarchy | pending_focus: widget_id, focus_cleared: false}
+  end
+
   def focus_widget(hierarchy, widget_id, direction) do
-    if Map.has_key?(hierarchy.widgets, widget_id) and hierarchy.focused_widget != widget_id do
+    if hierarchy.focused_widget != widget_id do
       updated_hierarchy =
         if hierarchy.focused_widget do
           {h, _} = EventRouter.handle_widget_event(hierarchy, hierarchy.focused_widget, {:blur})
@@ -32,11 +41,27 @@ defmodule Drafter.WidgetHierarchy.Focus do
 
       final_hierarchy = scroll_widget_into_view(final_hierarchy, widget_id, direction)
 
-      %{final_hierarchy | focused_widget: widget_id}
+      %{final_hierarchy | focused_widget: widget_id, focus_cleared: false, pending_focus: nil}
     else
       hierarchy
     end
   end
+
+  @doc """
+  Take focus away from `widget_id` if it has it, sending it a blur, and keep renders from
+  focusing the first focusable widget until something is focused again — whether or not
+  `widget_id` is focused, or drawn yet.
+  """
+  @spec blur_widget(WidgetHierarchy.t(), WidgetHierarchy.widget_id()) :: WidgetHierarchy.t()
+  def blur_widget(%{focused_widget: widget_id} = hierarchy, widget_id) do
+    {blurred, _} = EventRouter.handle_widget_event(hierarchy, widget_id, {:blur})
+    %{blurred | focused_widget: nil, focus_cleared: true}
+  end
+
+  def blur_widget(%{pending_focus: widget_id} = hierarchy, widget_id),
+    do: %{hierarchy | focus_cleared: true, pending_focus: nil}
+
+  def blur_widget(hierarchy, _widget_id), do: %{hierarchy | focus_cleared: true}
 
   @doc """
   Scroll a widget's container so the widget is visible.
@@ -239,15 +264,14 @@ defmodule Drafter.WidgetHierarchy.Focus do
   @doc """
   Move focus in `direction`, falling back to dispatching the event.
 
-  With nothing focused, focuses the first focusable widget. With something focused
-  but no widget in that direction, the event is dispatched to the focused widget
-  instead.
+  With nothing focused the event is left to the app. With something focused but no
+  widget in that direction, the event is dispatched to the focused widget instead.
   """
   @spec arrow_navigate_with_focus(hierarchy(), term(), arrow(), [widget_id()]) :: result()
   def arrow_navigate_with_focus(hierarchy, event, direction, focusable_widgets) do
     case hierarchy.focused_widget do
       nil ->
-        {focus_widget(hierarchy, hd(focusable_widgets), :down), []}
+        {hierarchy, []}
 
       focused_id ->
         case navigate_by_arrow(hierarchy, focused_id, focusable_widgets, direction) do

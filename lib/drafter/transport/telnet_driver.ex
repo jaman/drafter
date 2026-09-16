@@ -3,7 +3,7 @@ defmodule Drafter.Transport.TelnetDriver do
 
   use GenServer
 
-  alias Drafter.Terminal.{ANSI, InputBuffer, Probe}
+  alias Drafter.Terminal.{ANSI, InputBuffer, KittyKeyboard, Probe, Reports}
 
   @iac 255
   @telnet_do 253
@@ -29,6 +29,7 @@ defmodule Drafter.Transport.TelnetDriver do
     :size,
     :session,
     raw_mode: false,
+    key_release: false,
     input_buffer: "",
     terminal_env: %{},
     env_waiters: []
@@ -39,14 +40,15 @@ defmodule Drafter.Transport.TelnetDriver do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @spec setup(pid(), pid()) :: :ok
-  def setup(server, event_manager), do: GenServer.call(server, {:setup, event_manager})
+  @spec setup(pid(), pid(), keyword()) :: :ok
+  def setup(server, event_manager, opts \\ []),
+    do: GenServer.call(server, {:setup, event_manager, opts})
 
   @spec cleanup(pid()) :: :ok
   def cleanup(server), do: GenServer.call(server, :cleanup)
 
   @spec write(pid(), iodata()) :: :ok
-  def write(server, data), do: GenServer.cast(server, {:write, data})
+  def write(server, data), do: GenServer.call(server, {:driver_write, data}, :infinity)
 
   @spec get_size(pid()) :: {pos_integer(), pos_integer()}
   def get_size(server), do: GenServer.call(server, :get_size)
@@ -84,17 +86,21 @@ defmodule Drafter.Transport.TelnetDriver do
   end
 
   @impl GenServer
-  def handle_call({:setup, event_manager}, _from, state) do
+  def handle_call({:setup, event_manager, opts}, _from, state) do
     negotiate_telnet_options(state.socket)
+    key_release = Keyword.get(opts, :key_release, false)
 
     send_raw(state.socket, [
       ANSI.enter_alt_screen(),
       ANSI.hide_cursor(),
       ANSI.clear_screen(),
-      ANSI.enable_mouse()
+      ANSI.enable_mouse(),
+      keyboard_protocol_on(key_release),
+      cell_size_query(Keyword.get(opts, :cell_size, false))
     ])
 
-    {:reply, :ok, %{state | event_manager: event_manager, raw_mode: true}}
+    {:reply, :ok,
+     %{state | event_manager: event_manager, raw_mode: true, key_release: key_release}}
   end
 
   def handle_call({:probe, timeout}, _from, state) do
@@ -106,8 +112,9 @@ defmodule Drafter.Transport.TelnetDriver do
     {protocol, leftover} = Probe.run(write, read, timeout: timeout)
 
     :inet.setopts(state.socket, [{:active, true}])
+    send(self(), {:tcp, state.socket, leftover})
 
-    {:reply, {:ok, protocol}, %{state | input_buffer: state.input_buffer <> leftover}}
+    {:reply, {:ok, protocol}, state}
   end
 
   def handle_call({:terminal_env, _timeout}, _from, %__MODULE__{terminal_env: env} = state)
@@ -123,11 +130,22 @@ defmodule Drafter.Transport.TelnetDriver do
   def handle_call(:cleanup, _from, state) do
     if state.raw_mode do
       :inet.setopts(state.socket, [{:linger, {true, 2}}])
-      send_raw(state.socket, [ANSI.disable_mouse(), ANSI.show_cursor(), ANSI.exit_alt_screen()])
+
+      send_raw(state.socket, [
+        keyboard_protocol_off(state.key_release),
+        ANSI.disable_mouse(),
+        ANSI.show_cursor(),
+        ANSI.exit_alt_screen()
+      ])
     end
 
     :gen_tcp.close(state.socket)
-    {:reply, :ok, %{state | raw_mode: false}}
+    {:reply, :ok, %{state | raw_mode: false, key_release: false}}
+  end
+
+  def handle_call({:driver_write, data}, _from, state) do
+    if state.raw_mode, do: send_raw(state.socket, data)
+    {:reply, :ok, state}
   end
 
   def handle_call(:get_size, _from, state) do
@@ -139,16 +157,6 @@ defmodule Drafter.Transport.TelnetDriver do
   end
 
   @impl GenServer
-  def handle_cast({:write, data}, state) do
-    if state.raw_mode, do: send_raw(state.socket, data)
-    {:noreply, state}
-  end
-
-  def handle_cast({:driver_write, data}, state) do
-    if state.raw_mode, do: send_raw(state.socket, data)
-    {:noreply, state}
-  end
-
   def handle_cast({:set_event_manager, em_pid}, state) do
     {:noreply, %{state | event_manager: em_pid}}
   end
@@ -156,7 +164,7 @@ defmodule Drafter.Transport.TelnetDriver do
   @impl GenServer
   def handle_info({:tcp, _socket, data}, state) do
     {events, new_size, new_buffer, signals} =
-      parse_telnet_data(data, state.input_buffer, state.size)
+      parse_telnet_data(data, state.input_buffer, state.size, state.key_release)
 
     schedule_input_flush(new_buffer)
     state = Enum.reduce(signals, state, &apply_signal/2)
@@ -174,7 +182,7 @@ defmodule Drafter.Transport.TelnetDriver do
   end
 
   def handle_info(:input_flush, state) do
-    {events, remaining} = ANSI.flush_sequence(state.input_buffer)
+    {events, remaining} = ANSI.flush_sequence(state.input_buffer, key_release: state.key_release)
 
     if state.event_manager do
       Enum.each(events, &GenServer.cast(state.event_manager, {:event, &1}))
@@ -222,6 +230,15 @@ defmodule Drafter.Transport.TelnetDriver do
 
   defp end_session(state), do: state
 
+  defp keyboard_protocol_on(true), do: [KittyKeyboard.push(), KittyKeyboard.query()]
+  defp keyboard_protocol_on(false), do: []
+
+  defp cell_size_query(true), do: [Reports.cell_size_query()]
+  defp cell_size_query(false), do: []
+
+  defp keyboard_protocol_off(true), do: [KittyKeyboard.pop()]
+  defp keyboard_protocol_off(false), do: []
+
   defp send_raw(socket, data) do
     :gen_tcp.send(socket, IO.iodata_to_binary(data))
   end
@@ -233,10 +250,10 @@ defmodule Drafter.Transport.TelnetDriver do
     :ok
   end
 
-  defp parse_telnet_data(data, buffer, current_size) do
+  defp parse_telnet_data(data, buffer, current_size, key_release) do
     combined = buffer <> data
     {clean_data, new_size, signals} = strip_iac(combined, current_size, [])
-    {events, remaining} = ANSI.parse_sequence(clean_data)
+    {events, remaining} = ANSI.parse_sequence(clean_data, key_release: key_release)
     {events, new_size, remaining, Enum.reverse(signals)}
   end
 

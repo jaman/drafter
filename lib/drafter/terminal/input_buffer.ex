@@ -25,18 +25,23 @@ defmodule Drafter.Terminal.InputBuffer do
 
   @flush_after_ms 40
 
-  @type t :: %__MODULE__{pending: binary(), timer: reference() | nil}
+  @type t :: %__MODULE__{pending: binary(), timer: reference() | nil, key_release: boolean()}
 
-  defstruct pending: "", timer: nil
+  defstruct pending: "", timer: nil, key_release: false
 
   @doc """
   An empty buffer, holding no bytes and with no flush scheduled.
 
       iex> Drafter.Terminal.InputBuffer.new()
-      %Drafter.Terminal.InputBuffer{pending: "", timer: nil}
+      %Drafter.Terminal.InputBuffer{pending: "", timer: nil, key_release: false}
+
+  ## Options
+
+    * `:key_release` - `boolean()`, passed to every parse as
+      `Drafter.Terminal.ANSI.parse_sequence/2` describes. Default `false`.
   """
-  @spec new() :: t()
-  def new, do: %__MODULE__{}
+  @spec new(keyword()) :: t()
+  def new(opts \\ []), do: %__MODULE__{key_release: Keyword.get(opts, :key_release, false)}
 
   @doc """
   Milliseconds of silence after which a held sequence is resolved.
@@ -62,7 +67,9 @@ defmodule Drafter.Terminal.InputBuffer do
   """
   @spec feed(t(), binary()) :: {[ANSI.event()], t()}
   def feed(%__MODULE__{} = buffer, data) do
-    {events, pending} = ANSI.parse_sequence(buffer.pending <> data)
+    {events, pending} =
+      ANSI.parse_sequence(buffer.pending <> data, key_release: buffer.key_release)
+
     {events, reschedule(%{buffer | pending: pending})}
   end
 
@@ -85,7 +92,7 @@ defmodule Drafter.Terminal.InputBuffer do
   def flush(%__MODULE__{pending: ""} = buffer), do: {[], cancel(buffer)}
 
   def flush(%__MODULE__{} = buffer) do
-    {events, pending} = ANSI.flush_sequence(buffer.pending)
+    {events, pending} = ANSI.flush_sequence(buffer.pending, key_release: buffer.key_release)
     {events, %{cancel(buffer) | pending: pending}}
   end
 

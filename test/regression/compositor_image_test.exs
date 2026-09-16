@@ -82,7 +82,8 @@ defmodule Drafter.Regression.CompositorImageTest do
     assert poll(cap, &String.contains?(&1, "FRESH_SEVEN"))
   end
 
-  test "redraws an unchanged image with its place sequence when text crosses it", %{cap: cap} do
+  test "text on an image's row is written around the image, the cells it covers left alone, and the image is not sent again",
+       %{cap: cap} do
     Compositor.put_image(:field, "FULL_IMAGE", "DEL", %{
       dx: 0,
       dy: 0,
@@ -92,17 +93,26 @@ defmodule Drafter.Regression.CompositorImageTest do
       place: "PLACE_ONLY"
     })
 
-    Compositor.place_image(:field, 0, 4)
+    Compositor.place_image(:field, 3, 4)
     assert poll(cap, &String.contains?(&1, "FULL_IMAGE"))
 
     Cap.clear(cap)
-    Compositor.render_strips([Strip.from_text("text over the image")], 0, 4)
-
-    assert poll(cap, &String.contains?(&1, "PLACE_ONLY"))
-    refute String.contains?(settled(cap), "FULL_IMAGE")
+    Compositor.render_strips([Strip.from_text("abcdefghijklmnop")], 0, 4)
+    assert poll(cap, &String.contains?(&1, "jklmnop"))
+    out = settled(cap)
+    assert String.contains?(out, "abc")
+    refute String.contains?(out, "defghi"), "the cells under the image were written"
+    assert String.contains?(out, "\e[5;10H"), "the text after the image resumes at its column"
+    refute String.contains?(out, "PLACE_ONLY")
+    refute String.contains?(out, "FULL_IMAGE")
   end
 
-  test "sends the whole image again when there is no place sequence", %{cap: cap} do
+  test "an image not yet on screen does not hold text back, and is painted after it", %{cap: cap} do
+    Compositor.render_strips([Strip.from_text("abcdefghijklmnop")], 0, 4)
+    assert poll(cap, &String.contains?(&1, "abcdefghijklmnop"))
+
+    Cap.clear(cap)
+
     Compositor.put_image(:sixel, "PIXEL_BYTES", "", %{
       dx: 0,
       dy: 0,
@@ -112,13 +122,15 @@ defmodule Drafter.Regression.CompositorImageTest do
       place: nil
     })
 
-    Compositor.place_image(:sixel, 0, 4)
+    Compositor.place_image(:sixel, 3, 4)
     assert poll(cap, &String.contains?(&1, "PIXEL_BYTES"))
 
     Cap.clear(cap)
-    Compositor.render_strips([Strip.from_text("text over the image")], 0, 4)
-
-    assert poll(cap, &String.contains?(&1, "PIXEL_BYTES"))
+    Compositor.render_strips([Strip.from_text("ABCDEFGHIJKLMNOP")], 0, 4)
+    out = settled(cap)
+    assert String.contains?(out, "ABC") and String.contains?(out, "JKLMNOP")
+    refute String.contains?(out, "DEFGHI")
+    refute String.contains?(out, "PIXEL_BYTES")
   end
 
   test "clear_image resets the stamp so a lower-or-equal stamp paints again", %{cap: cap} do
@@ -133,5 +145,63 @@ defmodule Drafter.Regression.CompositorImageTest do
     Compositor.place_image(:reapp, 2, 4)
     Compositor.put_image(:reapp, "REBORN_ONE", "DEL", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 1})
     assert poll(cap, &String.contains?(&1, "REBORN_ONE"))
+  end
+
+  defmodule SlowCap do
+    def start, do: Agent.start_link(fn -> [] end)
+
+    def write(pid, data) do
+      binary = IO.iodata_to_binary(data)
+      if String.contains?(binary, "IMG"), do: Process.sleep(60)
+      Agent.update(pid, &[binary | &1])
+    end
+
+    def get_size(_pid), do: {80, 24}
+    def dump(pid), do: pid |> Agent.get(& &1) |> Enum.reverse() |> Enum.join()
+    def writes(pid), do: pid |> Agent.get(& &1) |> Enum.reverse()
+  end
+
+  test "an image frame is written after the text, outside the synchronized update, in its own write",
+       %{cap: cap} do
+    Compositor.put_image(:chart, "PAINTBYTES", "DELETESEQ", %{dx: 0, dy: 0, cols: 6, rows: 2})
+    Compositor.place_image(:chart, 3, 5)
+    assert poll(cap, &String.contains?(&1, "PAINTBYTES"))
+
+    out = Cap.dump(cap)
+    [before_image, _] = String.split(out, "PAINTBYTES", parts: 2)
+    assert String.contains?(before_image, "\e[?2026l")
+
+    assert length(String.split(before_image, "\e[?2026h")) ==
+             length(String.split(before_image, "\e[?2026l"))
+  end
+
+  test "text keeps flowing while a slow terminal digests images, and only the newest image is written" do
+    {:ok, em} = Event.Manager.start_link(name: nil)
+    {:ok, slow} = SlowCap.start()
+
+    {:ok, comp} =
+      Compositor.start_link(name: nil, terminal_driver: {SlowCap, slow}, event_manager: em)
+
+    Process.put(:drafter_compositor, comp)
+
+    Compositor.put_image(:chart, "IMG1", "", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 1})
+    Compositor.place_image(:chart, 3, 5)
+    Process.sleep(20)
+
+    for n <- 2..6 do
+      Compositor.put_image(:chart, "IMG#{n}", "", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: n})
+      Compositor.render_strips([Strip.from_text("row#{n}")], 0, 20)
+      Process.sleep(5)
+    end
+
+    Process.sleep(400)
+    writes = SlowCap.writes(slow)
+    text_writes = Enum.filter(writes, &String.contains?(&1, "row"))
+    image_writes = Enum.filter(writes, &String.contains?(&1, "IMG"))
+
+    assert Enum.any?(text_writes, &String.contains?(&1, "row6"))
+    assert List.last(image_writes) =~ "IMG6"
+    assert length(image_writes) < 6
+    assert Enum.all?(image_writes, &(not String.contains?(&1, "row")))
   end
 end

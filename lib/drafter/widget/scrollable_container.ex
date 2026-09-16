@@ -50,8 +50,9 @@ defmodule Drafter.Widget.ScrollableContainer do
       only consulted together with the internal `:scroll_locked` flag, which
       nothing sets, so it has no effect on rendering. Clicking the track above or
       below the thumb always pages the viewport. Mount-only.
-    * `:focusable` - `t:boolean/0`. Default `true`. Held on the state and never
-      read; the container is always focusable through its `:focusable` trait.
+    * `:focusable` - `t:boolean/0`. Default `true`. `false` keeps the container out
+      of Tab order, arrow navigation and the first-focus a render gives, so its keys
+      reach the app; the wheel still scrolls it
       Mount-only.
     * `:child_widget_ids` - list of widget IDs whose scroll events bubble through
       this container. Default `[]`. Live-updatable.

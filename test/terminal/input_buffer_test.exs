@@ -76,4 +76,22 @@ defmodule Drafter.Terminal.InputBufferTest do
     {events, _buffer} = feed_all(["x", "\e[200~pa", "ste\e[201~", "y"])
     assert events == [{:key, :x}, {:bracketed_paste, "paste"}, {:key, :y}]
   end
+
+  test "a buffer opened with key release on adds key_down to legacy presses" do
+    {events, buffer} = InputBuffer.feed(InputBuffer.new(key_release: true), "\e[A")
+    assert events == [{:key, :up}, {:key_down, :up, []}]
+    assert buffer.key_release
+  end
+
+  test "and flushes with it too" do
+    {[], buffer} = InputBuffer.feed(InputBuffer.new(key_release: true), "\e")
+    {events, _buffer} = InputBuffer.flush(buffer)
+    assert events == [{:key, :escape}, {:key_down, :escape, []}]
+  end
+
+  test "a buffer opened without it leaves legacy presses alone" do
+    {events, buffer} = InputBuffer.feed(InputBuffer.new(), "\e[A")
+    assert events == [{:key, :up}]
+    refute buffer.key_release
+  end
 end

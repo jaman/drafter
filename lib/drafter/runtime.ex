@@ -53,6 +53,9 @@ defmodule Drafter.Runtime do
   @doc "Handle an out-of-band process message delivered to the loop."
   @callback on_message(app(), term(), state()) :: state()
 
+  @doc "Release what the app holds, once, as it stops for any reason, with its last state."
+  @callback unmount(app(), state()) :: :ok
+
   @doc "Hook invoked while scrolling is active (for scroll-driven state)."
   @callback scroll_active(app(), state()) :: state()
 

@@ -1,7 +1,8 @@
 Mix.install(
   [
     {:drafter, path: "."},
-    {:french_curve, github: "jaman/french_curve"},
+#    {:french_curve, github: "jaman/french_curve", force: true},
+#    {:french_curve, path: "../french_curve"},
     {:elixir_make, "~> 0.9"},
     {:spark, "~> 2.6"}
   ], consolidate_protocols: false)

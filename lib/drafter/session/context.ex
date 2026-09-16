@@ -20,6 +20,8 @@ defmodule Drafter.Session.Context do
 
   @env_key :drafter_terminal_env
   @protocol_key :drafter_terminal_protocol
+  @key_release_key :drafter_key_release
+  @cell_size_key :drafter_cell_size
 
   @roles %{
     event_manager: {:drafter_event_manager, Drafter.Event.Manager},
@@ -45,7 +47,12 @@ defmodule Drafter.Session.Context do
   @doc "The process-dictionary keys a session context occupies."
   @spec keys() :: [atom()]
   def keys do
-    [@env_key, @protocol_key | Enum.map(@roles, fn {_role, {key, _fallback}} -> key end)]
+    [
+      @env_key,
+      @protocol_key,
+      @key_release_key,
+      @cell_size_key | Enum.map(@roles, fn {_role, {key, _fallback}} -> key end)
+    ]
   end
 
   @doc """
@@ -71,6 +78,43 @@ defmodule Drafter.Session.Context do
   """
   @spec terminal_protocol() :: {:ok, atom() | nil} | :unprobed
   def terminal_protocol, do: Process.get(@protocol_key, :unprobed)
+
+  @doc """
+  Record whether the terminal will report key releases.
+
+  The app loop calls this when `{:key_release_support, supported?}` arrives, before
+  handing the event to the app.
+  """
+  @spec put_key_release(boolean()) :: :ok
+  def put_key_release(supported?) do
+    Process.put(@key_release_key, supported?)
+    :ok
+  end
+
+  @doc """
+  Whether this session's terminal reports key releases.
+
+  `true` only after the terminal has answered the query a `key_release: true` app
+  sends at startup; `false` before that, for an app that did not opt in, and for a
+  terminal that never answers.
+  """
+  @spec key_release?() :: boolean()
+  def key_release?, do: Process.get(@key_release_key, false)
+
+  @doc "Record the terminal's cell size in pixels, from its `{:cell_size, size}` report."
+  @spec put_cell_size({pos_integer(), pos_integer()}) :: :ok
+  def put_cell_size({width, height}) do
+    Process.put(@cell_size_key, {width, height})
+    :ok
+  end
+
+  @doc """
+  The terminal's cell size as `{width, height}` in pixels, or `nil` when it has not
+  answered — because the app did not ask with `cell_size: true`, or the terminal does
+  not report it.
+  """
+  @spec cell_size() :: {pos_integer(), pos_integer()} | nil
+  def cell_size, do: Process.get(@cell_size_key)
 
   @doc """
   Record the environment of the terminal this session is attached to.

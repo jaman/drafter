@@ -65,4 +65,38 @@ defmodule Drafter.Regression.WidgetServerImageStampTest do
     assert_receive {:put_image_stamp, second}, 500
     assert second > first
   end
+
+  defmodule PriorityWidget do
+    @moduledoc false
+    use Drafter.Widget
+    defstruct [:test_pid]
+
+    def mount(props), do: %__MODULE__{test_pid: props.test_pid}
+    def render(_state, _rect), do: [Drafter.Draw.Strip.from_text("p")]
+
+    def image(state, rect, _id) do
+      send(state.test_pid, {:image_task_priority, Process.info(self(), :priority)})
+      {"FRAME", "", %{dx: 0, dy: 0, cols: rect.width, rows: rect.height}}
+    end
+  end
+
+  test "image_priority sets the priority the image task runs at" do
+    {:ok, comp} = RecordingCompositor.start_link(self())
+    Process.put(:drafter_compositor, comp)
+    Drafter.WidgetStripCache.create()
+    Drafter.WidgetStripCache.mark_visible(:priority_widget, true)
+
+    {:ok, _server} =
+      WidgetServer.start_link(
+        module: PriorityWidget,
+        id: :priority_widget,
+        props: %{test_pid: self()},
+        rect: %{x: 0, y: 0, width: 6, height: 2},
+        image_throttle: {1, :ms},
+        image_priority: :normal,
+        session_ctx: %{drafter_compositor: comp}
+      )
+
+    assert_receive {:image_task_priority, {:priority, :normal}}, 500
+  end
 end

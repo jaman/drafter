@@ -464,7 +464,13 @@ defmodule Drafter.Widget.TextInput do
   end
 
   defp handle_focused_event({:key, key}, state) when is_atom(key) do
-    try_insert_char(state, Atom.to_string(key))
+    char = Atom.to_string(key)
+
+    if Validation.printable_char?(char) do
+      try_insert_char(state, char)
+    else
+      {:bubble, state}
+    end
   end
 
   defp handle_focused_event({:mouse, %{type: :mouse_up, x: x}}, state),

@@ -54,6 +54,24 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
+  @doc """
+  Rebuild the widget hierarchy for `app_module`'s current state without painting.
+
+  Mounts, updates and hides widgets exactly as `render_app/4` would, so events that
+  arrive before the next painted frame are routed against the tree the state
+  describes. Returns the hierarchy to reuse, or `existing_hierarchy` while screens are
+  pushed on the screen manager or the app's `render/1` returned something other than a
+  component tree.
+  """
+  @spec rebuild_hierarchy(module(), term(), rect(), map() | nil) :: map() | nil
+  def rebuild_hierarchy(app_module, app_state, screen_rect, existing_hierarchy) do
+    if ScreenManager.get_all_screens() == [] do
+      rebuild_app_hierarchy(app_module, app_state, screen_rect, existing_hierarchy)
+    else
+      existing_hierarchy
+    end
+  end
+
   defp rebuild_app_hierarchy(app_module, app_state, screen_rect, existing_hierarchy) do
     current_theme = ThemeManager.get_current_theme()
 

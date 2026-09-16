@@ -34,17 +34,41 @@ defmodule Drafter.Terminal.TermiosNif do
   Load the native library, leaving the Elixir fallbacks in place if it is missing.
 
   Runs on module load. Always returns `:ok`, so a missing library never stops the
-  module from loading.
+  module from loading. A failure is recorded for `load_error/0` to report.
   """
   @spec load_nif() :: :ok
   def load_nif do
     nif_path = :filename.join(:code.priv_dir(:drafter), ~c"termios_nif")
 
     case :erlang.load_nif(nif_path, 0) do
-      :ok -> :ok
-      {:error, _reason} -> :ok
+      :ok ->
+        :persistent_term.erase(load_error_key())
+        :ok
+
+      {:error, reason} ->
+        :persistent_term.put(load_error_key(), describe(reason, nif_path))
+        :ok
     end
   end
+
+  @doc """
+  Why the native library is not in use, or `nil` when it loaded.
+
+  The functions with an Elixir fallback answer `:nif_not_loaded` when the library
+  is absent, and the ones without it raise the same. Neither says why; this does,
+  carrying the path that was tried and the reason the runtime gave for refusing it.
+  """
+  @spec load_error() :: binary() | nil
+  def load_error, do: :persistent_term.get(load_error_key(), nil)
+
+  @doc """
+  The `:persistent_term` key `load_error/0` reads.
+
+  Exposed so a test can stand in a load failure on a machine where the library
+  loads.
+  """
+  @spec load_error_key() :: {module(), :load_error}
+  def load_error_key, do: {__MODULE__, :load_error}
 
   @doc """
   Clear `IXON`/`IXOFF` on the controlling terminal, so `Ctrl+S` and `Ctrl+Q` reach
@@ -188,4 +212,9 @@ defmodule Drafter.Terminal.TermiosNif do
   """
   @spec killpg(pos_integer(), non_neg_integer()) :: :ok | {:error, binary()}
   def killpg(_pid, _signal), do: :erlang.nif_error(:nif_not_loaded)
+
+  defp describe({_tag, message}, path) when is_list(message),
+    do: "#{path}: #{List.to_string(message)}"
+
+  defp describe(reason, path), do: "#{path}: #{inspect(reason)}"
 end
