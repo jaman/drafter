@@ -1,6 +1,6 @@
 defmodule Drafter.Accounts.RegisterApp do
   @moduledoc """
-  The form a new player fills in to create an account.
+  The form a new user fills in to create an account.
 
   Asks for a username, a password and its confirmation, creates the account in
   the `Drafter.Accounts` server given in `props.accounts`, and stops. The outcome

@@ -42,7 +42,8 @@ ssh -p 2222 alice@localhost
 | `:system_dir` | auto-generated | Path to directory containing SSH host keys |
 | `:mount_props` | `%{}` | Map merged into `props` passed to `mount/1` for every session |
 | `:tunnel` | `false` | `true` accepts `ssh -R` reverse forwards from clients |
-| `:register_as` | `"new"` | With `auth: {:accounts, server}`, the username that opens the registration form |
+| `:register_as` | `nil` | With `auth: {:accounts, server}`, a username that opens the registration form; none by default |
+| `:register_app` | `{Drafter.Accounts.RegisterApp, %{}}` | The app the registration form runs, with props merged over `accounts:` and `notify:` |
 
 ### SSH host keys
 
@@ -78,7 +79,7 @@ For a server where people create their own accounts, start a `Drafter.Accounts` 
 and hand it to the daemon:
 
 ```elixir
-{:ok, accounts} = Drafter.Accounts.start_link(path: "/var/lib/game/accounts.bin")
+{:ok, accounts} = Drafter.Accounts.start_link(path: "/var/lib/myapp/accounts.terms")
 
 {:ok, _pid} = Drafter.Server.start_ssh(MyApp,
   port: 2222,
@@ -87,7 +88,7 @@ and hand it to the daemon:
 )
 ```
 
-A player who has no account connects as the registration user with any password:
+Someone with no account connects as the registration user with any password:
 
 ```bash
 ssh -p 2222 new@host
@@ -108,22 +109,22 @@ An app declared with `use Drafter.App, key_release: true` asks each client's ter
 for the kitty keyboard protocol. Where the terminal supports it (kitty, Ghostty,
 WezTerm, foot, Alacritty, iTerm2 3.5+), every key press is followed by
 `{:key_down, key, modifiers}` and every release arrives as `{:key_up, key, modifiers}`,
-which is what a game that steers by held keys needs. `{:key_release_support, true}`
+which is what an app that reacts to held keys needs. `{:key_release_support, true}`
 is delivered once the terminal confirms, and `Drafter.Session.Context.key_release?/0`
 answers the same question later. The `{:key, ...}` events are unchanged either way.
 
-### Sound through a reverse tunnel
+### Reverse tunnels
 
 With `tunnel: true`, a client can forward a port on the server back to its own
 machine:
 
 ```bash
-ssh -p 2222 -R 24713:localhost:4713 alice@host
+ssh -p 2222 -R <server port>:localhost:<client port> alice@host
 ```
 
-Anything the server connects to on `127.0.0.1:24713` reaches the client's
-`localhost:4713`. Keep the port the client chose in its account props so the app knows
-where to send.
+Anything the server connects to on `127.0.0.1:<server port>` reaches the client's
+`localhost:<client port>`. Which port a session forwarded is the app's to know — an
+account prop is one place to keep it.
 
 ### Shared chat example
 

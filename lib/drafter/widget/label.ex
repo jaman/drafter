@@ -184,19 +184,18 @@ defmodule Drafter.Widget.Label do
   """
   @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
-  def update(props, state) do
-    Enum.reduce(props, state, fn {key, value}, acc ->
-      case key do
-        :text -> with({text, runs} <- text_and_runs(value), do: %{acc | text: text, runs: runs})
-        :style -> %{acc | style: value}
-        :align -> %{acc | align: value}
-        :variant -> %{acc | variant: value}
-        :classes -> %{acc | classes: value}
-        :app_module -> %{acc | app_module: value}
-        _ -> acc
-      end
-    end)
+  def update(props, state), do: Enum.reduce(props, state, &apply_prop/2)
+
+  defp apply_prop({:text, value}, state) do
+    {text, runs} = text_and_runs(value)
+    %{state | text: text, runs: runs}
   end
+
+  defp apply_prop({key, value}, state)
+       when key in [:style, :align, :variant, :classes, :app_module],
+       do: Map.put(state, key, value)
+
+  defp apply_prop(_prop, state), do: state
 
   @doc """
   Always `1`, whatever the text contains — a multi-line label still reserves a

@@ -9,6 +9,7 @@ defmodule Drafter.Transport.SlowLinkTest do
 
   alias Drafter.Compositor
   alias Drafter.Draw.Strip
+  alias Drafter.Event.Manager
   alias Drafter.Transport.{SSHDriver, TelnetDriver}
 
   defmodule SlowDriver do
@@ -39,7 +40,7 @@ defmodule Drafter.Transport.SlowLinkTest do
     {:ok, driver} = SlowDriver.start_link(40)
     unique = System.unique_integer([:positive])
     manager = :"events_#{unique}"
-    start_supervised!({Drafter.Event.Manager, name: manager}, id: manager)
+    start_supervised!({Manager, name: manager}, id: manager)
 
     {:ok, compositor} =
       Compositor.start_link(
@@ -126,7 +127,7 @@ defmodule Drafter.Transport.SlowLinkTest do
   test "the ssh driver's write returns only once the channel took the bytes" do
     channel = SlowChannel.start(60)
     {:ok, driver} = SSHDriver.start_link(group_leader: channel)
-    {:ok, manager} = Drafter.Event.Manager.start_link(name: nil)
+    {:ok, manager} = Manager.start_link(name: nil)
     :ok = SSHDriver.setup(driver, manager)
 
     {elapsed, :ok} = :timer.tc(fn -> SSHDriver.write(driver, "frame") end)
@@ -143,7 +144,7 @@ defmodule Drafter.Transport.SlowLinkTest do
 
     {:ok, driver} = TelnetDriver.start_link(socket: server, session: self())
     :ok = :gen_tcp.controlling_process(server, driver)
-    {:ok, manager} = Drafter.Event.Manager.start_link(name: nil)
+    {:ok, manager} = Manager.start_link(name: nil)
     :ok = TelnetDriver.setup(driver, manager)
 
     assert :ok == TelnetDriver.write(driver, "frame")

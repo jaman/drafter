@@ -17,6 +17,17 @@ defmodule Drafter.AccountsTest do
     {:ok, accounts: accounts, path: path}
   end
 
+  defp fastest_authenticate(accounts, username, password) do
+    1..3
+    |> Enum.map(fn _ ->
+      {elapsed, :error} =
+        :timer.tc(fn -> Accounts.authenticate(accounts, username, password) end)
+
+      elapsed
+    end)
+    |> Enum.min()
+  end
+
   describe "register/4" do
     test "creates an account that then authenticates", %{accounts: accounts} do
       assert :ok = Accounts.register(accounts, "alice", "correct horse")
@@ -26,9 +37,9 @@ defmodule Drafter.AccountsTest do
     end
 
     test "keeps the props given", %{accounts: accounts} do
-      assert :ok = Accounts.register(accounts, "alice", "correct horse", %{pulse_port: 24_713})
+      assert :ok = Accounts.register(accounts, "alice", "correct horse", %{seat: 7})
 
-      assert {:ok, %{props: %{pulse_port: 24_713}}} =
+      assert {:ok, %{props: %{seat: 7}}} =
                Accounts.authenticate(accounts, "alice", "correct horse")
     end
 
@@ -61,16 +72,14 @@ defmodule Drafter.AccountsTest do
       assert :error = Accounts.authenticate(accounts, "nobody", "correct horse")
     end
 
-    test "takes as long for an unknown user as for a wrong password", %{accounts: accounts} do
+    test "takes as long for an unknown user as for a wrong password", %{path: path} do
+      {:ok, accounts} = Accounts.start_link(path: path <> ".timing", iterations: 50_000)
       :ok = Accounts.register(accounts, "alice", "correct horse")
 
-      {known, :error} =
-        :timer.tc(fn -> Accounts.authenticate(accounts, "alice", "wrong horse") end)
+      known = fastest_authenticate(accounts, "alice", "wrong horse")
+      unknown = fastest_authenticate(accounts, "nobody", "wrong horse")
 
-      {unknown, :error} =
-        :timer.tc(fn -> Accounts.authenticate(accounts, "nobody", "wrong horse") end)
-
-      assert unknown > known / 3
+      assert unknown > known / 2
     end
 
     test "is case-insensitive on the name and returns the registered spelling",
@@ -101,10 +110,10 @@ defmodule Drafter.AccountsTest do
 
   describe "props" do
     test "put_props/3 merges into the account", %{accounts: accounts} do
-      :ok = Accounts.register(accounts, "alice", "correct horse", %{pulse_port: 1})
+      :ok = Accounts.register(accounts, "alice", "correct horse", %{seat: 1})
       assert :ok = Accounts.put_props(accounts, "alice", %{team: :red})
 
-      assert {:ok, %{props: %{pulse_port: 1, team: :red}}} =
+      assert {:ok, %{props: %{seat: 1, team: :red}}} =
                Accounts.authenticate(accounts, "alice", "correct horse")
 
       assert {:error, :unknown} = Accounts.put_props(accounts, "nobody", %{})
@@ -118,19 +127,19 @@ defmodule Drafter.AccountsTest do
         Accounts.start_link(
           path: path <> ".defaults",
           iterations: 1_000,
-          default_props: fn n -> %{sound_port: 24_713 + n, colour: :blue} end
+          default_props: fn n -> %{seat: 100 + n, colour: :blue} end
         )
 
       :ok = Accounts.register(accounts, "first", "first password")
       :ok = Accounts.register(accounts, "second", "second password", %{colour: :red})
 
-      assert {:ok, %{props: %{sound_port: 24_713, colour: :blue}}} =
+      assert {:ok, %{props: %{seat: 100, colour: :blue}}} =
                Accounts.fetch(accounts, "first")
 
-      assert {:ok, %{props: %{sound_port: 24_714, colour: :red}}} =
+      assert {:ok, %{props: %{seat: 101, colour: :red}}} =
                Accounts.fetch(accounts, "second")
 
-      assert {:ok, %{props: %{sound_port: 24_714, colour: :red}}} =
+      assert {:ok, %{props: %{seat: 101, colour: :red}}} =
                Accounts.authenticate(accounts, "second", "second password")
     end
 
@@ -155,13 +164,13 @@ defmodule Drafter.AccountsTest do
         Accounts.start_link(
           path: file,
           iterations: 1_000,
-          default_props: fn n -> %{sound_port: 24_713 + n} end
+          default_props: fn n -> %{seat: 100 + n} end
         )
 
-      assert {:ok, %{props: %{sound_port: 24_713}}} = Accounts.fetch(again, "amy")
-      assert {:ok, %{props: %{sound_port: 24_714}}} = Accounts.fetch(again, "zed")
+      assert {:ok, %{props: %{seat: 100}}} = Accounts.fetch(again, "amy")
+      assert {:ok, %{props: %{seat: 101}}} = Accounts.fetch(again, "zed")
       :ok = Accounts.register(again, "new", "news password")
-      assert {:ok, %{props: %{sound_port: 24_715}}} = Accounts.fetch(again, "new")
+      assert {:ok, %{props: %{seat: 102}}} = Accounts.fetch(again, "new")
     end
   end
 
@@ -208,12 +217,12 @@ defmodule Drafter.AccountsTest do
 
   describe "persistence" do
     test "accounts survive a restart", %{accounts: accounts, path: path} do
-      :ok = Accounts.register(accounts, "alice", "correct horse", %{pulse_port: 5})
+      :ok = Accounts.register(accounts, "alice", "correct horse", %{seat: 5})
       GenServer.stop(accounts)
 
       {:ok, reopened} = Accounts.start_link(path: path, iterations: 1_000)
 
-      assert {:ok, %{props: %{pulse_port: 5}}} =
+      assert {:ok, %{props: %{seat: 5}}} =
                Accounts.authenticate(reopened, "alice", "correct horse")
     end
 

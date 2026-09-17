@@ -3,7 +3,7 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
-## [Unreleased]
+## [0.4.0]
 
 ### Added
 
@@ -18,7 +18,7 @@ Versions marked with ★ were published to Hex.pm.
 - **`Drafter.terminal_opts/1`** — the `:mouse_hover`, `:key_release` and `:cell_size` settings an app module declares, as transports read them.
 - **The accounts file is text** — one Erlang term per account, read by `:file.consult/1`; a binary file from before is read and rewritten as text.
 - **`start_ssh`'s `:ip` says exactly what to bind** — an address, `{0, 0, 0, 0}` for every IPv4 interface, `{0, 0, 0, 0, 0, 0, 0, 0}` for every IPv6 one, `:any` for both families, or a list of these bound by one daemon each on the same port (`{:ok, [pid]}`; `Drafter.Server.stop_ssh/1` stops either shape). A host reachable over IPv6 whose daemon was IPv4-only refused clients that resolved it to the IPv6 address.
-- **`Drafter.Accounts` numbers its accounts and takes `default_props:`** — a function from an account's number (0, 1, 2, … in registration order; a file from before numbering is numbered in name order when loaded) to props every account has unless its own say otherwise, so a server can hand each account something of its own, such as a port.
+- **`Drafter.Accounts` numbers its accounts and takes `default_props:`** — a function from an account's number (0, 1, 2, … in registration order; a file from before numbering is numbered in name order when loaded) to props every account has unless its own say otherwise, so a server can hand each account something of its own.
 - **`label/2` takes runs** — a list of `{text, style}` pieces drawn side by side on one line as one widget, each in its own style over the label's; a line of many colours no longer needs a `horizontal` of many labels.
 
 ### Changed
@@ -34,10 +34,11 @@ Versions marked with ★ were published to Hex.pm.
 - **`unmount/1` is called** — once, with the app's last state, on every way an app stops: `{:stop, reason}` from a callback, the global quit key, the runtime's `:shutdown`, and a linked process exiting. It was documented and never called.
 - **An arrow key with nothing focused reaches the app.** It used to focus the first focusable widget — a chat log or an input the app never asked to focus — and vanish. `Drafter.blur/1` now keeps focus away even when the widget it names is not focused or not drawn yet, and `Drafter.focus/1` on a widget not drawn yet takes effect once it appears. `scrollable/2`'s `focusable: false` is honoured, as its docs said.
 - **A refused password is a denial, not an "Internal error".** With `auth: {:accounts, _}`, a wrong password or an unknown user crashed the daemon's password check on its first refusal (the failure count started as `:undefined`), so the client was disconnected with `Internal error` instead of `Permission denied, please try again`; only a correct password on the first try ever got in.
-- **An SSH session ends when its input does** — a dropped connection reaches the app as `:shutdown`, as a dropped telnet connection already did, so the app's `unmount/1` runs and nothing it started (sound, world connections) outlives the session.
+- **An SSH session ends when its input does** — a dropped connection reaches the app as `:shutdown`, as a dropped telnet connection already did, so the app's `unmount/1` runs and nothing it started (processes, connections) outlives the session.
 
 - **Bound values are current for the next event.** A `bind:` update is applied before the following event is handled, so an app-level handler reading bound state after a burst of keystrokes sees all of them.
 - **A focused text input no longer swallows keys it cannot type.** `:escape`, function keys and other named keys bubble to the app instead of being dropped.
+- **`Drafter.Test.sync/1` waits at every hop.** It returns once the headless driver has forwarded every injected event and the frame the app drew for it is on the driver — `send_key/3` and the other input helpers with it — so a second key can no longer overtake the blur or focus change the first one asked for, and `HeadlessDriver.get_render_count/0` right after an input counts that input's frame. `Drafter.Test.HeadlessDriver.sync/0` and `Drafter.Compositor.sync/1` are the new hops.
 - **A lone Escape over SSH is delivered** after the input buffer's flush interval rather than waiting for the next byte.
 - **SSH session cleanup writes to the session's channel**, not the server's `/dev/tty`, so mouse tracking and the keyboard protocol are turned off in the client's terminal.
 - **The local driver writes every control sequence straight to `/dev/tty`.** Setup, mouse toggles, terminal queries and app writes no longer go through the BEAM stdio server, where they waited behind the stdin reader's blocking read until the terminal happened to send a byte; the graphics probe's queries therefore reach the terminal before the probe's deadline in every terminal, not only in those that answer something else first.

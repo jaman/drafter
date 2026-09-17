@@ -110,25 +110,30 @@ defmodule Drafter.ComponentRenderer do
     restore_focus(hierarchy, previous_focus, hidden_ids)
   end
 
+  defp restore_focus(%{pending_focus: pending} = hierarchy, _previous_focus, _hidden_ids)
+       when is_map_key(hierarchy.widgets, pending) do
+    WidgetHierarchy.focus_widget(hierarchy, pending)
+  end
+
+  defp restore_focus(hierarchy, nil, _hidden_ids), do: focus_when_unfocused(hierarchy)
+
   defp restore_focus(hierarchy, previous_focus, hidden_ids) do
     cond do
-      hierarchy.pending_focus && Map.has_key?(hierarchy.widgets, hierarchy.pending_focus) ->
-        WidgetHierarchy.focus_widget(hierarchy, hierarchy.pending_focus)
-
-      previous_focus && Map.has_key?(hierarchy.widgets, previous_focus) &&
-          not MapSet.member?(hidden_ids, previous_focus) ->
-        %{hierarchy | focused_widget: previous_focus}
-
-      previous_focus && MapSet.member?(hidden_ids, previous_focus) ->
+      MapSet.member?(hidden_ids, previous_focus) ->
         focus_first_or_clear(hierarchy)
 
-      hierarchy.focused_widget == nil and not hierarchy.focus_cleared ->
-        focus_first_or_nil(hierarchy)
+      Map.has_key?(hierarchy.widgets, previous_focus) ->
+        %{hierarchy | focused_widget: previous_focus}
 
       true ->
-        hierarchy
+        focus_when_unfocused(hierarchy)
     end
   end
+
+  defp focus_when_unfocused(%{focused_widget: nil, focus_cleared: false} = hierarchy),
+    do: focus_first_or_nil(hierarchy)
+
+  defp focus_when_unfocused(hierarchy), do: hierarchy
 
   defp focus_first_or_clear(hierarchy) do
     case find_first_focusable_widget(hierarchy) do

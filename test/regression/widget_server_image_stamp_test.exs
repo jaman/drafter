@@ -72,7 +72,7 @@ defmodule Drafter.Regression.WidgetServerImageStampTest do
     defstruct [:test_pid]
 
     def mount(props), do: %__MODULE__{test_pid: props.test_pid}
-    def render(_state, _rect), do: [Drafter.Draw.Strip.from_text("p")]
+    def render(_state, _rect), do: [Strip.from_text("p")]
 
     def image(state, rect, _id) do
       send(state.test_pid, {:image_task_priority, Process.info(self(), :priority)})

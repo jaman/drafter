@@ -67,6 +67,11 @@ defmodule Drafter.Server do
     * `:tunnel` - `boolean()`, default `false`. `true` accepts `ssh -R` from
       clients: the daemon listens on the port the client names and forwards each
       connection to it back over the ssh connection.
+    * `:register_as` - with `auth: {:accounts, server}`, a username that, with any
+      password, opens the registration form instead of a session; the account it
+      makes logs in from then on. Default `nil`: nobody registers over ssh.
+    * `:register_app` - `{module, props}`, the app that form is. Default
+      `{Drafter.Accounts.RegisterApp, %{}}`.
 
   """
   @spec start_ssh(module(), keyword()) :: {:ok, pid() | [pid()]} | {:error, term()}

@@ -33,10 +33,17 @@ defmodule Drafter.Transport.SSHAccountsTest do
 
     File.mkdir_p!(dir)
     {:ok, accounts} = Accounts.start_link(path: Path.join(dir, "accounts.bin"), iterations: 1_000)
-    :ok = Accounts.register(accounts, "bob", "bobs password", %{pulse_port: 24_800})
+    :ok = Accounts.register(accounts, "bob", "bobs password", %{seat: 24})
 
     port = 39_000 + :rand.uniform(900)
-    {:ok, daemon} = Drafter.Server.start_ssh(Whoami, port: port, auth: {:accounts, accounts})
+
+    {:ok, daemon} =
+      Drafter.Server.start_ssh(Whoami,
+        port: port,
+        auth: {:accounts, accounts},
+        register_as: "new"
+      )
+
     Process.sleep(500)
 
     on_exit(fn ->

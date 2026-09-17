@@ -33,8 +33,11 @@ defmodule Drafter.Transport.SSH do
       triples whose `props` map is merged into that user's mount props,
       `{:accounts, server}` to check passwords against a `Drafter.Accounts`
       server, or `:anonymous` to accept anything. Default: `[{"admin", "admin"}]`.
-    * `:register_as` - with `{:accounts, server}`, the username that opens the
-      registration form instead of an account; `nil` disables it. Default `"new"`.
+    * `:register_as` - with `{:accounts, server}`, a username that opens the
+      registration form instead of an account. Default `nil`: no registration.
+    * `:register_app` - `{module, props}`, the app the registration form runs
+      (`props` merged over `accounts:` and `notify:`). Default
+      `{Drafter.Accounts.RegisterApp, %{}}`.
     * `:tunnel` - `boolean()`, default `false`. `true` lets a client ask the daemon
       to listen on a port and forward its connections back to the client, which is
       `ssh -R`.
@@ -57,7 +60,13 @@ defmodule Drafter.Transport.SSH do
     auth = Keyword.get(opts, :auth, [{"admin", "admin"}])
     user_props = user_props(auth)
     tunnel = Keyword.get(opts, :tunnel, false)
-    registration = registration(auth, Keyword.get(opts, :register_as, "new"))
+
+    registration =
+      registration(
+        auth,
+        Keyword.get(opts, :register_as),
+        Keyword.get(opts, :register_app, {RegisterApp, %{}})
+      )
 
     if mode == :shared do
       Session.SharedState.get_or_start(app_module)
@@ -143,8 +152,9 @@ defmodule Drafter.Transport.SSH do
 
   defp account_props(%{register_as: register_as} = registration, username, session_ctx)
        when username == register_as do
-    props = %{accounts: registration.accounts, notify: self()}
-    Drafter.run_session(RegisterApp, session_ctx, mode: :isolated, props: props)
+    {app, extra} = registration.register_app
+    props = Map.merge(%{accounts: registration.accounts, notify: self()}, extra)
+    Drafter.run_session(app, session_ctx, mode: :isolated, props: props)
 
     receive do
       {:drafter_registration, {:ok, account}} -> {:ok, account}
@@ -217,10 +227,10 @@ defmodule Drafter.Transport.SSH do
 
   defp resolve_system_dir(dir), do: dir
 
-  defp registration({:accounts, accounts}, register_as),
-    do: %{accounts: accounts, register_as: register_as}
+  defp registration({:accounts, accounts}, register_as, register_app),
+    do: %{accounts: accounts, register_as: register_as, register_app: register_app}
 
-  defp registration(_auth, _register_as), do: nil
+  defp registration(_auth, _register_as, _register_app), do: nil
 
   defp auth_opts({:accounts, accounts}, registration) do
     [

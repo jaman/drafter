@@ -605,21 +605,32 @@ defmodule Drafter.Test do
   end
 
   @doc """
-  Returns once every event injected before this call has been handled by the app.
+  Returns once every event injected before this call has been handled by the app
+  and every frame the app drew for it is on the headless driver.
 
   An injected event passes from the headless driver to the event manager to the
-  app loop. This makes a synchronous round trip to each of those in that order, so
-  by the time it returns the event has been forwarded at every hop and processed
-  by the loop.
+  app loop, and the frame it produces passes from the loop to the compositor to
+  the driver. This makes a synchronous round trip to each of those in that order,
+  so by the time it returns the event has been processed by the loop and the
+  driver's buffer and render count include its frame. A frame the app itself is
+  still holding back under `frame_pacing: :always` is not waited for.
 
   Call this between injecting an event and asserting on state or screen contents.
   """
   @spec sync(map()) :: :ok
   def sync(ctx) do
-    HeadlessDriver.get_render_count()
+    sync_driver()
     sync_event_manager(ctx)
     sync_app(ctx)
+    sync_compositor(ctx)
+    HeadlessDriver.get_render_count()
     :ok
+  end
+
+  defp sync_driver do
+    HeadlessDriver.sync()
+  catch
+    :exit, _ -> :ok
   end
 
   defp sync_event_manager(ctx) do
@@ -649,6 +660,15 @@ defmodule Drafter.Test do
   end
 
   defp sync_app(_ctx), do: :ok
+
+  defp sync_compositor(%{session_pids: %{drafter_compositor: compositor}})
+       when is_pid(compositor) do
+    Drafter.Compositor.sync(compositor)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp sync_compositor(_ctx), do: :ok
 
   defp ask(%{app_pid: pid}, message) when is_pid(pid) do
     send(pid, message)

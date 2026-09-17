@@ -39,6 +39,7 @@ defmodule Drafter.Compositor do
   use GenServer
 
   alias Drafter.Draw.Strip
+  alias Drafter.Render.Writer
 
   @behind_poll_ms 4
   alias Drafter.{Event, Terminal}
@@ -291,6 +292,17 @@ defmodule Drafter.Compositor do
     GenServer.call(pid, :get_buffer)
   end
 
+  @doc """
+  Returns once everything handed to the compositor before this call is on the
+  terminal: a frame still waiting for its `:render_frame` is written now, and the
+  writer has passed every byte to the driver. Takes an explicit pid, like
+  `get_buffer/1`. Synchronous.
+  """
+  @spec sync(pid()) :: :ok
+  def sync(pid) do
+    GenServer.call(pid, :sync, :infinity)
+  end
+
   @impl GenServer
   def init(opts) do
     Drafter.Trace.ensure_started()
@@ -303,7 +315,7 @@ defmodule Drafter.Compositor do
 
     empty_buffer = create_empty_buffer(width, height)
 
-    {:ok, writer} = Drafter.Render.Writer.start_link(sink_for(terminal_driver))
+    {:ok, writer} = Writer.start_link(sink_for(terminal_driver))
 
     state = %__MODULE__{
       terminal_driver: terminal_driver,
@@ -325,6 +337,13 @@ defmodule Drafter.Compositor do
 
   def handle_call(:get_buffer, _from, state) do
     {:reply, state.screen_buffer, state}
+  end
+
+  def handle_call(:sync, _from, state) do
+    Writer.flush(state.writer)
+    new_state = if frame_pending?(state), do: write_frame(state), else: state
+    Writer.flush(new_state.writer)
+    {:reply, :ok, new_state}
   end
 
   @impl GenServer
@@ -420,7 +439,7 @@ defmodule Drafter.Compositor do
   end
 
   def handle_cast({:write_raw, data}, state) do
-    Drafter.Render.Writer.write(state.writer, data)
+    Writer.write(state.writer, data)
     {:noreply, state}
   end
 
@@ -471,26 +490,15 @@ defmodule Drafter.Compositor do
 
   def handle_info(:render_frame, state) do
     cond do
-      Enum.empty?(state.dirty_regions) and state.pending_image_clears == [] and
-          not images_pending?(state) ->
+      not frame_pending?(state) ->
         {:noreply, %{state | rendering: false}}
 
-      Drafter.Render.Writer.behind?(state.writer) ->
+      Writer.behind?(state.writer) ->
         Process.send_after(self(), :render_frame, @behind_poll_ms)
         {:noreply, state}
 
       true ->
-        {new_rendered, new_painted} = render_to_terminal(state)
-
-        {:noreply,
-         %{
-           state
-           | rendered_buffer: new_rendered,
-             painted_images: new_painted,
-             dirty_regions: [],
-             pending_image_clears: [],
-             rendering: false
-         }}
+        {:noreply, write_frame(state)}
     end
   end
 
@@ -500,7 +508,7 @@ defmodule Drafter.Compositor do
 
   @impl GenServer
   def terminate(_reason, %__MODULE__{writer: writer}) do
-    Drafter.Render.Writer.flush(writer)
+    Writer.flush(writer)
     :ok
   end
 
@@ -582,6 +590,23 @@ defmodule Drafter.Compositor do
     end
   end
 
+  defp frame_pending?(state) do
+    state.dirty_regions != [] or state.pending_image_clears != [] or images_pending?(state)
+  end
+
+  defp write_frame(state) do
+    {new_rendered, new_painted} = render_to_terminal(state)
+
+    %{
+      state
+      | rendered_buffer: new_rendered,
+        painted_images: new_painted,
+        dirty_regions: [],
+        pending_image_clears: [],
+        rendering: false
+    }
+  end
+
   defp schedule_render(state) do
     if state.rendering do
       {:noreply, state}
@@ -607,11 +632,11 @@ defmodule Drafter.Compositor do
 
     if output != [] do
       trace_frame(text_rows, image_rows)
-      Drafter.Render.Writer.write(state.writer, output)
+      Writer.write(state.writer, output)
     end
 
     if image_block != [] do
-      Drafter.Render.Writer.write_image(state.writer, [
+      Writer.write_image(state.writer, [
         image_block,
         Terminal.ANSI.cursor_to(1, 1),
         Terminal.ANSI.hide_cursor()

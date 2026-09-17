@@ -75,6 +75,12 @@ defmodule Drafter.Test.HeadlessDriver do
     GenServer.cast(__MODULE__, {:inject_event, event})
   end
 
+  @doc "Returns once every event injected before this call has been handed to the event manager."
+  @spec sync() :: :ok
+  def sync do
+    GenServer.call(__MODULE__, :sync)
+  end
+
   @doc "Everything written since the last `clear_buffer/0`, in write order."
   @spec get_buffer() :: [iodata()]
   def get_buffer do
@@ -134,6 +140,10 @@ defmodule Drafter.Test.HeadlessDriver do
 
   def handle_call(:get_size, _from, state) do
     {:reply, state.size, state}
+  end
+
+  def handle_call(:sync, _from, state) do
+    {:reply, :ok, state}
   end
 
   def handle_call(:get_buffer, _from, state) do

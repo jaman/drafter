@@ -7,7 +7,7 @@ defmodule Drafter.Accounts do
   and are returned in the spelling they were registered with. Each account carries
   a `props` map the application owns.
 
-      {:ok, accounts} = Drafter.Accounts.start_link(path: "/var/lib/game/accounts.terms")
+      {:ok, accounts} = Drafter.Accounts.start_link(path: "/var/lib/myapp/accounts.terms")
       :ok = Drafter.Accounts.register(accounts, "alice", "correct horse")
       {:ok, %{username: "alice", props: %{}}} = Drafter.Accounts.authenticate(accounts, "alice", "correct horse")
 
@@ -24,8 +24,9 @@ defmodule Drafter.Accounts do
     * the file is text: one Erlang term per account, in registration order, that
       `:file.consult/1` reads — `%{username: "alice", number: 0, props: %{…}, hash:
       <<…>>, salt: <<…>>, iterations: 300000}` — so it can be read and searched as it
-      is; a file written as `:erlang.term_to_binary/1` by an earlier version is read and
-      written back as text
+      is. It is UTF-8: a binary that is printable text is written as one, any other as
+      its bytes. A file written as `:erlang.term_to_binary/1` by an earlier version is
+      read and written back as text, as is one an earlier version wrote as Latin-1
   """
 
   use GenServer
@@ -275,9 +276,29 @@ defmodule Drafter.Accounts do
 
   defp load(path) do
     case :file.consult(path) do
-      {:ok, records} -> Map.new(records, fn record -> {key_of(record.username), record} end)
+      {:ok, records} -> keyed(records)
       {:error, :enoent} -> %{}
+      {:error, {_line, :file_io_server, :invalid_unicode}} -> keyed(consult_latin1(path))
       {:error, _not_terms} -> path |> File.read!() |> :erlang.binary_to_term()
+    end
+  end
+
+  defp keyed(records), do: Map.new(records, fn record -> {key_of(record.username), record} end)
+
+  defp consult_latin1(path) do
+    {:ok, device} = :file.open(path, [:read, {:encoding, :latin1}])
+
+    try do
+      read_terms(device, [])
+    after
+      :file.close(device)
+    end
+  end
+
+  defp read_terms(device, acc) do
+    case :io.read(device, ~c"") do
+      {:ok, term} -> read_terms(device, [term | acc])
+      :eof -> Enum.reverse(acc)
     end
   end
 
@@ -293,6 +314,38 @@ defmodule Drafter.Accounts do
     accounts
     |> Map.values()
     |> Enum.sort_by(& &1.number)
-    |> Enum.map(fn record -> :io_lib.format("~p.~n", [record]) end)
+    |> Enum.map(fn record -> [term(record), ".\n"] end)
   end
+
+  defp term(binary) when is_binary(binary) do
+    cond do
+      binary == "" ->
+        "<<>>"
+
+      not (String.valid?(binary) and String.printable?(binary)) ->
+        ["<<", Enum.join(:binary.bin_to_list(binary), ","), ">>"]
+
+      binary == :unicode.characters_to_binary(binary, :utf8, :latin1) ->
+        :io_lib.format("<<~p>>", [String.to_charlist(binary)])
+
+      true ->
+        :io_lib.format("<<~tp/utf8>>", [String.to_charlist(binary)])
+    end
+  end
+
+  defp term(map) when is_map(map),
+    do: [
+      "\#{",
+      map
+      |> Enum.sort()
+      |> Enum.map_join(",", fn {key, value} -> [term(key), " => ", term(value)] end),
+      "}"
+    ]
+
+  defp term(list) when is_list(list), do: ["[", Enum.map_join(list, ",", &term/1), "]"]
+
+  defp term(tuple) when is_tuple(tuple),
+    do: ["{", tuple |> Tuple.to_list() |> Enum.map_join(",", &term/1), "}"]
+
+  defp term(leaf), do: :io_lib.format("~tp", [leaf])
 end

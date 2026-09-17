@@ -51,6 +51,8 @@ defmodule Drafter.Runtime.BlurBeforeMountTest do
     def render(%{screen: :lobby} = state),
       do: vertical([label("keys=#{inspect(state.keys)}"), text_input(id: :chat, bind: :chat)])
 
+    def render(%{screen: :talk}), do: vertical([label("say"), text_input(id: :talk, bind: :talk)])
+
     def handle_event({:key, :enter}, %{screen: :title} = state) do
       Drafter.blur(:chat)
       {:ok, %{state | screen: :lobby}}
@@ -63,7 +65,6 @@ defmodule Drafter.Runtime.BlurBeforeMountTest do
 
     def handle_event({:key, key}, state), do: {:ok, %{state | keys: state.keys ++ [key]}}
     def handle_event(_event, state), do: {:noreply, state}
-    def render(%{screen: :talk}), do: vertical([label("say"), text_input(id: :talk, bind: :talk)])
   end
 
   test "a focus asked for before the widget is drawn lands on it once it appears, blur or no blur" do

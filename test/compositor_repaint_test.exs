@@ -51,6 +51,27 @@ defmodule Drafter.CompositorRepaintTest do
 
   defp painted?(text), do: Enum.any?(CountingDriver.writes(), &String.contains?(&1, text))
 
+  describe "sync/1" do
+    test "returns once strips handed over before it are written to the driver" do
+      pid = Process.get(:drafter_compositor)
+
+      for n <- 1..5 do
+        paint(pid, "frame #{n}")
+        assert :ok == Compositor.sync(pid)
+        assert painted?("frame #{n}"), "frame #{n} not written when sync returned"
+      end
+
+      assert length(CountingDriver.writes()) == 5
+    end
+
+    test "with nothing pending returns without writing" do
+      pid = Process.get(:drafter_compositor)
+
+      assert :ok == Compositor.sync(pid)
+      assert CountingDriver.writes() == []
+    end
+  end
+
   describe "sustained repaint" do
     test "a single paint reaches the terminal" do
       pid = Process.get(:drafter_compositor)

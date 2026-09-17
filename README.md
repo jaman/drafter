@@ -32,7 +32,7 @@ Add `drafter` to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:drafter, "~> 0.3"}
+    {:drafter, "~> 0.4"}
   ]
 end
 ```
