@@ -14,9 +14,11 @@ defmodule Drafter.Draw.Segment do
 
   """
 
+  @type color :: {0..255, 0..255, 0..255}
+
   @type style :: %{
-          optional(:fg) => {0..255, 0..255, 0..255},
-          optional(:bg) => {0..255, 0..255, 0..255},
+          optional(:fg) => color(),
+          optional(:bg) => color(),
           optional(:fg_alpha) => float(),
           optional(:bg_alpha) => float(),
           optional(:bold) => boolean(),
