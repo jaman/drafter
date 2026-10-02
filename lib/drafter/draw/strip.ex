@@ -81,6 +81,33 @@ defmodule Drafter.Draw.Strip do
   end
 
   @doc """
+  A strip from one row of `FrenchCurve.Backend.Cells` cells, `{glyph, fg, bg}` tuples
+  with `{r, g, b}` colours.
+
+  Neighbouring cells in the same two colours become one segment, so a row of
+  block characters costs the terminal one colour change per run rather than one
+  per cell.
+
+  ## Examples
+
+      iex> strip = Drafter.Draw.Strip.from_cells([{"▀", {1, 2, 3}, {4, 5, 6}}, {"▄", {1, 2, 3}, {4, 5, 6}}, {" ", {9, 9, 9}, {9, 9, 9}}])
+      iex> Enum.map(strip.segments, & &1.text)
+      ["▀▄", " "]
+      iex> strip.width
+      3
+
+  """
+  @spec from_cells([{String.t(), Segment.color(), Segment.color()}]) :: t()
+  def from_cells(cells) do
+    cells
+    |> Enum.chunk_by(fn {_glyph, fg, bg} -> {fg, bg} end)
+    |> Enum.map(fn [{_glyph, fg, bg} | _] = run ->
+      Segment.new(Enum.map_join(run, &elem(&1, 0)), %{fg: fg, bg: bg})
+    end)
+    |> new()
+  end
+
+  @doc """
   Cut the strip down to `crop_width` display columns.
 
   A strip already that narrow is returned unchanged, and a `crop_width` of zero or

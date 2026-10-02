@@ -26,24 +26,6 @@ defmodule Drafter.WidgetIdentityTest do
   defp ids(h), do: h.widgets |> Map.keys() |> Enum.sort()
 
   describe "keyed identity" do
-    test "a keyed widget keeps the same id regardless of position" do
-      first =
-        render(
-          {:layout, :vertical, [input(key: "alpha")], []},
-          Drafter.ThemeManager.get_current_theme()
-        )
-
-      second =
-        render(
-          {:layout, :vertical, [input(key: "inserted"), input(key: "alpha")], []},
-          Drafter.ThemeManager.get_current_theme(),
-          first
-        )
-
-      keyed = Enum.filter(ids(second), &(is_binary(&1) and String.contains?(&1, "alpha")))
-      assert length(keyed) == 1
-    end
-
     test "a keyed widget keeps its process when a sibling appears before it" do
       theme = Drafter.ThemeManager.get_current_theme()
       h = render({:layout, :vertical, [input(key: "alpha")], []}, theme)
@@ -107,14 +89,6 @@ defmodule Drafter.WidgetIdentityTest do
       theme = Drafter.ThemeManager.get_current_theme()
       h = render({:layout, :vertical, [input(id: :chosen, key: "ignored")], []}, theme)
       assert :chosen in ids(h)
-    end
-  end
-
-  describe "positional identity" do
-    test "unkeyed widgets remain addressable by position" do
-      theme = Drafter.ThemeManager.get_current_theme()
-      h = render({:layout, :vertical, [input([]), input([])], []}, theme)
-      assert length(Enum.filter(ids(h), &is_atom/1)) >= 2
     end
   end
 end

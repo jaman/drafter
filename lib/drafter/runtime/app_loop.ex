@@ -126,9 +126,32 @@ defmodule Drafter.Runtime.AppLoop do
     Process.put(:pending_intervals, [])
     ready_app_state = runtime.ready(app_module, app_state)
     initial_timers = collect_pending_intervals()
+    hierarchy = settle_focus(hierarchy)
     {_, hierarchy} = Renderer.render_app(app_module, ready_app_state, screen_rect, hierarchy)
 
     app_event_loop(app_module, ready_app_state, screen_rect, initial_timers, hierarchy, [])
+  end
+
+  @doc """
+  Apply the focus and blur the app has asked for so far to `hierarchy`, in the order
+  asked, before anything else the process has been sent is looked at.
+
+  For the render after `on_ready/1`: what `Drafter.focus/1` and `Drafter.blur/1` asked
+  for there takes effect in that render, whatever input arrived meanwhile.
+  """
+  @spec settle_focus(map() | nil) :: map() | nil
+  def settle_focus(nil), do: nil
+
+  def settle_focus(hierarchy) do
+    receive do
+      {:focus_widget, widget_id} ->
+        settle_focus(Drafter.WidgetHierarchy.focus_widget(hierarchy, widget_id))
+
+      {:blur_widget, widget_id} ->
+        settle_focus(Drafter.WidgetHierarchy.blur_widget(hierarchy, widget_id))
+    after
+      0 -> hierarchy
+    end
   end
 
   defp app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack) do
@@ -550,6 +573,7 @@ defmodule Drafter.Runtime.AppLoop do
     ready_state = Runtime.for_app(new_module).ready(new_module, new_state)
     initial_timers = collect_pending_intervals()
     drain_stale_events()
+    new_wh = settle_focus(new_wh)
     {_, new_wh} = Renderer.render_app(new_module, ready_state, rect, new_wh)
     current = {app_module, app_state, wh, timers, from_pid, ref, prev_handlers}
     app_event_loop(new_module, ready_state, rect, initial_timers, new_wh, [current | ss])

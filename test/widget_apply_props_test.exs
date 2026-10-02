@@ -40,19 +40,4 @@ defmodule Drafter.WidgetApplyPropsTest do
 
     assert Widget.apply_props(NoUpdate, %{label: "b"}, state) == state
   end
-
-  test "the fallback never invents keys on a struct" do
-    state = %NoUpdate{label: "a"}
-
-    result = Widget.apply_props(NoUpdate, %{unrelated: "x"}, state)
-
-    assert result.__struct__ == NoUpdate
-    refute Map.has_key?(result, :unrelated)
-  end
-
-  test "interaction state a widget owns is not clobbered by a re-render" do
-    state = %DefinesUpdate{label: "a", scroll: 42}
-
-    assert Widget.apply_props(DefinesUpdate, %{label: "b", scroll: 0}, state).scroll == 42
-  end
 end

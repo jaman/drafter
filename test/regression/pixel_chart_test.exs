@@ -131,12 +131,19 @@ defmodule Drafter.Regression.PixelChartTest do
     end
   end
 
-  @real_kitty %{"TERM" => "xterm-kitty", "TERM_PROGRAM" => nil, "TERM_PROGRAM_VERSION" => nil}
+  @real_kitty %{
+    "TERM" => "xterm-kitty",
+    "TERM_PROGRAM" => nil,
+    "TERM_PROGRAM_VERSION" => nil,
+    "LC_TERMINAL" => nil,
+    "LC_TERMINAL_VERSION" => nil
+  }
   @iterm %{
     "TERM" => "xterm-256color",
     "KITTY_WINDOW_ID" => nil,
     "TERM_PROGRAM" => "iTerm.app",
-    "TERM_PROGRAM_VERSION" => "3.5.0"
+    "TERM_PROGRAM_VERSION" => "3.5.0",
+    "FRENCH_CURVE_ITERM2" => nil
   }
 
   test "on a terminal that keeps images, kitty is a transmit+place keyed by id" do
@@ -154,16 +161,27 @@ defmodule Drafter.Regression.PixelChartTest do
     end)
   end
 
-  test "on iTerm, which keeps none, it is one transmit-and-display instead" do
-    with_env(@iterm, fn ->
-      assert Pixel.protocol(:auto) == :iterm2
+  test "on iTerm forced to kitty, which keeps none, a frame is one transmit-and-display" do
+    with_env(Map.put(@iterm, "FRENCH_CURVE_ITERM2", "kitty"), fn ->
+      assert Pixel.protocol(:auto) == :kitty
 
       assert {paint, clear} = Pixel.image(line_spec(), Pixel.protocol(:auto), {24, 10}, :w_iterm)
       paint = IO.iodata_to_binary(paint)
 
-      assert paint =~ "\e]1337;File=inline=1", "sent and shown together"
+      assert paint =~ "a=T,", "sent and shown together"
       refute paint =~ "a=t,i=", "storing it would leave iTerm holding a picture it never draws"
       refute paint =~ "a=p", "and a placement means nothing there"
+      assert IO.iodata_to_binary(clear) =~ "a=d,d=i,i="
+    end)
+  end
+
+  test "on iTerm it is an inline image with nothing to clear" do
+    with_env(@iterm, fn ->
+      assert Pixel.protocol(:auto) == :iterm2
+
+      assert {paint, clear} = Pixel.image(line_spec(), Pixel.protocol(:auto), {24, 10}, :w_iterm)
+
+      assert IO.iodata_to_binary(paint) =~ "\e]1337;File=inline=1"
       assert IO.iodata_to_binary(clear) == ""
     end)
   end

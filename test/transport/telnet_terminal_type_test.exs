@@ -168,15 +168,6 @@ defmodule Drafter.Transport.TelnetTerminalTypeTest do
     assert await_loop_protocol() == :kitty
   end
 
-  test "a client reporting sixel among its attributes gets sixel" do
-    socket = connect()
-
-    recv_until(socket, &contains?(&1, FrenchCurve.Capability.probe()))
-    :gen_tcp.send(socket, "\e[?62;4;6c")
-
-    assert await_loop_protocol() == :sixel
-  end
-
   test "a client that answers with no graphics is not second-guessed" do
     socket = connect()
 

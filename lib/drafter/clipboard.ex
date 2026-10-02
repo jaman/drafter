@@ -73,11 +73,11 @@ defmodule Drafter.Clipboard do
   clipboard arrives as a bracketed paste instead.
 
   Returns `{:ok, text}`, `{:error, :unavailable}` when no clipboard tool is on
-  `PATH` or the tool fails, and `{:error, :disabled}` when `enabled?/0` is false.
+  `PATH` or the tool fails, and `{:error, :disabled}` when `paste_enabled?/0` is false.
   """
   @spec paste() :: {:ok, String.t()} | {:error, :disabled | :unavailable}
   def paste do
-    if enabled?() do
+    if paste_enabled?() do
       read_local()
     else
       {:error, :disabled}

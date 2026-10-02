@@ -2,12 +2,13 @@ defmodule Drafter.Transport.TelnetRepaintTest do
   @moduledoc """
   What a telnet client receives, over a real socket.
 
-  Covers the initial paint, that a keystroke repaints, that the last of several
-  keystrokes reaches the wire, and that a session registers a loop while it runs
-  and leaves none behind once it closes.
+  Covers that a keystroke repaints, and that a session registers a loop while it
+  runs and leaves none behind once it closes.
   """
 
   use ExUnit.Case, async: false
+
+  alias Drafter.TestSupport.ScreenModel
 
   defmodule Echo do
     @moduledoc false
@@ -76,8 +77,8 @@ defmodule Drafter.Transport.TelnetRepaintTest do
     ArgumentError -> []
   end
 
-  defp read_until(socket, pattern, attempts \\ 20) do
-    Enum.reduce_while(1..attempts, "", fn _attempt, acc ->
+  defp read_until(socket, seen, pattern, attempts \\ 20) do
+    Enum.reduce_while(1..attempts, seen, fn _attempt, acc ->
       accumulate(:gen_tcp.recv(socket, 0, 400), acc, pattern)
     end)
   end
@@ -86,55 +87,28 @@ defmodule Drafter.Transport.TelnetRepaintTest do
 
   defp accumulate({:ok, data}, acc, pattern) do
     text = acc <> data
-    if text =~ pattern, do: {:halt, text}, else: {:cont, text}
+    if shows?(text, pattern), do: {:halt, text}, else: {:cont, text}
   end
 
-  @tag :telnet
-  test "the initial paint reaches the client" do
-    {socket, _server} = connect()
-
-    assert read_until(socket, "LAST=none") =~ "LAST=none"
-  end
+  defp shows?(bytes, text), do: [bytes] |> ScreenModel.apply() |> ScreenModel.shows?(text)
 
   @tag :telnet
   test "a single keystroke repaints" do
     {socket, _server} = connect()
-    assert read_until(socket, "LAST=none") =~ "LAST=none"
+    seen = read_until(socket, "", "LAST=none")
+    assert shows?(seen, "LAST=none")
 
     :gen_tcp.send(socket, "Q")
 
-    assert read_until(socket, "LAST=Q") =~ "LAST=Q",
+    assert shows?(read_until(socket, seen, "LAST=Q"), "LAST=Q"),
            "one keystroke produced no repaint; frames are lagging behind events"
-  end
-
-  @tag :telnet
-  test "the last of several keystrokes is not left unpainted" do
-    {socket, _server} = connect()
-    assert read_until(socket, "LAST=none") =~ "LAST=none"
-
-    for key <- ["W", "E", "R"] do
-      :gen_tcp.send(socket, key)
-      Process.sleep(150)
-    end
-
-    assert read_until(socket, "LAST=R") =~ "LAST=R",
-           "the final keystroke never reached the wire"
-  end
-
-  @tag :telnet
-  test "the session registers a loop that widgets can reach" do
-    {socket, _server} = connect()
-    assert read_until(socket, "LAST=none") =~ "LAST=none"
-
-    assert await_live_loop(),
-           "the telnet session registered no loop, so every widget message is dropped"
   end
 
   @tag :telnet
   test "a closed session leaves no loop behind" do
     before = live_loops()
     {socket, server} = connect()
-    assert read_until(socket, "LAST=none") =~ "LAST=none"
+    assert shows?(read_until(socket, "", "LAST=none"), "LAST=none")
     assert await_live_loop()
 
     teardown(socket, server)

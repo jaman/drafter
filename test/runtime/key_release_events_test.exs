@@ -66,12 +66,19 @@ defmodule Drafter.Runtime.KeyReleaseEventsTest do
   test "an app declares whether it wants releases" do
     assert Held.__key_release__()
     refute Plain.__key_release__()
-    assert Drafter.terminal_opts(Held) == [mouse_hover: true, key_release: true, cell_size: false]
+
+    assert Drafter.terminal_opts(Held) == [
+             mouse_hover: true,
+             key_release: true,
+             cell_size: false,
+             controller: false
+           ]
 
     assert Drafter.terminal_opts(Plain) == [
              mouse_hover: true,
              key_release: false,
-             cell_size: false
+             cell_size: false,
+             controller: false
            ]
   end
 end

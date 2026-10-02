@@ -119,6 +119,12 @@ defmodule Drafter.Accounts do
   @spec fetch(GenServer.server(), username()) :: {:ok, account()} | :error
   def fetch(server, username), do: GenServer.call(server, {:fetch, username})
 
+  @doc "Every account in the order registered, each with its `:number` beside `t:account/0`'s fields."
+  @spec list(GenServer.server()) :: [
+          %{username: username(), number: non_neg_integer(), props: map()}
+        ]
+  def list(server), do: GenServer.call(server, :list)
+
   @impl GenServer
   def init(opts) do
     path = Keyword.fetch!(opts, :path)
@@ -214,6 +220,16 @@ defmodule Drafter.Accounts do
     else
       {:reply, :error, state}
     end
+  end
+
+  def handle_call(:list, _from, state) do
+    listed =
+      state.accounts
+      |> Map.values()
+      |> Enum.sort_by(& &1.number)
+      |> Enum.map(&Map.put(public(&1, state), :number, &1.number))
+
+    {:reply, listed, state}
   end
 
   def handle_call({:fetch, username}, _from, state) do

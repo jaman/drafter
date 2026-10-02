@@ -45,7 +45,8 @@ defmodule Drafter.Widget.Slider do
     * `:track_color` / `:fill_color` / `:thumb_color` - `{r, g, b}` overrides for the
       three parts. Default `nil`, which takes them from the theme.
     * `:renderer` - `:text` (default) draws characters; `:braille` draws the shape
-      through `Drafter.Widget.Slider.Pixel`; a graphics protocol atom (`:pixel`,
+      through `Drafter.Widget.Slider.Pixel`, as do `:half`, `:quad`, `:sextant` and
+      `:octant`, the block-character sets of `FrenchCurve.Backend.Cells`; a graphics protocol atom (`:pixel`,
       `:kitty`, `:iterm2`, `:sixel`, `:auto`) transmits a picture, falling back to
       braille where the terminal has no protocol. Unset, the mode the app was run with
       applies; `DRAFTER_MODE` overrides both.
@@ -229,6 +230,7 @@ defmodule Drafter.Widget.Slider do
     case Pixel.mode(state.renderer) do
       :pixel -> render_shape(state, rect, fn _size -> nil end)
       :braille -> render_shape(state, rect, &Pixel.braille_strips(spec(state), &1))
+      {:cells, set} -> render_shape(state, rect, &Pixel.cells_strips(spec(state), &1, set))
       :text -> render_text(state, rect)
     end
   end

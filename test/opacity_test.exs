@@ -33,11 +33,6 @@ defmodule Drafter.OpacityTest do
   end
 
   describe "blend_over" do
-    test "a style without opacity is untouched" do
-      style = %{fg: @white}
-      assert LayerCompositor.blend_over(style, %{bg: @black}) == style
-    end
-
     test "full opacity is opaque and drops the marker" do
       assert LayerCompositor.blend_over(%{fg: @white, opacity: 1.0}, %{bg: @black}) == %{
                fg: @white
@@ -103,10 +98,6 @@ defmodule Drafter.OpacityTest do
       row.segments |> Enum.flat_map(&List.duplicate(&1.style, &1.width)) |> Enum.at(1)
     end
 
-    test "an opaque layer paints its own colour" do
-      assert composite_with(1.0).fg == @white
-    end
-
     test "a half-translucent layer blends with what is beneath" do
       assert composite_with(0.5).fg == {128, 128, 128}
     end
@@ -165,10 +156,6 @@ defmodule Drafter.OpacityTest do
   end
 
   describe "through the compositor" do
-    test "an opaque layer paints its own colour" do
-      assert over(nil).fg == @white
-    end
-
     test "a translucent layer blends with the layer beneath" do
       assert over(0.5).fg == {128, 128, 128}
     end

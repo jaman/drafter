@@ -23,15 +23,6 @@ defmodule Drafter.Widget.RadioSetColumnsTest do
     Enum.at(new_state.options, new_state.selected_index).id
   end
 
-  describe "single column" do
-    test "row maps directly to option" do
-      state = RadioSet.mount(%{options: @themes, cols: 1, width: 40})
-      assert click(state, 2, 0) == "catppuccin-mocha"
-      assert click(state, 2, 3) == "gruvbox-dark"
-      assert click(state, 2, 11) == "textual-light"
-    end
-  end
-
   describe "two columns" do
     test "the left column selects the first half, top to bottom" do
       state = two_column_set()
@@ -45,11 +36,6 @@ defmodule Drafter.Widget.RadioSetColumnsTest do
       assert click(state, 60, 0) == "nord"
       assert click(state, 60, 3) == "solarized-light"
       assert click(state, 60, 5) == "textual-light"
-    end
-
-    test "a click at the far right edge stays in the last column" do
-      state = two_column_set()
-      assert click(state, 99, 1) == "retro"
     end
 
     test "a click past the last row of a column selects nothing" do

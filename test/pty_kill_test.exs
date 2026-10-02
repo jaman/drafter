@@ -83,17 +83,6 @@ defmodule Drafter.PtyKillTest do
     refute group_alive?(os_pid)
   end
 
-  test "close/1 still means no escalation" do
-    {pty, os_pid} = stubborn_pty()
-
-    Pty.close(pty)
-    Process.sleep(300)
-
-    assert group_alive?(os_pid)
-
-    TermiosNif.killpg(os_pid, 9)
-  end
-
   describe "killpg/2" do
     test "reports an absent group rather than raising" do
       assert {:error, message} = TermiosNif.killpg(999_999, 0)

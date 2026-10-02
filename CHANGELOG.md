@@ -3,6 +3,68 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [Unreleased]
+
+### Breaking changes
+
+- **`Drafter.Event.Delegation` is removed** (`delegate_to_children/4`, `delegate_to_parent/3`, `delegate_to_siblings/4`, `broadcast_to_descendants/3`). Address a widget by id through `Drafter.WidgetPidRegistry`, as `Drafter.push_data/2` does.
+- **`Drafter.Session.start_isolated/3` is now `start_isolated/2`.** Drop the `driver_config` argument and pass every option, `:driver_pid` included, in `opts`.
+- **`:ease_in_out` (and `:ease`, its alias) is the quadratic curve.** Pass `:ease_in_out_cubic` for the previous motion.
+- **`Drafter.Clipboard.paste/0` is governed by the paste setting alone.** With `clipboard: [copy: true, paste: false]` it now returns `{:error, :disabled}`; set `paste: true` to read the clipboard.
+- **An app started through `Drafter.Session.Worker` mounts with the props it was given**, not `%{}`. An app that ignored or worked around the empty map receives the real props in `mount/1`.
+- **`Drafter.Widget.Chart.Pixel.mode/2` and `Drafter.Widget.Slider.Pixel.mode/1` can return `{:cells, set}`** besides `:pixel`, `:braille` and `:text` (type `t:Drafter.Widget.Chart.Pixel.drawing/0`), and `Chart.Pixel.modes/0` lists `:half`, `:quad`, `:sextant` and `:octant`. A custom widget matching on the result adds a `{:cells, set}` clause, drawn with `cells_strips/3`.
+- **iTerm2 draws with its own inline images**, even when it answers the kitty graphics query. Set `FRENCH_CURVE_ITERM2=kitty` to draw with kitty graphics there.
+- **A pointer motion report for a button that is not held is a `{:mouse, %{type: :move}}` event with no `:button` key**, not a `:drag`. Hover logic that read Ghostty's motion as `:drag` moves to `handle_hover/3` or a `:move` clause. `Drafter.Terminal.InputBuffer` gains a `:held` field, so a match against the whole struct literal no longer equals it.
+- **`Drafter.Runtime.FrameClock.interval_for/1` raises `ArgumentError`** for `"0fps"`, a non-positive integer and any other term it cannot use, where it raised `ArithmeticError` or `FunctionClauseError`. Rescue `ArgumentError`.
+- **`Drafter.Widget.RichLog` line numbers count from the first line of the log** in both directions. A test asserting on the numbers shown in a scrolled or reversed log updates its expected text.
+- **A scatter or bubble chart is scaled by the y values of its points.** `{x, y}` tuples and `%{x:, y:}` maps are read as points; a chart that wants a fixed axis passes `:min_value` and `:max_value`.
+- **`french_curve` is required at `~> 1.0`.** Update a lock that pins a 0.1 release.
+
+### Added
+
+- **Game controllers** — `use Drafter.App, controller: true` delivers `{:controller, event}` to `handle_event/2`: connections, buttons and axes in the Xbox layout. The reading is done by the separate `gamepad` package, which an app that wants controllers adds to its deps; drafter itself gains no build step. Local sessions only. `Drafter.terminal_opts/1` reports the setting as `:controller`.
+- **Block-character rendering for charts and sliders** — `renderer: :half | :quad | :sextant | :octant` (also as `DRAFTER_MODE` values and the `mode:` run option) draws the same raster the pixel path builds as block characters of that `FrenchCurve.Backend.Cells` glyph set, two colours per cell, through `Drafter.Widget.Chart.Pixel.cells_strips/3` and `Drafter.Widget.Slider.Pixel.cells_strips/3`. Octants (Unicode 16) match braille's resolution with solid pixels where the terminal or font draws them.
+- **`Drafter.Widget.Chart.Pixel.cell_sets/0`** — the glyph sets accepted as modes, and the `t:Drafter.Widget.Chart.Pixel.drawing/0` type naming what `mode/2` returns.
+- **`Drafter.Draw.Strip.from_cells/1`** — a strip from one row of `{glyph, fg, bg}` cells, with neighbouring cells in the same two colours joined into one segment.
+- **`Drafter.Accounts.list/1`** — every account in registration order, each with its `:number`, username and props.
+- **`Drafter.WidgetServer.retry_image/1`** — asks a widget server to generate its image again.
+- **`examples/spark/35_isometric_town.exs`** — an isometric and a first-person raycast view of one town, drawn as pixels or in any block-character set, with mouse targeting and game controller input.
+
+### Changed
+
+- **`:ease_in_out` follows its own family again.** It ran the cubic curve, byte for byte the same as `:ease_in_out_cubic`, while `:ease_in` is `t²` and `:ease_out` is `1-(1-t)²`. It is quadratic now, so an animation given `:ease_in_out` — or `:ease`, which aliases to it — starts and ends in the same places but moves more gently through the middle. Pass `:ease_in_out_cubic` to keep the old motion exactly.
+- **`Drafter.Session.start_isolated/3` is now `start_isolated/2`.** Its `driver_config` argument was passed to the worker and never read; the worker requires a `:driver_pid`, which callers already had to supply through `opts`. Drop the second argument and pass everything, `:driver_pid` included, in `opts`.
+- **An image handed to the compositor with the same bytes and placement as the one it shows is not sent to the terminal again.** `Drafter.Compositor.put_image/4` keeps a digest of each region's bytes and bumps the region's version only when the bytes or placement differ.
+- **The `x` and `y` of `c:Drafter.Widget.handle_press/3`, `handle_mouse_up/3` and `handle_drag/3` are documented as cells relative to the widget's rect**, which is what they are.
+- **A pie chart's raster covers only the circle's bounding square**, so a large pie costs less to draw.
+
+### Fixed
+
+- **Data pushed to a widget is drawn without waiting for something else to redraw it.** `Drafter.push_data/2` and `push_data_many/2` wrote the item into the widget's data channel and stopped there, leaving no re-render and a stale entry in the strip cache, which the renderer reuses. A log or sparkline fed this way stayed empty until an unrelated change redrew the widget — resizing a pane, for instance. Pushes now take the same throttled render path an event takes, so a burst coalesces into one render rather than one per item.
+- **Home then Page Down no longer crashes a scrollable widget.** The `:home` clause of `Drafter.Widget.Trait.Scrollable` returned a bare map where every sibling returns the trait state updated, so the trait's other five fields became `nil` and the next Page Down subtracted `nil` from `nil`.
+- **An app started through `Drafter.Session.Worker` receives its mount props.** They were flattened into top-level keyword keys while `Drafter.Runtime.mount_props/1` reads `:props`, so such an app always mounted with `%{}`.
+- **`Drafter.Widget.RichLog` numbers its lines by their place in the log.** The gutter counted within the visible slice, so with the default `reverse: true` a ten-line log in three rows showed lines 8, 9, 10 numbered 10, 9, 8, and with `reverse: false` the scroll offset was ignored.
+- **A scatter chart is scaled by its y values.** Any numeric two-tuple matched the `{value, weight}` clause, so `{x, y}` points yielded the x range and every point was placed against it; `%{x:, y:}` maps matched nothing and fell back to `{0, 100}`.
+- **`Drafter.Clipboard.paste/0` asks whether pasting is allowed**, not whether copying is: with `copy: false, paste: true` it refused while `paste_enabled?/0` said yes.
+- **`Drafter.WidgetStripCache.delete/1` clears the visible region too.** It left that table alone, so a widget created under a previously used id inherited the old widget's visible rect and had its image clipped to a stale height.
+- **`Drafter.Runtime.FrameClock.interval_for/1` raises `ArgumentError` for a rate it cannot use**, as its documentation says: `"0fps"` divided by zero and a non-positive integer matched no clause at all.
+- **A trait's `handles/0` goes through `Drafter.Widget.normalize_handles/1`.** A trait declaring `:click` never reached the router, which dispatches `:press`.
+- **`Drafter.Pty.close/2` with `:kill_after` does not signal a reused process id.** It slept and then sent `SIGKILL` without checking the program was still there; it now probes the group with signal `0` first.
+- **A widget the renderer has just made visible is asked for its image.** `schedule_image/1` declines for a widget not yet placed and nothing asked again until that widget next rendered, so its picture waited for an unrelated redraw.
+- **`Drafter.focus/1` and `Drafter.blur/1` called in `on_ready/1` take effect in the first frame**, for an app started by `Drafter.run/2`, a `Drafter.CellSession`, or a pushed app, whatever input arrives meanwhile.
+- **A widget is rendered once per frame, not twice.** `Drafter.WidgetServer.update_rect/2` rendered the widget on every call, and the loop calls it every frame before pushing the frame's props, so a widget whose props change each frame was rendered first with the old props and then with the new ones, and the loop waited on the first, wasted render. A rect equal to the widget's current one now changes nothing; a widget whose render is expensive (the isometric demo in block-character mode, forty milliseconds a frame) no longer builds an event queue behind it while a stick is held.
+- **No image bytes reach the terminal after it is restored on exit.** A widget's image task finishing during shutdown could hand a picture to the compositor after `Drafter.Terminal.Driver.cleanup/0` had left the alternate screen, and the escape sequence printed as base64 on the normal screen. `Drafter.run/2` now flushes and stops the compositor before restoring the terminal.
+- **Pointer motion Ghostty reports as a drag arrives as a move.** In any-motion mode Ghostty encodes a free pointer's motion with the left button's number rather than the "no button" code, so every hover reached apps as `:drag` and `handle_hover/3` never fired there. `Drafter.Terminal.InputBuffer` now remembers which buttons the terminal has reported down; a motion report for a button that is not down is a `:move`, and one for a button that is stays a `:drag`.
+- **iTerm2 is drawn the same way every run.** iTerm2 3.5 and later answers the kitty graphics query, and `Drafter.Widget.Chart.Pixel.protocol/1` took that answer as given, so whether a session drew with kitty graphics or with OSC 1337 inline images depended on whether the probe reply arrived in time. An iTerm2 session is now always judged by `FrenchCurve.Capability.detect/1`: its own inline images, or kitty graphics when `FRENCH_CURVE_ITERM2=kitty` is set. Animated images of either kind flicker under iTerm2's GPU renderer, which the README notes. `Pixel` and the widgets pass the session terminal's `placements?` answer to `FrenchCurve.frame/3` rather than the host's.
+- **A terminal that answers the startup probe without naming a protocol is judged by its environment.** `Drafter.Widget.Chart.Pixel.protocol/1` took `{:ok, nil}` from the probe as final, so an iTerm2 that did not answer the version query drew charts, sliders and every `image/3` widget that asks it as text; it now falls back to `FrenchCurve.Capability.detect/1` as it already did for a terminal never probed. `Drafter.Widget.Chart.Pixel.terminal/0` exposes the answer.
+- **Tab after a click on a widget that handles presses but is not focusable** no longer crashes the event router: the click leaves it the focused widget, and its state has no `focused` field, which was read as `nil` and asked `nil and …`.
+- **A frame's image bytes are written inside synchronized-update markers of their own.** They stay a separate write after the text, so a slow terminal still delays nothing, but a terminal that draws images as cells (iTerm2) no longer shows the erased region between taking the old picture down and putting the new one up.
+- **A widget switched off its picture by props shows its glyphs.** The renderer judged `image_active?/1` from the hierarchy's copy of a widget's state, which a props update does not refresh, so it placed the image the widget server had just withdrawn straight back and the rows under it were never drawn. The widget server now records its image activity in `Drafter.WidgetStripCache` on every render and the renderer reads that.
+
+### Removed
+
+- **`Drafter.Event.Delegation`.** `delegate_to_children/4`, `delegate_to_parent/3`, `delegate_to_siblings/4` and `broadcast_to_descendants/3` are gone. Address a widget by id through `Drafter.WidgetPidRegistry`, as `Drafter.push_data/2` does.
+
 ## [0.4.0]
 
 ### Added

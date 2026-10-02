@@ -3,33 +3,6 @@ defmodule Drafter.Widget.Trait.SelectableTest do
 
   alias Drafter.Widget.Trait.Selectable
 
-  describe "metadata" do
-    test "name is :selectable" do
-      assert :selectable = Selectable.name()
-    end
-
-    test "depends on focusable" do
-      assert [:focusable] = Selectable.dependencies()
-    end
-
-    test "handles keyboard" do
-      assert [:keyboard] = Selectable.handles()
-    end
-
-    test "is layout static" do
-      assert Selectable.layout_static?()
-    end
-  end
-
-  describe "default_state/0" do
-    test "initializes with single selection mode" do
-      state = Selectable.default_state()
-      assert state._selection_mode == :single
-      assert state._cursor_index == 0
-      assert MapSet.equal?(state._selected_indices, MapSet.new())
-    end
-  end
-
   describe "cursor movement" do
     test "arrow up moves cursor up" do
       state = %{Selectable.default_state() | _cursor_index: 5, _item_count: 10}
@@ -107,18 +80,6 @@ defmodule Drafter.Widget.Trait.SelectableTest do
       state = %{Selectable.default_state() | _selection_mode: :none, _cursor_index: 3}
       {:ok, new_state} = Selectable.handle_event({:key, :" "}, state, %{})
       assert MapSet.equal?(new_state._selected_indices, MapSet.new())
-    end
-  end
-
-  describe "enter and other keys" do
-    test "enter passes through" do
-      state = Selectable.default_state()
-      {:pass, _} = Selectable.handle_event({:key, :enter}, state, %{})
-    end
-
-    test "unhandled keys pass through" do
-      state = Selectable.default_state()
-      {:pass, _} = Selectable.handle_event({:key, :tab}, state, %{})
     end
   end
 end

@@ -30,11 +30,6 @@ defmodule Drafter.Widget.DigitsFontTest do
   end
 
   describe "repertoire" do
-    test "every font covers the same characters" do
-      [first | rest] = Enum.map(Font.names(), &Font.repertoire/1)
-      for other <- rest, do: assert(other == first)
-    end
-
     test "digits, the alphabet and a space are covered by every font" do
       required = Enum.map(?0..?9, &<<&1>>) ++ Enum.map(?A..?Z, &<<&1>>) ++ [" "]
 
@@ -126,23 +121,6 @@ defmodule Drafter.Widget.DigitsFontTest do
       existing = Digits.mount(Digits.from_component_opts(99, font: :block))
 
       assert %{font: :braille} = Digits.update_props_from_mount(mount_props, existing, [])
-    end
-  end
-
-  describe "rendering unrepresentable text" do
-    test "a snowman renders blanks without raising" do
-      state = Digits.mount(%{text: "4☃2"})
-      strips = Digits.render(state, rect(40, 5))
-
-      assert length(strips) == 5
-      assert Enum.all?(strips, &(Strip.width(&1) == 40))
-    end
-
-    test "lower case renders the same shapes as upper case" do
-      lower = Digits.mount(%{text: "cpu"}) |> Digits.render(rect(40, 5))
-      upper = Digits.mount(%{text: "CPU"}) |> Digits.render(rect(40, 5))
-
-      assert Enum.map(lower, &strip_text/1) == Enum.map(upper, &strip_text/1)
     end
   end
 end

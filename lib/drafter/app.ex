@@ -62,6 +62,12 @@ defmodule Drafter.App do
       how many pixels a cell is; the answer arrives as `{:cell_size, {width, height}}`
       and `Drafter.Session.Context.cell_size/0` keeps it. Widgets placing images at
       pixel offsets need it.
+    * `:controller` - `boolean()`, default `false`. `true` reads the game controllers
+      attached to the machine the app runs on through the `gamepad` package, which
+      the app adds to its own deps, and delivers their events as `{:controller, event}`
+      — buttons, axes, connections — in the shape `Gamepad.Wire` describes. Local
+      terminal sessions only; a client over ssh or telnet has its controller on its
+      own machine. Without the package a note is printed and no events arrive.
     * `:frame_pacing` - `:animations` (default) or `:always`. `:always` draws at
       most once per `c:refresh_rate/0` interval whatever caused the change, so a
       burst of events or timer ticks becomes one frame; `:animations` paces only
@@ -72,7 +78,8 @@ defmodule Drafter.App do
 
   No other key is read; an unknown one is silently ignored. Each of these is
   exposed on the module as `__css_path__/0`, `__inline_styles__/0`,
-  `__mouse_hover__/0`, `__key_release__/0`, `__cell_size__/0`, `__frame_pacing__/0`, and
+  `__mouse_hover__/0`, `__key_release__/0`, `__cell_size__/0`, `__controller__/0`,
+  `__frame_pacing__/0`, and
   `__runtime__/0`, which the loop calls and which are not overridable.
 
   `use Drafter.App` imports this module, so every element constructor
@@ -433,6 +440,7 @@ defmodule Drafter.App do
       @mouse_hover Keyword.get(unquote(opts), :mouse_hover, true)
       @key_release Keyword.get(unquote(opts), :key_release, false)
       @cell_size Keyword.get(unquote(opts), :cell_size, false)
+      @controller Keyword.get(unquote(opts), :controller, false)
       @frame_pacing Keyword.get(unquote(opts), :frame_pacing, :animations)
       @runtime_backend Keyword.get(unquote(opts), :runtime, Drafter.Runtime.Callback)
       @keybinding_hints []
@@ -449,6 +457,7 @@ defmodule Drafter.App do
       def __mouse_hover__, do: @mouse_hover
       def __key_release__, do: @key_release
       def __cell_size__, do: @cell_size
+      def __controller__, do: @controller
       def __frame_pacing__, do: @frame_pacing
       def __runtime__, do: @runtime_backend
       def __theme__(action) when action == :get, do: Drafter.ThemeManager.get_current_theme()

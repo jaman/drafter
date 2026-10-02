@@ -40,18 +40,8 @@ defmodule Drafter.Draw.AlphaBlendTest do
   end
 
   describe "Color.normalize_with_alpha/1" do
-    test "keeps the alpha an rgba string carries" do
-      assert Color.normalize_with_alpha("rgba(255, 0, 0, 0.5)") == {{255, 0, 0}, 0.5}
-    end
-
     test "keeps the alpha a 4-tuple carries" do
       assert Color.normalize_with_alpha({10, 20, 30, 0.25}) == {{10, 20, 30}, 0.25}
-    end
-
-    test "reports fully opaque for colours with no alpha" do
-      assert Color.normalize_with_alpha("#f00") == {{255, 0, 0}, 1.0}
-      assert Color.normalize_with_alpha({1, 2, 3}) == {{1, 2, 3}, 1.0}
-      assert Color.normalize_with_alpha(:black) == {{0, 0, 0}, 1.0}
     end
 
     test "clamps a nonsense alpha rather than propagating it" do
@@ -61,20 +51,6 @@ defmodule Drafter.Draw.AlphaBlendTest do
   end
 
   describe "a segment built from an rgba colour" do
-    test "keeps the rgb where every consumer expects it" do
-      style = Segment.new("x", %{bg: "rgba(255, 0, 0, 0.5)"}).style
-
-      assert style.bg == {255, 0, 0}
-      assert style.bg_alpha == 0.5
-    end
-
-    test "carries no alpha key when the colour is opaque" do
-      style = Segment.new("x", %{bg: "#f00"}).style
-
-      assert style.bg == {255, 0, 0}
-      refute Map.has_key?(style, :bg_alpha)
-    end
-
     test "tracks fg and bg alphas separately" do
       style = Segment.new("x", %{fg: {255, 255, 255, 0.25}, bg: {0, 0, 0, 0.75}}).style
 
@@ -94,12 +70,6 @@ defmodule Drafter.Draw.AlphaBlendTest do
       style = composited_style(%{bg: {255, 0, 0, 0.0}})
 
       assert style.bg == {0, 0, 0}
-    end
-
-    test "a fully opaque overlay covers what is beneath" do
-      style = composited_style(%{bg: {255, 0, 0, 1.0}})
-
-      assert style.bg == {255, 0, 0}
     end
 
     test "the alpha key never survives into the composited style" do

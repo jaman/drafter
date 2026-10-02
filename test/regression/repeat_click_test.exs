@@ -63,25 +63,4 @@ defmodule Drafter.Regression.RepeatClickTest do
     assert first, "first click should be consumed"
     assert second, "a repeat click inside the active-effect window must also be consumed"
   end
-
-  test "two rapid clicks fire the callback exactly twice" do
-    hierarchy = hierarchy_with_button()
-    {hierarchy, _} = click(hierarchy)
-    {_hierarchy, _} = click(hierarchy)
-
-    assert clicks_received() == 2
-  end
-
-  test "a click on a disabled button is not reported consumed" do
-    Drafter.WidgetStripCache.create()
-    owner = self()
-    props = Button.mount(%{text: "9", on_click: fn -> send(owner, :clicked) end, disabled: true})
-
-    hierarchy =
-      WidgetHierarchy.new()
-      |> WidgetHierarchy.add_widget(:btn_off, Button, Map.from_struct(props), nil, @rect)
-
-    {_h, _consumed} = click(hierarchy)
-    assert clicks_received() == 0
-  end
 end

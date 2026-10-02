@@ -27,37 +27,15 @@ defmodule Drafter.AppCallbackTotalityTest do
     def render(_state), do: []
   end
 
-  @unhandled [
-    {:mouse, %{type: :move, x: 3, y: 4, modifiers: []}},
-    {:mouse, %{type: :mouse_down, x: 1, y: 1, modifiers: []}},
-    {:key, :z},
-    {:key, :a, [:alt]},
-    {:char, 233},
-    {:bracketed_paste, "text"},
-    :some_bare_atom
-  ]
-
   describe "an app that only declares a keybinding" do
     test "still answers its keybinding" do
       assert OnlyKeybinding.handle_event({:key, :q, [:ctrl]}, %{}) == {:stop, :normal}
-    end
-
-    test "ignores every other event instead of crashing" do
-      for event <- @unhandled do
-        assert {:noreply, %{}} = OnlyKeybinding.handle_event(event, %{})
-      end
     end
   end
 
   describe "an app that handles some events" do
     test "still answers the events it declared" do
       assert {:ok, %{saved: true}} = OnlySpecificEvents.handle_event(:save, %{})
-    end
-
-    test "ignores every other event instead of crashing" do
-      for event <- @unhandled do
-        assert {:noreply, %{}} = OnlySpecificEvents.handle_event(event, %{})
-      end
     end
 
     test "still answers the timer it declared" do

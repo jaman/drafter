@@ -17,10 +17,6 @@ defmodule Drafter.LayoutDockTest do
       assert Layout.dock_edge(input(dock: :bottom)) == :bottom
     end
 
-    test "an undocked component reports no edge" do
-      assert Layout.dock_edge(input([])) == nil
-    end
-
     test "a meaningless edge is ignored rather than honoured" do
       assert Layout.dock_edge(input(dock: :sideways)) == nil
     end

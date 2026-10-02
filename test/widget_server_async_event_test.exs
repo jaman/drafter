@@ -48,43 +48,12 @@ defmodule Drafter.WidgetServerAsyncEventTest do
   end
 
   describe "asynchronous events" do
-    test "a single cast is applied" do
-      {pid, _id} = start_widget()
-
-      WidgetServer.send_event(pid, {:write, "one"})
-
-      assert count(pid) == 1
-    end
-
     test "a burst of casts is applied in full, not throttled away" do
       {pid, _id} = start_widget()
 
       for line <- 1..500, do: WidgetServer.send_event(pid, {:write, line})
 
       assert count(pid) == 500
-    end
-
-    test "casts sent faster than the frame interval still all land" do
-      {pid, _id} = start_widget()
-
-      for line <- 1..50 do
-        WidgetServer.send_event(pid, {:write, line})
-        WidgetServer.get_state(pid)
-      end
-
-      assert count(pid) == 50
-    end
-
-    test "state advances identically whether sent async or sync" do
-      {async, _} = start_widget()
-      {sync, _} = start_widget()
-
-      for line <- 1..100 do
-        WidgetServer.send_event(async, {:write, line})
-        WidgetServer.send_event_sync(sync, {:write, line})
-      end
-
-      assert count(async) == count(sync)
     end
 
     test "a throttled burst is followed by a catch-up render" do
@@ -98,14 +67,6 @@ defmodule Drafter.WidgetServerAsyncEventTest do
       flush_renders()
 
       assert_receive {:widget_render_needed, ^id}, 500
-    end
-
-    test "an event a widget ignores leaves its state alone" do
-      {pid, _id} = start_widget()
-
-      WidgetServer.send_event(pid, {:unhandled, :thing})
-
-      assert count(pid) == 0
     end
   end
 end

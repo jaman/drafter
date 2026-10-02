@@ -11,6 +11,8 @@ defmodule Drafter.Transport.SessionStartupTest do
 
   use ExUnit.Case, async: false
 
+  alias Drafter.TestSupport.ScreenModel
+
   defmodule Ticker do
     @moduledoc false
     use Drafter.App
@@ -61,8 +63,8 @@ defmodule Drafter.Transport.SessionStartupTest do
     socket
   end
 
-  defp read_until(socket, pattern, attempts \\ 30) do
-    Enum.reduce_while(1..attempts, "", fn _attempt, acc ->
+  defp read_until(socket, seen, pattern, attempts \\ 30) do
+    Enum.reduce_while(1..attempts, seen, fn _attempt, acc ->
       accumulate(:gen_tcp.recv(socket, 0, 400), acc, pattern)
     end)
   end
@@ -71,14 +73,16 @@ defmodule Drafter.Transport.SessionStartupTest do
 
   defp accumulate({:ok, data}, acc, pattern) do
     text = acc <> data
-    if text =~ pattern, do: {:halt, text}, else: {:cont, text}
+    if shows?(text, pattern), do: {:halt, text}, else: {:cont, text}
   end
+
+  defp shows?(bytes, text), do: [bytes] |> ScreenModel.apply() |> ScreenModel.shows?(text)
 
   @tag :telnet
   test "a reducer app can be served remotely, not just run locally" do
     socket = connect(Reduced, mount_props: %{label: "from init"})
 
-    assert read_until(socket, "LABEL=") =~ "LABEL=from init",
+    assert shows?(read_until(socket, "", "LABEL=from init"), "LABEL=from init"),
            "the session did not mount through the app's runtime backend"
   end
 
@@ -86,10 +90,10 @@ defmodule Drafter.Transport.SessionStartupTest do
   test "an interval registered in on_ready fires for a remote session" do
     socket = connect([])
 
-    assert read_until(socket, "TICKS=") =~ "TICKS=",
-           "the session never painted"
+    seen = read_until(socket, "", "TICKS=")
+    assert shows?(seen, "TICKS="), "the session never painted"
 
-    assert read_until(socket, "TICKS=3") =~ "TICKS=3",
+    assert shows?(read_until(socket, seen, "TICKS=3"), "TICKS=3"),
            "on_ready registered an interval that never fired over telnet"
   end
 
@@ -97,6 +101,6 @@ defmodule Drafter.Transport.SessionStartupTest do
   test "mount props reach a remote session" do
     socket = connect(mount_props: %{cwd: "/remote/dir"})
 
-    assert read_until(socket, "CWD=") =~ "CWD=/remote/dir"
+    assert shows?(read_until(socket, "", "CWD=/remote/dir"), "CWD=/remote/dir")
   end
 end

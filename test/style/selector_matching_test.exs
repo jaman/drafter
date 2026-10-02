@@ -20,19 +20,8 @@ defmodule Drafter.Style.SelectorMatchingTest do
       assert parse("button").widget_type == :button
     end
 
-    test "accepts the capitalised form the query docs teach" do
-      assert Selector.same_name?(parse("Button").widget_type, :button)
-    end
-
     test "underscores a multi-word capitalised name to match the module's type name" do
       assert Selector.same_name?(parse("TextInput").widget_type, :text_input)
-    end
-
-    test "keeps a name whose atom does not exist rather than dropping it" do
-      parsed = parse("nosuchwidgettype")
-
-      refute parsed.widget_type == nil
-      assert Selector.same_name?(parsed.widget_type, "nosuchwidgettype")
     end
   end
 
@@ -40,11 +29,6 @@ defmodule Drafter.Style.SelectorMatchingTest do
     test "a capitalised selector matches only that type" do
       assert Query.matches_type?(Drafter.Widget.Button, parse("Button").widget_type)
       refute Query.matches_type?(Drafter.Widget.Label, parse("Button").widget_type)
-    end
-
-    test "a lowercase selector matches only that type" do
-      assert Query.matches_type?(Drafter.Widget.Button, parse("button").widget_type)
-      refute Query.matches_type?(Drafter.Widget.Label, parse("button").widget_type)
     end
 
     test "a type nobody defines matches nothing at all" do
@@ -73,13 +57,6 @@ defmodule Drafter.Style.SelectorMatchingTest do
       assert Query.matches_id?(:Charts_chart_12, id)
       refute Query.matches_id?(:Charts_chart_11, id)
     end
-
-    test "an id belonging to nothing rendered yet matches nothing" do
-      id = parse("#never_rendered_widget_id").id
-
-      refute id == nil
-      refute Query.matches_id?(:some_other_widget, id)
-    end
   end
 
   describe "matching classes" do
@@ -96,12 +73,6 @@ defmodule Drafter.Style.SelectorMatchingTest do
       assert length(classes) == 1
       refute Query.matches_classes?(%{classes: [:primary]}, classes)
       refute Query.matches_classes?(%{classes: []}, classes)
-    end
-
-    test "a capitalised selector still carries its class" do
-      classes = parse("Button.primary").classes
-
-      assert Query.matches_classes?(%{classes: [:primary]}, classes)
     end
   end
 

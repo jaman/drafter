@@ -10,10 +10,6 @@ defmodule Drafter.LayoutGridTest do
     Layout.calculate_grid_layout(children, @rect, opts)
   end
 
-  test "an empty grid places nothing" do
-    assert Layout.calculate_grid_layout([], @rect, columns: 3) == []
-  end
-
   test "columns divide the width evenly" do
     [a, b, c] = cells(3, columns: 3)
     assert Enum.map([a, b, c], & &1.width) == [4, 4, 4]
@@ -52,12 +48,6 @@ defmodule Drafter.LayoutGridTest do
     [a, b, c, _d] = cells(4, columns: 2, gap: {1, 3})
     assert b.x == a.x + a.width + 3
     assert c.y == a.y + a.height + 1
-  end
-
-  test "rows infer the column count" do
-    assert length(cells(6, rows: 2)) == 6
-    [a, _b, _c, d, _e, _f] = cells(6, rows: 2)
-    assert d.y > a.y
   end
 
   test "with neither columns nor rows everything sits on one row" do

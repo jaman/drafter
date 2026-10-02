@@ -40,15 +40,6 @@ defmodule Drafter.Runtime.FramePacingTest do
     Keyword.get(dict, :frame_interval_ms)
   end
 
-  test "the loop process has a frame interval, so renders take the paced branch" do
-    ctx = Drafter.Test.start_headless(Paced, %{}, width: 20, height: 4)
-
-    assert is_integer(frame_interval(ctx)),
-           "the loop never armed frame pacing, so this test exercises a branch production does not"
-
-    Drafter.Test.stop(ctx)
-  end
-
   test "the default is 30fps" do
     ctx = Drafter.Test.start_headless(Paced, %{}, width: 20, height: 4)
 

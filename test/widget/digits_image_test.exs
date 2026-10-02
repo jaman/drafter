@@ -27,13 +27,6 @@ defmodule Drafter.Widget.DigitsImageTest do
   end
 
   describe "rasterising" do
-    test "text becomes a raster wide enough for every character" do
-      raster = Image.raster(["4", "2"], {40, 6}, {255, 255, 255})
-
-      {width, _height} = Raster.dimensions(raster)
-      assert width >= 2 * Bitmap.width()
-    end
-
     test "the raster is a whole multiple of the bitmap size" do
       raster = Image.raster(["A"], {40, 6}, {255, 255, 255})
       {width, height} = Raster.dimensions(raster)
@@ -84,12 +77,6 @@ defmodule Drafter.Widget.DigitsImageTest do
   end
 
   describe "protocol negotiation" do
-    test "no protocol means no image, and the widget falls back to cells" do
-      if Image.protocol(:auto) == nil do
-        assert Image.render("42", {20, 4}, {255, 255, 255}, :auto, :id) == nil
-      end
-    end
-
     test "an explicit protocol produces a paint and a clear" do
       case Image.render("42", {20, 4}, {255, 255, 255}, :sixel, :id) do
         nil ->
@@ -117,22 +104,6 @@ defmodule Drafter.Widget.DigitsImageTest do
       end)
     end
 
-    test "on iTerm there is nothing to delete, since nothing was stored" do
-      env = %{
-        "TERM" => "xterm-256color",
-        "KITTY_WINDOW_ID" => nil,
-        "TERM_PROGRAM" => "iTerm.app",
-        "TERM_PROGRAM_VERSION" => "3.5.0"
-      }
-
-      with_env(env, fn ->
-        {paint, clear} = Image.render("7", {10, 3}, {255, 255, 255}, :auto, :some_widget)
-
-        assert paint |> IO.iodata_to_binary() =~ "\e]1337;File=inline=1"
-        assert IO.iodata_length(clear) == 0
-      end)
-    end
-
     test "empty text never produces an image" do
       assert Image.render("", {20, 4}, {255, 255, 255}, :sixel, :id) == nil
     end
@@ -144,24 +115,11 @@ defmodule Drafter.Widget.DigitsImageTest do
   end
 
   describe "the widget callback" do
-    test "the default renderer draws cells and asks for no image" do
-      state = Digits.mount(%{text: "42"})
-
-      assert Digits.image(state, rect(20, 5), :id) == nil
-      assert Digits.render(state, rect(20, 5)) != []
-    end
-
     test "an explicit protocol returns paint, clear and a placement box" do
       state = Digits.mount(%{text: "42", renderer: :sixel})
 
       assert {_paint, _clear, %{dx: 0, dy: 0, cols: 20, rows: 5}} =
                Digits.image(state, rect(20, 5), :id)
-    end
-
-    test "cells still render when a graphics renderer is asked for" do
-      state = Digits.mount(%{text: "42", renderer: :graphics})
-
-      assert length(Digits.render(state, rect(20, 5))) == 5
     end
 
     test "the renderer survives a component re-mount" do

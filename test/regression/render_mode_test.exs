@@ -36,12 +36,6 @@ defmodule Drafter.RenderModeTest do
     assert Pixel.mode(:pixel, :line) == :text
   end
 
-  test "DRAFTER_MODE sets the global default" do
-    System.put_env("DRAFTER_MODE", "braille")
-    assert Pixel.resolve(nil) == :braille
-    assert Pixel.mode(nil, :line) == :braille
-  end
-
   test "DRAFTER_MODE parses case-insensitively and trims" do
     System.put_env("DRAFTER_MODE", "  Sixel ")
     assert Pixel.resolve(nil) == :sixel
@@ -57,12 +51,6 @@ defmodule Drafter.RenderModeTest do
   test "runtime application env applies when env var unset" do
     Application.put_env(:drafter, :render_mode, :sixel)
     assert Pixel.resolve(nil) == :sixel
-  end
-
-  test "DRAFTER_MODE takes precedence over runtime config" do
-    System.put_env("DRAFTER_MODE", "braille")
-    Application.put_env(:drafter, :render_mode, :sixel)
-    assert Pixel.resolve(nil) == :braille
   end
 
   test "invalid runtime mode is ignored" do

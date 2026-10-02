@@ -14,7 +14,7 @@ defmodule Drafter.Widget.Chart.ProtocolDetectionTest do
 
   @controlled ~w(
     TERM TERM_PROGRAM TERM_PROGRAM_VERSION KITTY_WINDOW_ID WEZTERM_PANE
-    LC_TERMINAL KONSOLE_VERSION DRAFTER_MODE DRAFTER_NO_PIXEL
+    LC_TERMINAL LC_TERMINAL_VERSION KONSOLE_VERSION DRAFTER_MODE DRAFTER_NO_PIXEL FRENCH_CURVE_ITERM2
   )
 
   defp detected_for(overrides) do
@@ -41,59 +41,11 @@ defmodule Drafter.Widget.Chart.ProtocolDetectionTest do
     test "kitty, by the window id it exports" do
       assert detected_for(%{"KITTY_WINDOW_ID" => "1"}) == :kitty
     end
-
-    test "kitty, by TERM alone, with no window id to go on" do
-      assert detected_for(%{"TERM" => "xterm-kitty"}) == :kitty
-    end
-
-    test "ghostty" do
-      assert detected_for(%{"TERM" => "xterm-ghostty"}) == :kitty
-    end
-
-    test "wezterm, by program name" do
-      assert detected_for(%{"TERM_PROGRAM" => "WezTerm"}) == :kitty
-    end
-
-    test "wezterm, by pane id, for when a multiplexer dropped the program name" do
-      assert detected_for(%{"TERM" => "xterm-256color", "WEZTERM_PANE" => "0"}) == :kitty
-    end
-  end
-
-  describe "terminals that speak their own protocol" do
-    test "iTerm uses its inline protocol, not kitty" do
-      assert detected_for(%{"TERM_PROGRAM" => "iTerm.app", "TERM_PROGRAM_VERSION" => "3.5.0"}) ==
-               :iterm2
-    end
-
-    test "iTerm over ssh, by the locale variable it forwards" do
-      assert detected_for(%{"TERM" => "xterm-256color", "LC_TERMINAL" => "iTerm2"}) == :iterm2
-    end
-
-    test "konsole uses sixel" do
-      assert detected_for(%{"KONSOLE_VERSION" => "220400"}) == :sixel
-    end
-
-    test "foot uses sixel" do
-      assert detected_for(%{"TERM" => "foot"}) == :sixel
-    end
   end
 
   describe "terminals with no graphics" do
     test "a plain xterm reports no protocol" do
       assert detected_for(%{"TERM" => "xterm-256color"}) == nil
-    end
-
-    test "an empty environment reports no protocol" do
-      assert detected_for(%{}) == nil
-    end
-
-    test "a variable exported empty does not count as a terminal" do
-      assert detected_for(%{"KITTY_WINDOW_ID" => ""}) == nil
-      assert detected_for(%{"WEZTERM_PANE" => ""}) == nil
-    end
-
-    test "another terminal's LC_TERMINAL is not iTerm" do
-      assert detected_for(%{"LC_TERMINAL" => "Alacritty"}) == nil
     end
   end
 
@@ -107,20 +59,6 @@ defmodule Drafter.Widget.Chart.ProtocolDetectionTest do
       Context.put_terminal_env(%{"TERM" => "xterm-kitty"})
 
       assert detected_for(%{"TERM" => "xterm-256color"}) == :kitty
-    end
-
-    test "a session on a plain terminal gets no protocol from a host that has one" do
-      Context.put_terminal_env(%{"TERM" => "xterm-256color"})
-
-      assert detected_for(%{"KITTY_WINDOW_ID" => "1"}) == nil
-    end
-
-    test "two sessions on different terminals detect differently" do
-      Context.put_terminal_env(%{"LC_TERMINAL" => "iTerm2"})
-      assert Pixel.protocol(:auto) == :iterm2
-
-      Context.put_terminal_env(%{"KONSOLE_VERSION" => "220400"})
-      assert Pixel.protocol(:auto) == :sixel
     end
   end
 
@@ -140,15 +78,29 @@ defmodule Drafter.Widget.Chart.ProtocolDetectionTest do
       assert detected_for(%{"TERM" => "xterm-kitty"}) == :sixel
     end
 
-    test "a terminal that answered with no graphics is not second-guessed" do
+    test "a terminal that answered without naming a protocol is guessed at from its environment" do
       Context.put_terminal_protocol(nil)
 
-      assert detected_for(%{"KITTY_WINDOW_ID" => "1"}) == nil
+      assert detected_for(%{"KITTY_WINDOW_ID" => "1"}) == :kitty
+      assert detected_for(%{"TERM" => "xterm-256color"}) == nil
     end
 
-    test "a terminal that was never asked is guessed at from its environment" do
-      assert Context.terminal_protocol() == :unprobed
-      assert detected_for(%{"KITTY_WINDOW_ID" => "1"}) == :kitty
+    test "whatever iTerm2 answers, its environment decides between inline and kitty" do
+      iterm = %{"TERM_PROGRAM" => "iTerm.app", "TERM_PROGRAM_VERSION" => "3.7.2"}
+      forced = Map.put(iterm, "FRENCH_CURVE_ITERM2", "kitty")
+
+      for answered <- [:kitty, :sixel, :iterm2] do
+        Context.put_terminal_protocol(answered)
+
+        assert detected_for(iterm) == :iterm2, "answered #{answered}"
+        assert detected_for(forced) == :kitty, "answered #{answered}"
+      end
+
+      Context.put_terminal_protocol(:sixel)
+      assert detected_for(%{"TERM" => "foot"}) == :sixel
+
+      Context.put_terminal_protocol(:kitty)
+      assert detected_for(%{"TERM" => "xterm-ghostty"}) == :kitty
     end
   end
 

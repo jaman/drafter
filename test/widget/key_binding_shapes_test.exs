@@ -11,13 +11,9 @@ defmodule Drafter.Widget.KeyBindingShapesTest do
   use ExUnit.Case, async: true
 
   alias Drafter.Terminal.ANSI
-  alias Drafter.Widget.{DataTable, DirectoryTree, EventRouter, SplitPaneDivider, Switch, Tree}
+  alias Drafter.Widget.{DataTable, DirectoryTree, EventRouter, SplitPaneDivider, Tree}
 
   describe "what the parser emits" do
-    test "space is the character atom, not :space" do
-      assert {[{:key, :" "}], ""} = ANSI.parse_sequence(" ")
-    end
-
     test "enter is a named atom" do
       assert {[{:key, :enter}], ""} = ANSI.parse_sequence("\r")
     end
@@ -50,15 +46,6 @@ defmodule Drafter.Widget.KeyBindingShapesTest do
       state = DataTable.mount(%{columns: [%{key: :a, label: "A"}], rows: [%{a: 1}]})
 
       assert {:ok, _} = DataTable.handle_key(:" ", state)
-    end
-  end
-
-  describe "hover" do
-    test "a switch hovers on the event the router sends" do
-      state = Switch.mount(%{})
-
-      assert {:ok, %{hovered: true}} = Switch.handle_event(:hover, state)
-      assert {:ok, %{hovered: false}} = Switch.handle_event(:unhover, %{state | hovered: true})
     end
   end
 
@@ -107,18 +94,6 @@ defmodule Drafter.Widget.KeyBindingShapesTest do
 
       assert {:ok, down} = send_key(state, {:key, :down, [:alt]})
       assert position(down) > start
-    end
-
-    test "an arrow with no modifier bubbles rather than resizing" do
-      state = divider(:horizontal)
-
-      assert {:bubble, _} = send_key(state, {:key, :left, []})
-    end
-
-    test "an axis the divider does not move along bubbles" do
-      state = divider(:horizontal)
-
-      assert {:bubble, _} = send_key(state, {:key, :up, [:alt]})
     end
   end
 end

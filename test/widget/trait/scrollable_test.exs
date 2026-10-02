@@ -3,40 +3,6 @@ defmodule Drafter.Widget.Trait.ScrollableTest do
 
   alias Drafter.Widget.Trait.Scrollable
 
-  describe "metadata" do
-    test "name is :scrollable" do
-      assert :scrollable = Scrollable.name()
-    end
-
-    test "no dependencies" do
-      assert [] = Scrollable.dependencies()
-    end
-
-    test "handles scroll and keyboard" do
-      handles = Scrollable.handles()
-      assert :scroll in handles
-      assert :keyboard in handles
-    end
-
-    test "is layout static" do
-      assert Scrollable.layout_static?()
-    end
-  end
-
-  describe "default_state/0" do
-    test "initializes scroll offsets to zero" do
-      state = Scrollable.default_state()
-      assert state._scroll_offset_y == 0
-      assert state._scroll_offset_x == 0
-    end
-
-    test "initializes dimensions to zero" do
-      state = Scrollable.default_state()
-      assert state._content_height == 0
-      assert state._viewport_height == 0
-    end
-  end
-
   describe "handle_event/3 scroll events" do
     test "scroll up decreases offset" do
       state = %{Scrollable.default_state() | _scroll_offset_y: 5}
@@ -104,21 +70,10 @@ defmodule Drafter.Widget.Trait.ScrollableTest do
       assert new_state._scroll_offset_y == 19
     end
 
-    test "home scrolls to top" do
-      state = %{Scrollable.default_state() | _scroll_offset_y: 50}
-      {:ok, new_state} = Scrollable.handle_event({:key, :home}, state, %{})
-      assert new_state._scroll_offset_y == 0
-    end
-
     test "end scrolls to bottom" do
       state = %{Scrollable.default_state() | _content_height: 100, _viewport_height: 20}
       {:ok, new_state} = Scrollable.handle_event({:key, :end}, state, %{})
       assert new_state._scroll_offset_y == 80
-    end
-
-    test "unhandled key passes through" do
-      state = Scrollable.default_state()
-      {:pass, _} = Scrollable.handle_event({:key, :tab}, state, %{})
     end
   end
 

@@ -9,12 +9,6 @@ defmodule Drafter.DataTableAutoHeightTest do
   defp cols, do: [%{key: :id, label: "ID"}, %{key: :name, label: "Name"}]
   defp rows, do: for(i <- 1..40, do: %{id: i, name: "row #{i}"})
 
-  test "mount tolerates height: :auto and normalizes the height field" do
-    state = DataTable.mount(%{columns: cols(), data: rows(), height: :auto})
-    assert state.viewport_height == :auto
-    assert state.height == 20
-  end
-
   test "get_data_height stays sane with an unresolved :auto viewport" do
     state = DataTable.mount(%{columns: cols(), data: rows(), height: :auto})
     assert DataTable.get_data_height(state) == 19

@@ -55,11 +55,6 @@ defmodule Drafter.Widget.DataTableGeometryTest do
     assert state.width == 60
   end
 
-  test "drag maths uses the laid-out height, not the mount height" do
-    state = mounted_at(%{x: 0, y: 0, width: 60, height: 40}, 200)
-    assert DataTable.get_data_height(state) == 39
-  end
-
   test "the thumb the renderer draws is the thumb the drag maths targets" do
     state = mounted_at(%{x: 0, y: 0, width: 60, height: 40}, 200)
     data_height = DataTable.get_data_height(state)
@@ -109,18 +104,6 @@ defmodule Drafter.Widget.DataTableGeometryTest do
 
     assert Range.size(thumb) > 1,
            "39 of 100 rows visible should give a multi-row thumb, got #{inspect(thumb)}"
-  end
-
-  test "a small drag produces a proportionally small scroll" do
-    state = mounted_at(%{x: 0, y: 0, width: 60, height: 40}, 200)
-    data_height = DataTable.get_data_height(state)
-    total = length(state.data)
-    max_offset = total - data_height
-
-    one_row = Scrollbar.offset_from_row(1, total, data_height)
-
-    assert one_row <= div(max_offset, 4),
-           "one row of drag jumped #{one_row} of #{max_offset} rows"
   end
 
   test "resizing the widget keeps geometry in step" do

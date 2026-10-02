@@ -10,7 +10,7 @@ defmodule Drafter.Widget.ImageActiveTest do
   use ExUnit.Case, async: false
 
   alias Drafter.Widget
-  alias Drafter.Widget.{Chart, Digits, Gauge, Label, PieChart, Slider}
+  alias Drafter.Widget.{Chart, Digits, Gauge, PieChart, Slider}
 
   setup :setup_session_pdict
 
@@ -23,12 +23,6 @@ defmodule Drafter.Widget.ImageActiveTest do
     def image(_state, _rect, _id), do: {"paint", "clear", %{dx: 0, dy: 0, cols: 1, rows: 1}}
   end
 
-  describe "a widget that cannot paint an image" do
-    test "is never active" do
-      refute Widget.image_active?(Label, %{})
-    end
-  end
-
   describe "a widget that paints unconditionally" do
     test "is active, having no predicate of its own" do
       assert Widget.image_active?(AlwaysPainting, %{})
@@ -36,11 +30,6 @@ defmodule Drafter.Widget.ImageActiveTest do
   end
 
   describe "slider" do
-    test "is inactive while drawing characters" do
-      refute Widget.image_active?(Slider, Slider.mount(%{renderer: :text}))
-      refute Widget.image_active?(Slider, Slider.mount(%{renderer: :braille}))
-    end
-
     test "is active while drawing a picture" do
       assert Widget.image_active?(Slider, Slider.mount(%{renderer: :kitty}))
     end

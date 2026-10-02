@@ -168,6 +168,7 @@ defmodule Drafter.CellSession do
 
     {_, hierarchy} = Renderer.render_app(app_module, app_state, screen_rect)
     ready_state = backend.ready(app_module, app_state)
+    hierarchy = AppLoop.settle_focus(hierarchy)
     {_, hierarchy} = Renderer.render_app(app_module, ready_state, screen_rect, hierarchy)
 
     AppLoop.enter_loop(app_module, ready_state, screen_rect, %{}, hierarchy, [])

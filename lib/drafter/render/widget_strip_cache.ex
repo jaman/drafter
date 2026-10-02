@@ -3,11 +3,13 @@ defmodule Drafter.WidgetStripCache do
 
   @table :drafter_widget_strips
   @visible_table :drafter_widget_visible
+  @image_table :drafter_widget_image_active
 
   @spec create() :: :ok
   def create do
     ensure_table(@table)
     ensure_table(@visible_table)
+    ensure_table(@image_table)
     :ok
   end
 
@@ -43,9 +45,37 @@ defmodule Drafter.WidgetStripCache do
 
   @spec delete(term()) :: boolean()
   def delete(widget_id) do
+    :ets.delete(@image_table, session_key(widget_id))
+    :ets.delete(@visible_table, session_key(widget_id))
     :ets.delete(@table, session_key(widget_id))
   rescue
     ArgumentError -> true
+  end
+
+  @doc """
+  Record whether a widget's server is drawing a transmitted image with its current state.
+
+  Written by the widget server on every render, so the renderer can place or withdraw
+  the image from the state the server actually holds rather than the hierarchy's copy.
+  """
+  @spec mark_image_active(term(), boolean()) :: true
+  def mark_image_active(widget_id, active?) do
+    :ets.insert(@image_table, {session_key(widget_id), active?})
+  rescue
+    ArgumentError -> true
+  end
+
+  @doc "What the widget's server last recorded with `mark_image_active/2`, or `nil` if nothing yet."
+  @spec image_active(term()) :: boolean() | nil
+  def image_active(widget_id) do
+    key = session_key(widget_id)
+
+    case :ets.lookup(@image_table, key) do
+      [{^key, active?}] -> active?
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
   end
 
   @doc """
@@ -92,6 +122,7 @@ defmodule Drafter.WidgetStripCache do
     session = session_id()
     clear_session(@table, {{:"$1", :_, :_}, [match_session(session)], [true]})
     clear_session(@visible_table, {{:"$1", :_}, [match_session(session)], [true]})
+    clear_session(@image_table, {{:"$1", :_}, [match_session(session)], [true]})
     :ok
   end
 

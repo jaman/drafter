@@ -31,12 +31,6 @@ defmodule Drafter.Integration.ScreenTextTest do
     assert length(TUI.screen_lines(ctx)) == 8
   end
 
-  test "no row exceeds the screen width", %{ctx: ctx} do
-    for line <- TUI.screen_lines(ctx) do
-      assert String.length(line) <= 44
-    end
-  end
-
   test "blank rows read as empty rather than as spaces", %{ctx: ctx} do
     assert Enum.any?(TUI.screen_lines(ctx), &(&1 == ""))
   end

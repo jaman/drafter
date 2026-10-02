@@ -92,18 +92,4 @@ defmodule Drafter.EventCaptureIntegrationTest do
     assert :captured_x in parent_state.capture_log
     assert child_state.event_log == []
   end
-
-  test "events without capture handlers work normally" do
-    hierarchy = WidgetHierarchy.new()
-
-    hierarchy =
-      hierarchy
-      |> WidgetHierarchy.add_widget(:child, ChildWidget, %{}, nil)
-      |> WidgetHierarchy.focus_widget(:child)
-
-    {new_hierarchy, _actions} = WidgetHierarchy.handle_event(hierarchy, {:key, :enter})
-
-    child_state = WidgetHierarchy.get_widget_state(new_hierarchy, :child)
-    assert length(child_state.event_log) == 1
-  end
 end

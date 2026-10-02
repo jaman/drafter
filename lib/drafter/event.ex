@@ -74,6 +74,7 @@ defmodule Drafter.Event do
           | {:key, key(), modifiers()}
           | {:char, char()}
           | {:mouse, map()}
+          | {:controller, map()}
           | {:bracketed_paste, binary()}
           | {:resize, resize_info()}
           | {:focus, widget_id :: term()}

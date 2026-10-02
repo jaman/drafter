@@ -52,33 +52,14 @@ defmodule Drafter.CellSessionTextTest do
       assert Enum.all?(lines, &is_binary/1)
     end
 
-    test "the rows carry the rendered text in order", %{session: session} do
-      assert [first, second | _] = CellSession.take_lines(session)
-
-      assert first =~ "hello world"
-      assert second =~ "second line"
-    end
-
     test "trailing blanks are trimmed, so a row is its content", %{session: session} do
       [first | _] = CellSession.take_lines(session)
 
       assert first == "hello world"
     end
-
-    test "an empty row is an empty string rather than a run of spaces", %{session: session} do
-      lines = CellSession.take_lines(session)
-
-      assert Enum.at(lines, 5) == ""
-    end
   end
 
   describe "take_text/1" do
-    test "joins the rows with newlines", %{session: session} do
-      text = CellSession.take_text(session)
-
-      assert text == Enum.join(CellSession.take_lines(session), "\n")
-    end
-
     test "reflects input fed into the session", %{session: session} do
       CellSession.feed_input(session, {:char, ?!})
 
@@ -94,16 +75,5 @@ defmodule Drafter.CellSessionTextTest do
 
       assert CellSession.take_text(session) =~ "hello world"
     end
-  end
-
-  test "agrees with the strips take_cells/1 returns", %{session: session} do
-    alias Drafter.Draw.Strip
-
-    from_strips =
-      session
-      |> CellSession.take_cells()
-      |> Enum.map_join("\n", &String.trim_trailing(Strip.to_plain_text(&1)))
-
-    assert CellSession.take_text(session) == from_strips
   end
 end

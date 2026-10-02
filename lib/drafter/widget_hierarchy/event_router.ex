@@ -491,6 +491,6 @@ defmodule Drafter.WidgetHierarchy.EventRouter do
 
   defp focused_widget_traps_tab?(hierarchy) do
     fields = focused_widget_fields(hierarchy)
-    Map.get(fields, :focused, false) and Map.get(fields, :trap_focus, false) == true
+    Map.get(fields, :focused) == true and Map.get(fields, :trap_focus) == true
   end
 end

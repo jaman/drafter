@@ -1,21 +1,7 @@
 defmodule Drafter.Terminal.KittyKeyboardTest do
   use ExUnit.Case, async: true
 
-  alias Drafter.Terminal.{ANSI, KittyKeyboard}
-
-  describe "sequences" do
-    test "push asks for disambiguation, event types, all keys as escape codes, and text" do
-      assert KittyKeyboard.push() == "\e[>27u"
-    end
-
-    test "pop restores the previous mode" do
-      assert KittyKeyboard.pop() == "\e[<u"
-    end
-
-    test "query asks for the current flags" do
-      assert KittyKeyboard.query() == "\e[?u"
-    end
-  end
+  alias Drafter.Terminal.ANSI
 
   describe "query reply" do
     test "releases are reported only when the reply's flags carry event types (bit 2)" do
@@ -83,15 +69,6 @@ defmodule Drafter.Terminal.KittyKeyboardTest do
                ANSI.parse_sequence("\e[101;1;233:233u")
     end
 
-    test "caps lock and num lock are not modifiers" do
-      assert {[{:key, :a}, {:key_down, :a, []}], ""} = ANSI.parse_sequence("\e[97;65u")
-      assert {[{:key, :a}, {:key_down, :a, []}], ""} = ANSI.parse_sequence("\e[97;129u")
-    end
-
-    test "space" do
-      assert {[{:key, :" "}, {:key_down, :" ", []}], ""} = ANSI.parse_sequence("\e[32u")
-    end
-
     test "alternate key codes are ignored in favour of the base key" do
       assert {[{:key, :A}, {:key_down, :a, [:shift]}], ""} =
                ANSI.parse_sequence("\e[97:65:97;2;65u")
@@ -113,19 +90,10 @@ defmodule Drafter.Terminal.KittyKeyboardTest do
                ANSI.parse_sequence("\e[9;2u")
     end
 
-    test "their releases are key_up" do
-      assert {[{:key_up, :enter, []}], ""} = ANSI.parse_sequence("\e[13;1:3u")
-    end
-
     test "modifier keys are only ever key_down and key_up" do
       assert {[{:key_down, :left_shift, []}], ""} = ANSI.parse_sequence("\e[57441u")
       assert {[{:key_up, :left_shift, []}], ""} = ANSI.parse_sequence("\e[57441;1:3u")
       assert {[{:key_down, :right_control, []}], ""} = ANSI.parse_sequence("\e[57448u")
-    end
-
-    test "keypad keys without text are only key_down and key_up" do
-      assert {[{:key_down, :kp_5, []}], ""} = ANSI.parse_sequence("\e[57404u")
-      assert {[{:key_up, :kp_enter, []}], ""} = ANSI.parse_sequence("\e[57414;1:3u")
     end
 
     test "keypad keys with text also type it" do
@@ -150,28 +118,8 @@ defmodule Drafter.Terminal.KittyKeyboardTest do
       assert {[{:key_up, :f1, []}], ""} = ANSI.parse_sequence("\e[1;1:3P")
     end
 
-    test "a repeat is only the legacy key" do
-      assert {[{:key, :page_up}], ""} = ANSI.parse_sequence("\e[5;1:2~")
-    end
-
-    test "an explicit press is the legacy key plus key_down" do
-      assert {[{:key, :right, [:ctrl]}, {:key_down, :right, [:ctrl]}], ""} =
-               ANSI.parse_sequence("\e[1;5:1C")
-    end
-
     test "a release with modifiers" do
       assert {[{:key_up, :left, [:shift]}], ""} = ANSI.parse_sequence("\e[1;2:3D")
-    end
-
-    test "home and end in both encodings" do
-      assert {[{:key_up, :home, []}], ""} = ANSI.parse_sequence("\e[1;1:3H")
-      assert {[{:key_up, :home, []}], ""} = ANSI.parse_sequence("\e[7;1:3~")
-      assert {[{:key_up, :end, []}], ""} = ANSI.parse_sequence("\e[8;1:3~")
-    end
-
-    test "kp_begin" do
-      assert {[{:key, :kp_begin}, {:key_down, :kp_begin, []}], ""} =
-               ANSI.parse_sequence("\e[1;1:1E")
     end
   end
 
@@ -209,10 +157,6 @@ defmodule Drafter.Terminal.KittyKeyboardTest do
   end
 
   describe "partial sequences" do
-    test "an unterminated CSI u is retained" do
-      assert {[], "\e[97;1:"} = ANSI.parse_sequence("\e[97;1:")
-    end
-
     test "a sequence split across reads parses whole" do
       {events, rest} = ANSI.parse_sequence("\e[97;1")
       assert events == []

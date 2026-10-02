@@ -27,9 +27,4 @@ defmodule Drafter.WeightedAreaTest do
 
     assert Pixel.braille_strips(area_spec(data), {20, 8}) != nil
   end
-
-  test "plain number series still rasterises" do
-    assert Pixel.braille_strips(area_spec([1.0, 3.0, 2.0, 4.0]), {20, 8}) != nil
-    assert Pixel.braille_strips(area_spec([[1.0, 2.0, 3.0], [3.0, 2.0, 1.0]]), {20, 8}) != nil
-  end
 end

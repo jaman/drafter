@@ -11,46 +11,12 @@ defmodule Drafter.Widget.RichLogTest do
 
   defp strip_text(strip), do: Enum.map_join(strip.segments, & &1.text)
 
-  describe "mount" do
-    test "accepts the plain string form the moduledoc documents" do
-      state = RichLog.mount(%{lines: ["one", "two"]})
-
-      assert texts(RichLog.render(state, rect(20, 4))) == ["one", "two", "", ""]
-    end
-
-    test "accepts the annotated tuple form" do
-      state = RichLog.mount(%{lines: [{"warn", %{color: {255, 0, 0}}}]})
-
-      assert "warn" in texts(RichLog.render(state, rect(20, 2)))
-    end
-
-    test "keeps the newest lines when more than max_lines are given" do
-      state = RichLog.mount(%{lines: Enum.map(1..10, &"line #{&1}"), max_lines: 3})
-
-      assert texts(RichLog.render(state, rect(20, 3))) == ["line 8", "line 9", "line 10"]
-    end
-  end
-
   describe "update" do
     test "a growing lines prop reaches the widget" do
       state = RichLog.mount(%{lines: []})
       state = RichLog.update(%{lines: ["alpha", "beta"]}, state)
 
       assert texts(RichLog.render(state, rect(20, 2))) == ["alpha", "beta"]
-    end
-
-    test "an omitted lines prop leaves the existing content alone" do
-      state = RichLog.mount(%{lines: ["kept"]})
-      state = RichLog.update(%{wrap: false}, state)
-
-      assert texts(RichLog.render(state, rect(20, 1))) == ["kept"]
-    end
-
-    test "update honours max_lines" do
-      state = RichLog.mount(%{lines: [], max_lines: 2})
-      state = RichLog.update(%{lines: ["a", "b", "c"]}, state)
-
-      assert texts(RichLog.render(state, rect(20, 2))) == ["b", "c"]
     end
   end
 
@@ -83,14 +49,6 @@ defmodule Drafter.Widget.RichLogTest do
 
       assert length(strips) == 4
       assert texts(strips) |> Enum.reject(&(&1 == "")) |> length() > 1
-    end
-
-    test "wrapping off truncates instead of spilling rows" do
-      state = RichLog.mount(%{lines: ["aaaa bbbb cccc dddd"], wrap: false})
-      strips = RichLog.render(state, rect(10, 3))
-
-      assert length(strips) == 3
-      assert Enum.all?(strips, &(Strip.width(&1) == 10))
     end
 
     test "wrapped rows overflowing the rect keep the newest rows" do

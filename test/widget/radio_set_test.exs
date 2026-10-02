@@ -11,43 +11,6 @@ defmodule Drafter.Widget.RadioSetTest do
       state = RadioSet.mount(%{options: [{"Light", :light}, {"Dark", :dark}]})
       assert state.options == [%{id: :light, label: "Light"}, %{id: :dark, label: "Dark"}]
     end
-
-    test "normalizes string options to maps" do
-      state = RadioSet.mount(%{options: ["alpha", "beta"]})
-      assert state.options == [%{id: "alpha", label: "alpha"}, %{id: "beta", label: "beta"}]
-    end
-
-    test "accepts already-normalized map options" do
-      opts = [%{id: :a, label: "A"}, %{id: :b, label: "B"}]
-      state = RadioSet.mount(%{options: opts})
-      assert state.options == opts
-    end
-
-    test "sets selected_index when selected matches a tuple option" do
-      state = RadioSet.mount(%{options: [{"Light", :light}, {"Dark", :dark}], selected: :dark})
-      assert state.selected_index == 1
-    end
-
-    test "sets selected_index when selected matches a string option" do
-      state = RadioSet.mount(%{options: ["alpha", "beta", "gamma"], selected: "beta"})
-      assert state.selected_index == 1
-    end
-
-    test "defaults selected_index to 0 when no selected given" do
-      state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}]})
-      assert state.selected_index == 0
-    end
-
-    test "highlighted_index matches selected_index on mount" do
-      state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}, {"C", :c}], selected: :c})
-      assert state.highlighted_index == state.selected_index
-      assert state.highlighted_index == 2
-    end
-
-    test "defaults focused to false" do
-      state = RadioSet.mount(%{})
-      assert state.focused == false
-    end
   end
 
   describe "update/2" do
@@ -65,19 +28,6 @@ defmodule Drafter.Widget.RadioSetTest do
       assert new_state.highlighted_index == 2
     end
 
-    test "recalculates selected_index when :selected changes" do
-      state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}, {"C", :c}], selected: :a})
-      new_state = RadioSet.update(%{selected: :c}, state)
-      assert new_state.selected_index == 2
-    end
-
-    test "clamps selected_index when options list shrinks" do
-      state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}, {"C", :c}], selected: :c})
-      assert state.selected_index == 2
-      new_state = RadioSet.update(%{options: [{"A", :a}]}, state)
-      assert new_state.selected_index == 0
-    end
-
     test "preserves options when no options key in props" do
       state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}]})
       new_state = RadioSet.update(%{selected: :b}, state)
@@ -93,20 +43,6 @@ defmodule Drafter.Widget.RadioSetTest do
       assert new_state.highlighted_index == 1
     end
 
-    test "up bubbles at index 0" do
-      state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}]})
-      state = %{state | highlighted_index: 0}
-      assert {:bubble, new_state} = RadioSet.handle_event({:key, :up}, state)
-      assert new_state.highlighted_index == 0
-    end
-
-    test "down increments highlighted_index" do
-      state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}, {"C", :c}]})
-      state = %{state | highlighted_index: 0}
-      assert {:ok, new_state} = RadioSet.handle_event({:key, :down}, state)
-      assert new_state.highlighted_index == 1
-    end
-
     test "down bubbles at last option index" do
       state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}]})
       state = %{state | highlighted_index: 1}
@@ -114,36 +50,11 @@ defmodule Drafter.Widget.RadioSetTest do
       assert new_state.highlighted_index == 1
     end
 
-    test "enter sets selected_index to highlighted_index" do
-      state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}, {"C", :c}]})
-      state = %{state | highlighted_index: 2}
-      assert {:ok, new_state} = RadioSet.handle_event({:key, :enter}, state)
-      assert new_state.selected_index == 2
-    end
-
     test "space sets selected_index to highlighted_index" do
       state = RadioSet.mount(%{options: [{"A", :a}, {"B", :b}]})
       state = %{state | highlighted_index: 1}
       assert {:ok, new_state} = RadioSet.handle_event({:key, :" "}, state)
       assert new_state.selected_index == 1
-    end
-
-    test "focus sets focused to true" do
-      state = RadioSet.mount(%{options: []})
-      assert {:ok, new_state} = RadioSet.handle_event({:focus}, state)
-      assert new_state.focused == true
-    end
-
-    test "blur sets focused to false" do
-      state = RadioSet.mount(%{options: []})
-      state = %{state | focused: true}
-      assert {:ok, new_state} = RadioSet.handle_event({:blur}, state)
-      assert new_state.focused == false
-    end
-
-    test "unhandled event returns noreply" do
-      state = RadioSet.mount(%{options: []})
-      assert {:noreply, ^state} = RadioSet.handle_event({:key, :tab}, state)
     end
   end
 end

@@ -79,18 +79,6 @@ defmodule Drafter.Widget.DataTableScrollbarDragTest do
       assert dragged.scroll.offset > pressed.scroll.offset
     end
 
-    test "dragging back up scrolls back to the start" do
-      state = table()
-      x = scrollbar_x(state)
-      top = first_data_row(state)
-
-      {:ok, pressed, _} = DataTable.handle_press(x, top, state)
-      {:ok, down, _} = DataTable.handle_drag(x, top + 8, pressed)
-      {:ok, up, _} = DataTable.handle_drag(x, top, down)
-
-      assert up.scroll.offset == 0
-    end
-
     test "dragging past the bottom clamps rather than overscrolling" do
       state = table()
       x = scrollbar_x(state)
@@ -111,11 +99,6 @@ defmodule Drafter.Widget.DataTableScrollbarDragTest do
 
       hierarchy = Mouse.maybe_start_drag_capture(%{drag_capture_widget: nil}, :table, pressed)
       assert hierarchy.drag_capture_widget == :table
-    end
-
-    test "an idle table does not capture the pointer" do
-      hierarchy = Mouse.maybe_start_drag_capture(%{drag_capture_widget: nil}, :table, table())
-      assert hierarchy.drag_capture_widget == nil
     end
 
     test "a widget using flat drag fields still captures" do

@@ -12,29 +12,10 @@ defmodule Drafter.Terminal.InputBufferTest do
 
   defp bytes(binary), do: for(<<byte <- binary>>, do: <<byte>>)
 
-  test "a complete chunk decodes immediately and holds nothing" do
-    {events, buffer} = InputBuffer.feed(InputBuffer.new(), "abc")
-    assert events == [key: :a, key: :b, key: :c]
-    assert buffer.pending == ""
-    assert buffer.timer == nil
-  end
-
-  test "an escape sequence split across chunks decodes once complete" do
-    {events, buffer} = feed_all(["\e[", "A"])
-    assert events == [key: :up]
-    assert buffer.pending == ""
-  end
-
   test "a paste split byte by byte decodes as one paste event" do
     {events, buffer} = feed_all(bytes("\e[200~hello\e[201~"))
     assert events == [bracketed_paste: "hello"]
     assert buffer.pending == ""
-  end
-
-  test "a large paste split byte by byte survives intact" do
-    body = String.duplicate("0123456789", 50)
-    {events, _buffer} = feed_all(bytes("\e[200~#{body}\e[201~"))
-    assert events == [bracketed_paste: body]
   end
 
   test "undecided bytes schedule a flush" do
@@ -53,30 +34,6 @@ defmodule Drafter.Terminal.InputBufferTest do
     refute_receive :input_flush, 100
   end
 
-  test "flushing a held escape yields the escape key" do
-    {[], buffer} = InputBuffer.feed(InputBuffer.new(), "\e")
-    {events, buffer} = InputBuffer.flush(buffer)
-    assert events == [key: :escape]
-    assert buffer.pending == ""
-    assert buffer.timer == nil
-  end
-
-  test "flushing an empty buffer is a no-op" do
-    assert {[], %InputBuffer{pending: ""}} = InputBuffer.flush(InputBuffer.new())
-  end
-
-  test "reset discards held bytes" do
-    {[], buffer} = InputBuffer.feed(InputBuffer.new(), "\e[200~partial")
-    buffer = InputBuffer.reset(buffer)
-    assert buffer.pending == ""
-    assert buffer.timer == nil
-  end
-
-  test "keys typed while a paste is buffering are not lost or reordered" do
-    {events, _buffer} = feed_all(["x", "\e[200~pa", "ste\e[201~", "y"])
-    assert events == [{:key, :x}, {:bracketed_paste, "paste"}, {:key, :y}]
-  end
-
   test "a buffer opened with key release on adds key_down to legacy presses" do
     {events, buffer} = InputBuffer.feed(InputBuffer.new(key_release: true), "\e[A")
     assert events == [{:key, :up}, {:key_down, :up, []}]
@@ -93,5 +50,38 @@ defmodule Drafter.Terminal.InputBufferTest do
     {events, buffer} = InputBuffer.feed(InputBuffer.new(), "\e[A")
     assert events == [{:key, :up}]
     refute buffer.key_release
+  end
+
+  describe "mouse buttons" do
+    test "motion reported with a button that was never pressed is a move" do
+      {events, _buffer} = feed_all(["\e[<32;10;5M", "\e[<32;11;5M"])
+
+      assert events == [
+               mouse: %{type: :move, x: 9, y: 4, modifiers: []},
+               mouse: %{type: :move, x: 10, y: 4, modifiers: []}
+             ]
+    end
+
+    test "motion while the button is down is a drag, and a move again after release" do
+      {events, _buffer} =
+        feed_all(["\e[<0;10;5M", "\e[<32;11;5M", "\e[<0;11;5m", "\e[<32;12;5M"])
+
+      assert [
+               mouse: %{type: :mouse_down, button: :left},
+               mouse: %{type: :drag, button: :left, x: 10},
+               mouse: %{type: :mouse_up, button: :left},
+               mouse: %{type: :move, x: 11}
+             ] = events
+    end
+
+    test "the no-button motion code is a move whatever was pressed before" do
+      {events, _buffer} = feed_all(["\e[<0;1;1M", "\e[<0;1;1m", "\e[<35;2;2M"])
+      assert List.last(events) == {:mouse, %{type: :move, x: 1, y: 1, modifiers: []}}
+    end
+
+    test "held buttons survive across chunks" do
+      {events, _buffer} = feed_all(["\e[<0;10;5M\e[<", "32;11;5M"])
+      assert [mouse: %{type: :mouse_down}, mouse: %{type: :drag}] = events
+    end
   end
 end

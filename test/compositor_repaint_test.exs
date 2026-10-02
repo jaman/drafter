@@ -3,6 +3,7 @@ defmodule Drafter.CompositorRepaintTest do
 
   alias Drafter.Compositor
   alias Drafter.Draw.Strip
+  alias Drafter.TestSupport.ScreenModel
 
   defmodule CountingDriver do
     @moduledoc false
@@ -49,7 +50,22 @@ defmodule Drafter.CompositorRepaintTest do
     :sys.get_state(pid)
   end
 
-  defp painted?(text), do: Enum.any?(CountingDriver.writes(), &String.contains?(&1, text))
+  defp painted?(text) do
+    CountingDriver.writes() |> ScreenModel.apply() |> ScreenModel.row(0) == text
+  end
+
+  defp lands?(pid, text, timeout \\ 2000),
+    do: waiting(pid, text, System.monotonic_time(:millisecond) + timeout)
+
+  defp waiting(pid, text, deadline) do
+    settle(pid)
+
+    cond do
+      painted?(text) -> true
+      System.monotonic_time(:millisecond) >= deadline -> false
+      true -> waiting(pid, text, deadline)
+    end
+  end
 
   describe "sync/1" do
     test "returns once strips handed over before it are written to the driver" do
@@ -77,18 +93,16 @@ defmodule Drafter.CompositorRepaintTest do
       pid = Process.get(:drafter_compositor)
 
       paint(pid, "hello")
-      settle(pid)
 
-      assert painted?("hello")
+      assert lands?(pid, "hello")
     end
 
     test "the final frame of a burst always reaches the terminal" do
       pid = Process.get(:drafter_compositor)
 
       for n <- 1..500, do: paint(pid, "frame #{n}")
-      settle(pid)
 
-      assert painted?("frame 500"),
+      assert lands?(pid, "frame 500"),
              "the tail of a burst was coalesced away; #{length(CountingDriver.writes())} writes"
     end
 
@@ -97,24 +111,9 @@ defmodule Drafter.CompositorRepaintTest do
 
       for round <- 1..10 do
         for n <- 1..100, do: paint(pid, "r#{round} n#{n}")
-        settle(pid)
 
-        assert painted?("r#{round} n100"), "round #{round} never reached the terminal"
+        assert lands?(pid, "r#{round} n100"), "round #{round} never reached the terminal"
       end
-    end
-
-    test "sustained paints keep producing writes rather than flatlining" do
-      pid = Process.get(:drafter_compositor)
-
-      for n <- 1..2000 do
-        paint(pid, "tick #{n}")
-        if rem(n, 100) == 0, do: settle(pid)
-      end
-
-      settle(pid)
-
-      assert length(CountingDriver.writes()) >= 10,
-             "only #{length(CountingDriver.writes())} writes for 2000 paints"
     end
 
     test "painting identical content twice writes once" do

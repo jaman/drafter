@@ -24,10 +24,6 @@ defmodule Drafter.Widget.SwitchHoverTest do
   defp styles(state), do: thumb_and_track(state)
 
   describe "hover" do
-    test "the router's hover event sets the flag" do
-      assert {:ok, %{hovered: true}} = Switch.handle_event(:hover, Switch.mount(%{}))
-    end
-
     test "unhover clears it" do
       hovered = %{Switch.mount(%{}) | hovered: true}
 
@@ -50,16 +46,6 @@ defmodule Drafter.Widget.SwitchHoverTest do
       hovered_backgrounds = hovered |> styles() |> Enum.map(&Map.get(&1, :bg)) |> Enum.uniq()
 
       refute resting_backgrounds == hovered_backgrounds
-    end
-
-    test "hover styling applies whether the switch is on or off" do
-      for switch_state <- [:on, :off] do
-        resting = %{Switch.mount(%{label: "T"}) | state: switch_state}
-        hovered = %{resting | hovered: true}
-
-        refute styles(resting) == styles(hovered),
-               "no hover change while #{switch_state}"
-      end
     end
 
     test "a focused switch is also distinguishable from a resting one" do

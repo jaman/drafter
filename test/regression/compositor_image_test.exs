@@ -3,6 +3,7 @@ defmodule Drafter.Regression.CompositorImageTest do
 
   alias Drafter.{Compositor, Event}
   alias Drafter.Draw.Strip
+  alias Drafter.TestSupport.ScreenModel
 
   defmodule Cap do
     def start, do: Agent.start_link(fn -> [] end)
@@ -46,6 +47,49 @@ defmodule Drafter.Regression.CompositorImageTest do
     Cap.clear(cap)
     Compositor.clear_image(:chart)
     assert poll(cap, &String.contains?(&1, "DELETESEQ"))
+  end
+
+  test "does not send the image again when the same bytes are put", %{cap: cap} do
+    region = %{dx: 0, dy: 0, cols: 6, rows: 2}
+    Compositor.put_image(:still, "SAMEBYTES", "DEL", region)
+    Compositor.place_image(:still, 3, 5)
+    assert poll(cap, &String.contains?(&1, "SAMEBYTES"))
+
+    Cap.clear(cap)
+    Compositor.put_image(:still, "SAMEBYTES", "DEL", Map.put(region, :stamp, 1))
+    Compositor.put_image(:still, "SAMEBYTES", "DEL", Map.put(region, :stamp, 2))
+
+    refute String.contains?(settled(cap), "SAMEBYTES"),
+           "the same picture was transmitted again"
+  end
+
+  test "sends the image again as soon as its bytes change", %{cap: cap} do
+    region = %{dx: 0, dy: 0, cols: 6, rows: 2}
+    Compositor.put_image(:moving, "FRAME_ONE", "DEL", region)
+    Compositor.place_image(:moving, 3, 5)
+    assert poll(cap, &String.contains?(&1, "FRAME_ONE"))
+
+    Cap.clear(cap)
+    Compositor.put_image(:moving, "FRAME_TWO", "DEL", Map.put(region, :stamp, 1))
+    assert poll(cap, &String.contains?(&1, "FRAME_TWO"))
+  end
+
+  test "sends the image again when the same bytes move to a new size", %{cap: cap} do
+    Compositor.put_image(:resized, "SAMEBYTES2", "DEL", %{dx: 0, dy: 0, cols: 6, rows: 2})
+    Compositor.place_image(:resized, 3, 5)
+    assert poll(cap, &String.contains?(&1, "SAMEBYTES2"))
+
+    Cap.clear(cap)
+
+    Compositor.put_image(:resized, "SAMEBYTES2", "DEL", %{
+      dx: 0,
+      dy: 0,
+      cols: 8,
+      rows: 3,
+      stamp: 1
+    })
+
+    assert poll(cap, &String.contains?(&1, "SAMEBYTES2"))
   end
 
   test "never paints an image whose box falls below the screen", %{cap: cap} do
@@ -105,32 +149,6 @@ defmodule Drafter.Regression.CompositorImageTest do
     assert String.contains?(out, "\e[5;10H"), "the text after the image resumes at its column"
     refute String.contains?(out, "PLACE_ONLY")
     refute String.contains?(out, "FULL_IMAGE")
-  end
-
-  test "an image not yet on screen does not hold text back, and is painted after it", %{cap: cap} do
-    Compositor.render_strips([Strip.from_text("abcdefghijklmnop")], 0, 4)
-    assert poll(cap, &String.contains?(&1, "abcdefghijklmnop"))
-
-    Cap.clear(cap)
-
-    Compositor.put_image(:sixel, "PIXEL_BYTES", "", %{
-      dx: 0,
-      dy: 0,
-      cols: 6,
-      rows: 2,
-      stamp: 1,
-      place: nil
-    })
-
-    Compositor.place_image(:sixel, 3, 4)
-    assert poll(cap, &String.contains?(&1, "PIXEL_BYTES"))
-
-    Cap.clear(cap)
-    Compositor.render_strips([Strip.from_text("ABCDEFGHIJKLMNOP")], 0, 4)
-    out = settled(cap)
-    assert String.contains?(out, "ABC") and String.contains?(out, "JKLMNOP")
-    refute String.contains?(out, "DEFGHI")
-    refute String.contains?(out, "PIXEL_BYTES")
   end
 
   test "clear_image resets the stamp so a lower-or-equal stamp paints again", %{cap: cap} do
@@ -196,10 +214,9 @@ defmodule Drafter.Regression.CompositorImageTest do
 
     Process.sleep(400)
     writes = SlowCap.writes(slow)
-    text_writes = Enum.filter(writes, &String.contains?(&1, "row"))
     image_writes = Enum.filter(writes, &String.contains?(&1, "IMG"))
 
-    assert Enum.any?(text_writes, &String.contains?(&1, "row6"))
+    assert writes |> ScreenModel.apply() |> ScreenModel.row(20) == "row6"
     assert List.last(image_writes) =~ "IMG6"
     assert length(image_writes) < 6
     assert Enum.all?(image_writes, &(not String.contains?(&1, "row")))

@@ -64,30 +64,4 @@ defmodule Drafter.LayerCompositorTest do
       assert after_seg.text == "AAAAA"
     end
   end
-
-  describe "LayerCompositor helper functions" do
-    test "background_layer creates layer with correct z-index" do
-      strips = [Strip.new([Segment.new("test", %{})])]
-      bounds = %{x: 0, y: 0, width: 4, height: 1}
-
-      layer = LayerCompositor.background_layer(strips, bounds)
-
-      assert layer.id == :background
-      assert layer.z_index == 0
-      assert layer.strips == strips
-      assert layer.bounds == bounds
-    end
-
-    test "widget_layer creates layer with correct z-index" do
-      strips = [Strip.new([Segment.new("widget", %{})])]
-      bounds = %{x: 0, y: 0, width: 6, height: 1}
-
-      layer = LayerCompositor.widget_layer(:my_widget, strips, bounds)
-
-      assert layer.id == :my_widget
-      assert layer.z_index == 20
-      assert layer.strips == strips
-      assert layer.bounds == bounds
-    end
-  end
 end

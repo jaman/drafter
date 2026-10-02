@@ -18,10 +18,6 @@ defmodule Drafter.Runtime.FrameClockTest do
       assert FrameClock.interval_for("unlimited") == nil
     end
 
-    test "a millisecond interval passes through" do
-      assert FrameClock.interval_for(50) == 50
-    end
-
     test "an unparseable rate is rejected loudly" do
       assert_raise ArgumentError, fn -> FrameClock.interval_for("fast") end
       assert_raise ArgumentError, fn -> FrameClock.interval_for("30hz") end

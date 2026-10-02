@@ -2,12 +2,14 @@ defmodule Drafter.Widget.Chart.Pixel do
   @moduledoc """
   Renders chart data as terminal graphics via the frozen `french_curve` library.
 
-  Two outputs from a single rasterisation path: a true-image escape sequence for
-  terminals that support a pixel protocol (kitty / iTerm2 / sixel), or anti-aliased
-  braille `Strip`s for any other truecolor terminal. Callers pick the mode with
-  `mode/2` ("best available" for `:pixel`) and pass a chart `spec` to `image/4`
-  (a `{paint, clear}` pair — `clear` is a kitty delete for the persistent-layer
-  protocol, empty for cell-grid protocols) or `braille_strips/2`.
+  Three outputs from a single rasterisation path: a true-image escape sequence for
+  terminals that support a pixel protocol (kitty / iTerm2 / sixel), anti-aliased
+  braille `Strip`s for any other truecolor terminal, or block-character `Strip`s in
+  one of `FrenchCurve.Backend.Cells`' glyph sets (`:half`, `:quad`, `:sextant`,
+  `:octant`), two colours per cell. Callers pick the mode with `mode/2` ("best
+  available" for `:pixel`) and pass a chart `spec` to `image/4` (a `{paint, clear}`
+  pair — `clear` is a kitty delete for the persistent-layer protocol, empty for
+  cell-grid protocols), `braille_strips/2` or `cells_strips/3`.
 
   A `spec` is `%{type, values, color: {r,g,b,a}, smooth, fill_opacity, min, max}`.
   Add a `raster/3` clause to support a new chart type; `supported/0` gates which
@@ -16,10 +18,12 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Session.Context
+  alias FrenchCurve.Backend.Cells
   alias FrenchCurve.{Capability, Chart, Draw, Raster}
 
   @pixel_protocols [:iterm2, :kitty, :sixel]
-  @modes [:auto, :pixel, :kitty, :iterm2, :sixel, :braille, :text]
+  @cell_sets [:half, :quad, :sextant, :octant]
+  @modes [:auto, :pixel, :kitty, :iterm2, :sixel, :braille, :text | @cell_sets]
   @supported [
     :line,
     :step,
@@ -59,12 +63,20 @@ defmodule Drafter.Widget.Chart.Pixel do
   @spec modes() :: [atom()]
   def modes, do: @modes
 
-  @spec mode(atom() | nil, atom()) :: :pixel | :braille | :text
+  @typedoc "How a chart or slider draws: an image, braille, block characters of a glyph set, or text."
+  @type drawing :: :pixel | :braille | {:cells, FrenchCurve.Backend.Cells.set()} | :text
+
+  @doc "The glyph sets accepted as modes, each drawing through `cells_strips/3`."
+  @spec cell_sets() :: [atom()]
+  def cell_sets, do: @cell_sets
+
+  @spec mode(atom() | nil, atom()) :: drawing()
   def mode(renderer, type), do: to_mode(resolve(renderer), type)
 
   defp to_mode(_effective, type) when type not in @supported, do: :text
   defp to_mode(:text, _type), do: :text
   defp to_mode(:braille, _type), do: :braille
+  defp to_mode(set, _type) when set in @cell_sets, do: {:cells, set}
 
   defp to_mode(effective, _type) when effective in [:auto, :pixel] do
     if detect(), do: :pixel, else: :braille
@@ -79,9 +91,9 @@ defmodule Drafter.Widget.Chart.Pixel do
   any mode that is not `:auto` or `:pixel` has no protocol and returns `nil`.
 
   `:auto` and `:pixel` take what the terminal answered when it was probed at
-  startup — see `Drafter.Terminal.Probe`. A terminal that was never probed is
-  guessed at from its environment instead, through
-  `FrenchCurve.Capability.detect/1`.
+  startup — see `Drafter.Terminal.Probe`. A terminal that was never probed, or
+  that answered the probe without naming a protocol, is guessed at from its
+  environment instead, through `FrenchCurve.Capability.detect/1`.
 
   Either way the terminal in question is the one this session is attached to, which
   for a session served over ssh or telnet is the connecting client's rather than
@@ -123,24 +135,31 @@ defmodule Drafter.Widget.Chart.Pixel do
     end
   end
 
-  defp parse_mode(value) do
-    case value |> String.trim() |> String.downcase() do
-      "auto" -> :auto
-      "pixel" -> :pixel
-      "kitty" -> :kitty
-      "iterm2" -> :iterm2
-      "sixel" -> :sixel
-      "braille" -> :braille
-      "text" -> :text
-      _ -> nil
-    end
-  end
+  @mode_names Map.new(@modes, &{Atom.to_string(&1), &1})
+
+  defp parse_mode(value), do: Map.get(@mode_names, value |> String.trim() |> String.downcase())
+
+  @doc """
+  The graphics protocol of this session's terminal, whatever mode is in force.
+
+  What the terminal answered when it was probed at startup, or, when it was never
+  probed or named no protocol, what its environment suggests through
+  `FrenchCurve.Capability.detect/1`. `nil` when neither names one. An iTerm2 session is
+  always judged by its environment, whatever it answered: `:iterm2`, or `:kitty` when
+  `FRENCH_CURVE_ITERM2=kitty` is set (see `FrenchCurve.Capability`).
+  """
+  @spec terminal() :: atom() | nil
+  def terminal, do: detect()
 
   defp detect do
     case Context.terminal_protocol() do
-      {:ok, protocol} -> protocol
-      :unprobed -> detect_from_env()
+      {:ok, probed} when not is_nil(probed) -> unless_iterm2(probed)
+      _unprobed_or_unnamed -> detect_from_env()
     end
+  end
+
+  defp unless_iterm2(probed) do
+    if Capability.iterm2?(Context.terminal_env()), do: detect_from_env(), else: probed
   end
 
   defp detect_from_env do
@@ -165,12 +184,14 @@ defmodule Drafter.Widget.Chart.Pixel do
     _ -> nil
   end
 
-  # FrenchCurve.frame/3 rather than the kitty pieces by hand: a terminal detected as :kitty
-  # does not necessarily keep images under an id, and one that does not draws nothing at all
-  # when sent a store and then a placement. `detect/0` above never calls iTerm :kitty, so this
-  # widget was never bitten by it — but the choice belongs in one place, not five.
   defp encode(raster, protocol, {cols, rows}, id) do
-    case FrenchCurve.frame(raster, id, fit: {cols, rows}, protocol: protocol) do
+    placements = Capability.placements?(Context.terminal_env())
+
+    case FrenchCurve.frame(raster, id,
+           fit: {cols, rows},
+           protocol: protocol,
+           placements: placements
+         ) do
       nil -> nil
       {paint, clear, _place} -> {paint, clear}
     end
@@ -181,6 +202,23 @@ defmodule Drafter.Widget.Chart.Pixel do
     case raster(spec, cols * 2, rows * 4) do
       nil -> nil
       r -> r |> FrenchCurve.render(:braille, []) |> rows_to_strips() |> fit_rows(rows, cols)
+    end
+  rescue
+    _ -> nil
+  end
+
+  @doc """
+  Renders `spec` as `rows` strips of `cols` cells in the glyph set `set`, or `nil` when
+  it cannot be drawn.
+  """
+  @spec cells_strips(map(), {pos_integer(), pos_integer()}, FrenchCurve.Backend.Cells.set()) ::
+          [Strip.t()] | nil
+  def cells_strips(spec, {cols, rows}, set) do
+    {sx, sy} = Cells.subpixels(set)
+
+    case raster(spec, cols * sx, rows * sy) do
+      nil -> nil
+      r -> r |> FrenchCurve.render(:cells, set: set) |> cells_to_strips() |> fit_rows(rows, cols)
     end
   rescue
     _ -> nil
@@ -368,12 +406,18 @@ defmodule Drafter.Widget.Chart.Pixel do
     cy = h / 2
     radius = min(w, h) / 2 - 1
 
-    for y <- 0..(h - 1)//1, x <- 0..(w - 1)//1, reduce: Raster.new(w, h) do
+    reach = radius * radius
+    left = max(0, ceil(cx - radius))
+    right = min(w - 1, floor(cx + radius))
+    top = max(0, ceil(cy - radius))
+    bottom = min(h - 1, floor(cy + radius))
+
+    for y <- top..bottom//1, x <- left..right//1, reduce: Raster.new(w, h) do
       raster ->
         dx = x - cx
         dy = y - cy
 
-        if dx * dx + dy * dy <= radius * radius do
+        if dx * dx + dy * dy <= reach do
           Raster.put_pixel(raster, x, y, slice_color_at(ranges, pixel_angle(dx, dy)))
         else
           raster
@@ -888,6 +932,8 @@ defmodule Drafter.Widget.Chart.Pixel do
       )
     end)
   end
+
+  defp cells_to_strips(rows), do: Enum.map(rows, &Strip.from_cells/1)
 
   defp fit_rows(strips, rows, cols) do
     sized = Enum.map(strips, &Strip.fit_to_width(&1, cols))

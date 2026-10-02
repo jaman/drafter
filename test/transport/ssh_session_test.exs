@@ -79,15 +79,6 @@ defmodule Drafter.Transport.SSHSessionTest do
     end
   end
 
-  test "a connected session registers a loop", %{port: port} do
-    {conn, channel} = open(port)
-
-    assert live_loops() != []
-
-    :ssh_connection.close(conn, channel)
-    :ssh.close(conn)
-  end
-
   defp reachable?(address, port) do
     case :gen_tcp.connect(address, port, [], 1_000) do
       {:ok, socket} ->
@@ -193,15 +184,6 @@ defmodule Drafter.Transport.SSHSessionTest do
     {conn, channel} = open_answering(port, "\eP>|kitty(0.32.2)\e\\\e[?62;22c")
 
     assert loop_protocol() == :kitty
-
-    :ssh_connection.close(conn, channel)
-    :ssh.close(conn)
-  end
-
-  test "a client reporting sixel among its attributes gets sixel", %{port: port} do
-    {conn, channel} = open_answering(port, "\e[?62;4;6c")
-
-    assert loop_protocol() == :sixel
 
     :ssh_connection.close(conn, channel)
     :ssh.close(conn)

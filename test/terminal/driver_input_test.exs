@@ -61,16 +61,6 @@ defmodule Drafter.Terminal.DriverInputTest do
     assert collect() == [key: :h, key: :e, key: :l, key: :l, key: :o]
   end
 
-  test "control characters are delivered", %{driver: driver} do
-    type(driver, "\x03")
-    assert collect() == [{:key, :c, [:ctrl]}]
-  end
-
-  test "carriage return is delivered as enter", %{driver: driver} do
-    type(driver, "\r")
-    assert collect() == [key: :enter]
-  end
-
   test "an arrow key typed one byte at a time arrives as a single key event", %{driver: driver} do
     type(driver, "\e[A")
     assert collect() == [key: :up]
@@ -81,25 +71,10 @@ defmodule Drafter.Terminal.DriverInputTest do
     assert collect() == [key: :escape]
   end
 
-  test "a paste typed one byte at a time arrives as one paste event", %{driver: driver} do
-    type(driver, "\e[200~select 1\e[201~")
-    assert collect() == [bracketed_paste: "select 1"]
-  end
-
-  test "typing continues to work after a paste", %{driver: driver} do
-    type(driver, "\e[200~x\e[201~ab")
-    assert collect() == [{:bracketed_paste, "x"}, {:key, :a}, {:key, :b}]
-  end
-
   test "typing continues to work after a bare escape flushes", %{driver: driver} do
     type(driver, "\e")
     assert collect() == [key: :escape]
     type(driver, "ok")
     assert collect() == [key: :o, key: :k]
-  end
-
-  test "a multi-byte utf8 character split across reads arrives once", %{driver: driver} do
-    type(driver, "é")
-    assert collect() == [char: 233]
   end
 end

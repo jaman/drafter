@@ -15,6 +15,7 @@ defmodule Drafter.Widget.Slider.Pixel do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Widget.Chart.Pixel
+  alias FrenchCurve.Backend.Cells
   alias FrenchCurve.{Draw, Raster}
 
   @image_scale 4
@@ -44,13 +45,17 @@ defmodule Drafter.Widget.Slider.Pixel do
   app was run with. A mode asking for pixels on a terminal with no graphics protocol
   falls back to braille.
   """
-  @spec mode(atom() | nil) :: :pixel | :braille | :text
+  @spec mode(atom() | nil) :: Pixel.drawing()
   def mode(renderer) do
     case Pixel.resolve(renderer) do
       :text -> :text
       :braille -> :braille
-      resolved -> if Pixel.protocol(resolved), do: :pixel, else: :braille
+      resolved -> if Pixel.protocol(resolved), do: :pixel, else: cells_or_braille(resolved)
     end
+  end
+
+  defp cells_or_braille(resolved) do
+    if resolved in Pixel.cell_sets(), do: {:cells, resolved}, else: :braille
   end
 
   @doc "The pixel protocol in use, or `nil` when the terminal has none."
@@ -70,6 +75,29 @@ defmodule Drafter.Widget.Slider.Pixel do
       encode(Raster.finalize(raster), protocol, {cols, rows}, id)
     else
       _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  @doc """
+  Renders `spec` as `rows` strips of `cols` cells in the glyph set `set`, or `nil` when
+  it cannot be drawn.
+  """
+  @spec cells_strips(spec(), {pos_integer(), pos_integer()}, Cells.set()) ::
+          [Strip.t()] | nil
+  def cells_strips(spec, {cols, rows}, set) do
+    {sx, sy} = Cells.subpixels(set)
+
+    case raster(spec, {cols * sx, rows * sy}) do
+      nil ->
+        nil
+
+      raster ->
+        raster
+        |> FrenchCurve.render(:cells, set: set)
+        |> Enum.map(&Strip.from_cells/1)
+        |> fit_rows(rows, cols)
     end
   rescue
     _ -> nil

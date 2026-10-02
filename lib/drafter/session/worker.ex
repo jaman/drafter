@@ -67,7 +67,7 @@ defmodule Drafter.Session.Worker do
       event_handler: eh
     }
 
-    session_opts = [mode: mode, shared_state: shared_state] ++ Map.to_list(mount_props)
+    session_opts = [mode: mode, shared_state: shared_state, props: mount_props]
 
     app_pid =
       spawn_link(fn ->

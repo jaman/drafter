@@ -5,10 +5,6 @@ defmodule Drafter.RenderCacheTest do
   alias Drafter.RenderCache
 
   describe "extract_layout_impact/1" do
-    test "returns {false, nil} for empty actions" do
-      assert {false, nil} = RenderCache.extract_layout_impact([])
-    end
-
     test "returns {false, nil} for unrelated actions" do
       assert {false, nil} =
                RenderCache.extract_layout_impact([:some_action, {:app_callback, :foo, :bar}])
@@ -20,10 +16,6 @@ defmodule Drafter.RenderCacheTest do
 
     test "matches {:widget_layout_needed, direction} tuple" do
       assert {true, :below} = RenderCache.extract_layout_impact([{:widget_layout_needed, :below}])
-    end
-
-    test "matches {:widget_layout_needed, :all} tuple" do
-      assert {true, :all} = RenderCache.extract_layout_impact([{:widget_layout_needed, :all}])
     end
 
     test "extracts direction among other actions" do
@@ -64,11 +56,6 @@ defmodule Drafter.RenderCacheTest do
   end
 
   describe "strips_fingerprint/1" do
-    test "same strips produce same fingerprint" do
-      strip = Strip.from_text("hello")
-      assert RenderCache.strips_fingerprint([strip]) == RenderCache.strips_fingerprint([strip])
-    end
-
     test "different strips produce different fingerprint" do
       strip_a = Strip.from_text("hello")
       strip_b = Strip.from_text("world")

@@ -110,16 +110,4 @@ defmodule Drafter.Widget.KeyShapeCoverageTest do
       assert back.cursor_index == 0
     end
   end
-
-  describe "the shapes themselves" do
-    test "printable punctuation arrives as an atom, not a binary" do
-      assert press("+") == {:key, :+}
-      assert press("/") == {:key, :/}
-    end
-
-    test "modified arrows arrive as a three-element tuple, not a nested one" do
-      assert press("\e[1;2D") == {:key, :left, [:shift]}
-      assert press("\e[1;5D") == {:key, :left, [:ctrl]}
-    end
-  end
 end

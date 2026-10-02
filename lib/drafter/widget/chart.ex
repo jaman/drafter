@@ -157,7 +157,8 @@ defmodule Drafter.Widget.Chart do
     * `:class` — theme class atom or list of them, reaching `mount/1` as
       `:classes`. Default `[]`
     * `:renderer` — rendering backend for this chart: `:text` (ASCII/block), `:braille`
-      (anti-aliased braille), `:pixel` / `:auto` (best terminal graphics available —
+      (anti-aliased braille), `:half` / `:quad` / `:sextant` / `:octant` (block
+      characters of that `FrenchCurve.Backend.Cells` set, two colours per cell), `:pixel` / `:auto` (best terminal graphics available —
       kitty/iTerm2/sixel image, falling back to braille), or `:iterm2` / `:kitty` /
       `:sixel` to force a protocol. Overrides the runtime `mode:` config, but the
       `DRAFTER_MODE` env var still forces over it. When unset, the global mode applies:
@@ -619,6 +620,7 @@ defmodule Drafter.Widget.Chart do
     case Pixel.mode(renderer(state), state.chart_type) do
       :pixel -> blank_strips(rect)
       :braille -> braille_render(state, rect)
+      {:cells, set} -> cells_render(state, rect, set)
       :text -> render_text(state, rect)
     end
   end
@@ -692,6 +694,13 @@ defmodule Drafter.Widget.Chart do
 
   defp braille_render(state, rect) do
     case Pixel.braille_strips(pixel_spec(state), {max(1, rect.width), max(1, rect.height)}) do
+      nil -> render_text(state, rect)
+      strips -> strips
+    end
+  end
+
+  defp cells_render(state, rect, set) do
+    case Pixel.cells_strips(pixel_spec(state), {max(1, rect.width), max(1, rect.height)}, set) do
       nil -> render_text(state, rect)
       strips -> strips
     end
@@ -921,7 +930,7 @@ defmodule Drafter.Widget.Chart do
     live_candle = Map.get(props, :_live_candle)
 
     data = data || []
-    data_values = extract_values(data)
+    data_values = extract_values(data, Map.get(props, :chart_type))
 
     live_values =
       if live_candle do
@@ -949,6 +958,19 @@ defmodule Drafter.Widget.Chart do
       {min_val - padding, max_val + padding}
     end
   end
+
+  defp extract_values(data, chart_type) when chart_type in [:scatter, :bubble],
+    do: Enum.flat_map(data, &point_height/1)
+
+  defp extract_values(data, _chart_type), do: extract_values(data)
+
+  defp point_height({_x, y}) when is_number(y), do: [y]
+  defp point_height({_x, y, _weight}) when is_number(y), do: [y]
+  defp point_height([_x, y]) when is_number(y), do: [y]
+  defp point_height([_x, y, _weight]) when is_number(y), do: [y]
+  defp point_height(%{y: y}) when is_number(y), do: [y]
+  defp point_height(points) when is_list(points), do: Enum.flat_map(points, &point_height/1)
+  defp point_height(_other), do: []
 
   defp extract_values([first | _] = data) when is_number(first), do: data
 

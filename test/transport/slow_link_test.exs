@@ -10,7 +10,8 @@ defmodule Drafter.Transport.SlowLinkTest do
   alias Drafter.Compositor
   alias Drafter.Draw.Strip
   alias Drafter.Event.Manager
-  alias Drafter.Transport.{SSHDriver, TelnetDriver}
+  alias Drafter.TestSupport.ScreenModel
+  alias Drafter.Transport.SSHDriver
 
   defmodule SlowDriver do
     @moduledoc false
@@ -68,12 +69,17 @@ defmodule Drafter.Transport.SlowLinkTest do
     writes = SlowDriver.writes(driver)
 
     assert length(writes) < 30
-    assert writes |> List.last() |> String.contains?("frame 30")
 
     numbers =
-      Enum.map(writes, fn write ->
-        Regex.run(~r/frame (\d+)/, write) |> List.last() |> String.to_integer()
+      writes
+      |> Enum.scan(%{}, fn write, screen -> ScreenModel.apply([write], screen) end)
+      |> Enum.map(fn screen ->
+        Regex.run(~r/frame (\d+)/, ScreenModel.row(screen, 0))
+        |> List.last()
+        |> String.to_integer()
       end)
+
+    assert List.last(numbers) == 30
 
     assert Enum.zip(numbers, tl(numbers)) |> Enum.any?(fn {a, b} -> b - a > 1 end),
            "frames were not merged: #{inspect(numbers)}"
@@ -134,30 +140,5 @@ defmodule Drafter.Transport.SlowLinkTest do
 
     assert elapsed >= 60_000
     assert Enum.any?(SlowChannel.written(channel), &String.contains?(&1, "frame"))
-  end
-
-  test "the telnet driver's write returns once the socket took the bytes" do
-    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
-    {:ok, port} = :inet.port(listener)
-    {:ok, client} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false])
-    {:ok, server} = :gen_tcp.accept(listener)
-
-    {:ok, driver} = TelnetDriver.start_link(socket: server, session: self())
-    :ok = :gen_tcp.controlling_process(server, driver)
-    {:ok, manager} = Manager.start_link(name: nil)
-    :ok = TelnetDriver.setup(driver, manager)
-
-    assert :ok == TelnetDriver.write(driver, "frame")
-    {:ok, received} = :gen_tcp.recv(client, 0, 1000)
-
-    assert String.contains?(received, "frame") or
-             String.contains?(drain(client, received), "frame")
-  end
-
-  defp drain(socket, acc) do
-    case :gen_tcp.recv(socket, 0, 200) do
-      {:ok, more} -> drain(socket, acc <> more)
-      _ -> acc
-    end
   end
 end

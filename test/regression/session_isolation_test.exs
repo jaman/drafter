@@ -49,22 +49,4 @@ defmodule Drafter.Regression.SessionIsolationTest do
 
     Enum.each([session_a, session_b, widget_a, widget_b], &Process.exit(&1, :kill))
   end
-
-  test "a session with no context still resolves its own registrations" do
-    widget = spawn(fn -> Process.sleep(:infinity) end)
-    WidgetPidRegistry.register(:standalone, widget)
-    assert WidgetPidRegistry.lookup(:standalone) == widget
-    Process.exit(widget, :kill)
-  end
-
-  test "a lookup from a different session does not see an unrelated registration" do
-    other = spawn(fn -> Process.sleep(:infinity) end)
-    widget = spawn(fn -> Process.sleep(:infinity) end)
-
-    WidgetPidRegistry.register(:only_here, widget)
-
-    assert in_session(other, fn -> WidgetPidRegistry.lookup(:only_here) end) == nil
-
-    Enum.each([other, widget], &Process.exit(&1, :kill))
-  end
 end

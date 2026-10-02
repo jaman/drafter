@@ -380,8 +380,11 @@ defmodule Drafter.Compositor do
           visible: false,
           version: 0,
           clear: "",
-          place: nil
+          place: nil,
+          digest: nil
         })
+
+      digest = digest(paint)
 
       region =
         Map.merge(base, %{
@@ -392,7 +395,8 @@ defmodule Drafter.Compositor do
           dy: placement.dy,
           cols: placement.cols,
           rows: placement.rows,
-          version: base.version + 1
+          digest: digest,
+          version: base.version + if(repeat?(base, digest, placement), do: 0, else: 1)
         })
 
       state = if covers?(base, region), do: state, else: invalidate_region(state, base)
@@ -784,6 +788,17 @@ defmodule Drafter.Compositor do
     top = region.y + region.dy
     left >= 0 and top >= 0 and left + region.cols <= width and top + region.rows <= height
   end
+
+  defp repeat?(%{bytes: bytes, digest: digest} = base, digest, placement)
+       when not is_nil(bytes) and not is_nil(digest) do
+    Map.get(base, :dx) == placement.dx and Map.get(base, :dy) == placement.dy and
+      Map.get(base, :cols) == placement.cols and Map.get(base, :rows) == placement.rows and
+      Map.get(base, :place) == placement.place
+  end
+
+  defp repeat?(_base, _digest, _placement), do: false
+
+  defp digest(paint), do: :erlang.phash2(:erlang.iolist_to_binary(paint))
 
   defp needs_paint?(_region, nil), do: true
 

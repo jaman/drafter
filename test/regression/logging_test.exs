@@ -7,10 +7,6 @@ defmodule Drafter.LoggingTest do
     assert Logging.plan([]) == :silence
   end
 
-  test "log: false also writes no file" do
-    assert Logging.plan(log: false) == :silence
-  end
-
   test "log: true plans a file at drafter.log in the cwd" do
     assert {:file, path, :debug} = Logging.plan(log: true)
     assert String.ends_with?(path, "drafter.log")

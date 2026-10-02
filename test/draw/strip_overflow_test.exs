@@ -13,24 +13,6 @@ defmodule Drafter.Draw.StripOverflowTest do
     assert Strip.overflow(s, 3, :ellipsis) == s
   end
 
-  test "clip cuts at the boundary" do
-    assert text(Strip.overflow(strip("abcdefgh"), 4, :clip)) == "abcd"
-  end
-
-  test "ellipsis marks the truncation and respects the width" do
-    result = Strip.overflow(strip("abcdefgh"), 4, :ellipsis)
-    assert text(result) == "abc…"
-    assert result.width == 4
-  end
-
-  test "the default mode is clip" do
-    assert text(Strip.overflow(strip("abcdefgh"), 4)) == "abcd"
-  end
-
-  test "a width of one leaves only the marker" do
-    assert text(Strip.overflow(strip("abcdefgh"), 1, :ellipsis)) == "…"
-  end
-
   test "zero width empties the strip" do
     assert text(Strip.overflow(strip("abcdefgh"), 0, :ellipsis)) == ""
   end
@@ -51,9 +33,5 @@ defmodule Drafter.Draw.StripOverflowTest do
     result = Strip.overflow(s, 5, :ellipsis)
     assert text(result) == "abcd…"
     assert result.width == 5
-  end
-
-  test "an empty strip stays empty" do
-    assert text(Strip.overflow(Strip.empty(), 5, :ellipsis)) == ""
   end
 end

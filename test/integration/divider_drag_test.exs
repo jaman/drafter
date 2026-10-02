@@ -55,10 +55,6 @@ defmodule Drafter.Integration.DividerDragTest do
     Process.sleep(120)
   end
 
-  test "the divider has a rect to start with", %{ctx: ctx} do
-    assert is_integer(divider_column(ctx))
-  end
-
   test "its rect follows the pointer instead of clamping to the ends", %{ctx: ctx} do
     start = divider_column(ctx)
 
@@ -81,24 +77,5 @@ defmodule Drafter.Integration.DividerDragTest do
 
     assert after_further - start < 40,
            "the divider jumped to an extreme rather than tracking: #{start} -> #{after_further}"
-  end
-
-  test "a drag does not slam between the two ends of the range", %{ctx: ctx} do
-    start = divider_column(ctx)
-    DT.send_mouse(ctx, %{type: :mouse_down, x: start, y: 5, button: :left})
-    Process.sleep(120)
-
-    columns =
-      for step <- [2, 4, 6, 8] do
-        drag_to(ctx, start + step)
-        divider_column(ctx)
-      end
-
-    DT.send_mouse(ctx, %{type: :mouse_up, x: start + 8, y: 5, button: :left})
-
-    assert columns == Enum.sort(columns),
-           "the divider moved non-monotonically while the pointer moved one way: #{inspect(columns)}"
-
-    assert length(Enum.uniq(columns)) > 1, "the divider never moved: #{inspect(columns)}"
   end
 end

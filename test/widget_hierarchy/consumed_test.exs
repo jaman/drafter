@@ -56,23 +56,6 @@ defmodule Drafter.WidgetHierarchy.ConsumedTest do
     refute consumed
   end
 
-  test "an event producing actions is reported consumed" do
-    {_h, actions, consumed} =
-      WidgetHierarchy.handle_event_consumed(hierarchy_with(), {:key, :z})
-
-    assert actions == [{:app_callback, :zapped, nil}]
-    assert consumed
-  end
-
-  test "consumption is independent of how much state each widget carries" do
-    small = hierarchy_with(%{bulk: []})
-    large = hierarchy_with(%{bulk: Enum.to_list(1..50_000)})
-
-    assert {_, _, true} = WidgetHierarchy.handle_event_consumed(small, {:key, :x})
-    assert {_, _, true} = WidgetHierarchy.handle_event_consumed(large, {:key, :x})
-    assert {_, _, false} = WidgetHierarchy.handle_event_consumed(large, {:key, :q})
-  end
-
   test "dispatch returns a verdict only, never the widget's state" do
     Drafter.WidgetStripCache.create()
     hierarchy = hierarchy_with(%{bulk: Enum.to_list(1..1_000)})

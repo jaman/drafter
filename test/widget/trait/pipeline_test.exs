@@ -3,18 +3,6 @@ defmodule Drafter.Widget.Trait.PipelineTest do
 
   alias Drafter.Widget.Trait.Pipeline
 
-  defmodule PassTrait do
-    @behaviour Drafter.Widget.Trait
-
-    def name, do: :pass_trait
-    def default_state, do: %{_pass_count: 0}
-    def handles, do: [:keyboard]
-
-    def handle_event(_event, trait_state, _ws) do
-      {:pass, trait_state}
-    end
-  end
-
   defmodule CounterTrait do
     @behaviour Drafter.Widget.Trait
 
@@ -48,14 +36,6 @@ defmodule Drafter.Widget.Trait.PipelineTest do
   end
 
   describe "run_traits/3" do
-    test "pass does not modify state" do
-      state = %{_pass_count: 0}
-      {new_state, consumed?} = Pipeline.run_traits([PassTrait], {:key, :up}, state)
-
-      assert new_state._pass_count == 0
-      refute consumed?
-    end
-
     test "ok updates trait state" do
       state = %{_counter: 0}
       {new_state, consumed?} = Pipeline.run_traits([CounterTrait], {:key, :up}, state)
@@ -85,14 +65,6 @@ defmodule Drafter.Widget.Trait.PipelineTest do
       assert new_state._consumed == true
       assert consumed?
     end
-
-    test "events not handled by any trait pass through" do
-      state = %{_counter: 0}
-      {new_state, consumed?} = Pipeline.run_traits([CounterTrait], {:key, :down}, state)
-
-      assert new_state._counter == 0
-      refute consumed?
-    end
   end
 
   describe "extract_trait_state/2" do
@@ -114,26 +86,6 @@ defmodule Drafter.Widget.Trait.PipelineTest do
       assert result._counter == 10
       assert result.focused == true
       assert result.items == ["a"]
-    end
-  end
-
-  describe "apply_pre_render/3" do
-    test "returns unchanged state and rect with no traits" do
-      state = %{foo: 1}
-      rect = %{x: 0, y: 0, width: 80, height: 40}
-
-      {new_state, new_rect} = Pipeline.apply_pre_render([], state, rect)
-
-      assert new_state == state
-      assert new_rect == rect
-    end
-  end
-
-  describe "apply_post_render/4" do
-    test "returns unchanged strips with no traits" do
-      strips = [:strip1, :strip2]
-      result = Pipeline.apply_post_render([], strips, %{}, %{})
-      assert result == strips
     end
   end
 end

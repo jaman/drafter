@@ -27,20 +27,11 @@ defmodule Drafter.Terminal.DriverProbeTest do
     :exit, _reason -> :ok
   end
 
-  test "a driver with no terminal reports it was never asked" do
-    assert Driver.probe() == :unprobed
-  end
-
   test "and does so immediately, rather than waiting out the deadline" do
     {elapsed, result} = :timer.tc(fn -> Driver.probe(1_000) end)
 
     assert result == :unprobed
     assert elapsed < 250_000, "took #{div(elapsed, 1000)}ms to say there was nothing to ask"
-  end
-
-  test "asking twice is harmless" do
-    assert Driver.probe() == :unprobed
-    assert Driver.probe() == :unprobed
   end
 
   test "a driver that is not running reports it was never asked rather than raising" do

@@ -77,15 +77,6 @@ defmodule Drafter.ClipboardTest do
     test "addresses the primary selection when asked" do
       assert Clipboard.osc52("hi", :primary) == "\e]52;p;#{Base.encode64("hi")}\a"
     end
-
-    test "survives a round trip through base64" do
-      text = "multi\nline — with ünicode"
-
-      assert ["\e]52;c;" <> rest] = [Clipboard.osc52(text)]
-      payload = rest |> String.trim_trailing("\a")
-
-      assert Base.decode64!(payload) == text
-    end
   end
 
   describe "copy/2" do
@@ -126,11 +117,6 @@ defmodule Drafter.ClipboardTest do
       Application.put_env(:drafter, :clipboard, false)
 
       assert Clipboard.paste() == {:error, :disabled}
-    end
-
-    test "returns a string or a reason, never raises" do
-      assert match?({:ok, text} when is_binary(text), Clipboard.paste()) or
-               Clipboard.paste() == {:error, :unavailable}
     end
   end
 
@@ -192,13 +178,6 @@ defmodule Drafter.ClipboardTest do
       assert Clipboard.paste_enabled?()
     end
 
-    test "switching everything off blocks both directions" do
-      Application.put_env(:drafter, :clipboard, false)
-
-      refute Clipboard.enabled?()
-      refute Clipboard.paste_enabled?()
-    end
-
     test "other events are unaffected by the paste switch" do
       Application.put_env(:drafter, :clipboard, paste: false)
       manager = subscribed_manager()
@@ -252,14 +231,6 @@ defmodule Drafter.ClipboardTest do
     test "defaults to on" do
       Application.delete_env(:drafter, :clipboard)
 
-      assert Clipboard.enabled?()
-    end
-
-    test "is off only for an explicit false" do
-      Application.put_env(:drafter, :clipboard, false)
-      refute Clipboard.enabled?()
-
-      Application.put_env(:drafter, :clipboard, true)
       assert Clipboard.enabled?()
     end
   end

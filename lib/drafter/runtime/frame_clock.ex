@@ -34,13 +34,18 @@ defmodule Drafter.Runtime.FrameClock do
   def interval_for(ms) when is_integer(ms) and ms > 0, do: ms
 
   def interval_for(spec) when is_binary(spec) do
-    if Regex.match?(~r/^\d+(\.\d+)?\s*fps$/i, spec) do
-      [fps] = Regex.run(~r/[\d.]+/, spec)
-      round(1000 / String.to_float(ensure_float(fps)))
+    with true <- Regex.match?(~r/^\d+(\.\d+)?\s*fps$/i, spec),
+         [fps] <- Regex.run(~r/[\d.]+/, spec),
+         rate = String.to_float(ensure_float(fps)),
+         true <- rate > 0 do
+      round(1000 / rate)
     else
-      raise ArgumentError, "invalid refresh_rate: #{inspect(spec)}"
+      _ -> raise ArgumentError, "invalid refresh_rate: #{inspect(spec)}"
     end
   end
+
+  def interval_for(spec),
+    do: raise(ArgumentError, "invalid refresh_rate: #{inspect(spec)}")
 
   defp ensure_float(value) do
     if String.contains?(value, "."), do: value, else: value <> ".0"

@@ -173,11 +173,11 @@ defmodule Drafter.Widget.RichLog do
 
     content_width = rect.width - line_number_width
 
-    visible_lines = get_visible_lines(state, rect.height)
+    {first_line, visible_lines} = get_visible_lines(state, rect.height)
 
     rows =
       Enum.flat_map(
-        Enum.with_index(visible_lines),
+        Enum.with_index(visible_lines, first_line),
         fn {line, idx} ->
           render_rich_line(
             line,
@@ -414,18 +414,14 @@ defmodule Drafter.Widget.RichLog do
   defp get_visible_lines(state, visible_count) do
     total_lines = length(state.lines)
 
-    lines_to_show =
-      if state.reverse do
-        start_index = max(0, total_lines - visible_count - state.scroll_offset)
-        end_index = min(total_lines, start_index + visible_count)
-        Enum.slice(state.lines, start_index, end_index - start_index)
-      else
-        start_index = min(state.scroll_offset, max(0, total_lines - visible_count))
-        end_index = min(total_lines, start_index + visible_count)
-        Enum.slice(state.lines, start_index, end_index - start_index)
-      end
+    start_index =
+      if state.reverse,
+        do: max(0, total_lines - visible_count - state.scroll_offset),
+        else: min(state.scroll_offset, max(0, total_lines - visible_count))
 
-    lines_to_show
+    end_index = min(total_lines, start_index + visible_count)
+
+    {start_index, Enum.slice(state.lines, start_index, end_index - start_index)}
   end
 
   defp render_rich_line(
@@ -455,16 +451,7 @@ defmodule Drafter.Widget.RichLog do
 
     line_number =
       if state.show_line_numbers do
-        total_lines = length(state.lines)
-
-        actual_index =
-          if state.reverse do
-            total_lines - line_index
-          else
-            line_index + 1
-          end
-
-        num = String.pad_trailing("#{actual_index} ", line_number_width, " ")
+        num = String.pad_trailing("#{line_index + 1} ", line_number_width, " ")
         num_style = %{fg: {100, 100, 100}, bg: bg}
         [Segment.new(num, num_style)]
       else

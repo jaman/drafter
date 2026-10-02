@@ -12,6 +12,12 @@ defmodule Drafter.Terminal.InputBuffer do
   process after `flush_after_ms/0`; drivers resolve the tail by calling `flush/1`
   on receipt.
 
+  The buffer also remembers which mouse buttons are down, from the presses and
+  releases it decodes. A motion report that names a button the terminal never
+  reported pressed, or reported released since, is delivered as a `:move`, not a
+  `:drag`: a terminal in any-motion mode may encode a free pointer's motion with a
+  button number rather than the "no button" code.
+
       iex> buffer = Drafter.Terminal.InputBuffer.new()
       iex> {events, buffer} = Drafter.Terminal.InputBuffer.feed(buffer, "ab\\e[")
       iex> events
@@ -25,9 +31,14 @@ defmodule Drafter.Terminal.InputBuffer do
 
   @flush_after_ms 40
 
-  @type t :: %__MODULE__{pending: binary(), timer: reference() | nil, key_release: boolean()}
+  @type t :: %__MODULE__{
+          pending: binary(),
+          timer: reference() | nil,
+          key_release: boolean(),
+          held: MapSet.t(atom())
+        }
 
-  defstruct pending: "", timer: nil, key_release: false
+  defstruct pending: "", timer: nil, key_release: false, held: MapSet.new()
 
   @doc """
   An empty buffer, holding no bytes and with no flush scheduled.
@@ -70,7 +81,30 @@ defmodule Drafter.Terminal.InputBuffer do
     {events, pending} =
       ANSI.parse_sequence(buffer.pending <> data, key_release: buffer.key_release)
 
-    {events, reschedule(%{buffer | pending: pending})}
+    {events, held} = track_buttons(events, buffer.held)
+    {events, reschedule(%{buffer | pending: pending, held: held})}
+  end
+
+  defp track_buttons(events, held) do
+    {events, held} =
+      Enum.reduce(events, {[], held}, fn
+        {:mouse, %{type: :mouse_down, button: button}} = event, {acc, held} ->
+          {[event | acc], MapSet.put(held, button)}
+
+        {:mouse, %{type: :mouse_up, button: button}} = event, {acc, held} ->
+          {[event | acc], MapSet.delete(held, button)}
+
+        {:mouse, %{type: :drag, button: button} = payload} = event, {acc, held} ->
+          if MapSet.member?(held, button),
+            do: {[event | acc], held},
+            else:
+              {[{:mouse, payload |> Map.delete(:button) |> Map.put(:type, :move)} | acc], held}
+
+        event, {acc, held} ->
+          {[event | acc], held}
+      end)
+
+    {Enum.reverse(events), held}
   end
 
   @doc """
@@ -80,13 +114,13 @@ defmodule Drafter.Terminal.InputBuffer do
   cancelled.
 
       iex> {_events, buffer} = Drafter.Terminal.InputBuffer.feed(Drafter.Terminal.InputBuffer.new(), "\\e")
-      iex> Drafter.Terminal.InputBuffer.flush(buffer)
-      {[{:key, :escape}], %Drafter.Terminal.InputBuffer{pending: "", timer: nil}}
+      iex> {events, %Drafter.Terminal.InputBuffer{pending: "", timer: nil}} = Drafter.Terminal.InputBuffer.flush(buffer)
+      iex> events
+      [{:key, :escape}]
 
   An empty buffer yields no events.
 
-      iex> Drafter.Terminal.InputBuffer.flush(Drafter.Terminal.InputBuffer.new())
-      {[], %Drafter.Terminal.InputBuffer{pending: "", timer: nil}}
+      iex> {[], %Drafter.Terminal.InputBuffer{pending: ""}} = Drafter.Terminal.InputBuffer.flush(Drafter.Terminal.InputBuffer.new())
   """
   @spec flush(t()) :: {[ANSI.event()], t()}
   def flush(%__MODULE__{pending: ""} = buffer), do: {[], cancel(buffer)}
@@ -100,8 +134,7 @@ defmodule Drafter.Terminal.InputBuffer do
   Discard held bytes and any pending flush, decoding nothing.
 
       iex> {_events, buffer} = Drafter.Terminal.InputBuffer.feed(Drafter.Terminal.InputBuffer.new(), "\\e[")
-      iex> Drafter.Terminal.InputBuffer.reset(buffer)
-      %Drafter.Terminal.InputBuffer{pending: "", timer: nil}
+      iex> %Drafter.Terminal.InputBuffer{pending: "", timer: nil} = Drafter.Terminal.InputBuffer.reset(buffer)
   """
   @spec reset(t()) :: t()
   def reset(%__MODULE__{} = buffer), do: %{cancel(buffer) | pending: ""}

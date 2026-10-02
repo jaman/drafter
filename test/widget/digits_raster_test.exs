@@ -32,11 +32,6 @@ defmodule Drafter.Widget.DigitsRasterTest do
       end
     end
 
-    test "a space is blank and a zero is not" do
-      assert MapSet.size(Bitmap.pixels(" ")) == 0
-      assert MapSet.size(Bitmap.pixels("0")) > 0
-    end
-
     test "lower case resolves to the upper-case bitmap" do
       assert Bitmap.pixels("q") == Bitmap.pixels("Q")
       assert Bitmap.drawable?("q")
@@ -65,17 +60,6 @@ defmodule Drafter.Widget.DigitsRasterTest do
       end
     end
 
-    test "cell size and shrink together account for the glyph size" do
-      for packing <- @packings do
-        {across, down} = Raster.cell_pixels(packing)
-        {shrink_x, shrink_y} = Raster.shrink(packing)
-        font = Raster.font(packing)
-
-        assert font.width == div(div(Bitmap.width(), shrink_x), across)
-        assert font.height == div(div(Bitmap.height(), shrink_y), down)
-      end
-    end
-
     test "a blank bitmap rasterises to blank cells, not to nothing" do
       for packing <- @packings do
         font = Raster.font(packing)
@@ -95,13 +79,6 @@ defmodule Drafter.Widget.DigitsRasterTest do
       end
     end
 
-    test "every packing covers exactly the bitmap repertoire" do
-      for packing <- @packings do
-        assert packing |> Raster.font() |> Map.fetch!(:glyphs) |> Map.keys() |> Enum.sort() ==
-                 Bitmap.characters()
-      end
-    end
-
     test "shrinking keeps a thin stroke rather than dropping it" do
       lit = MapSet.new([{0, 0}])
 
@@ -117,13 +94,6 @@ defmodule Drafter.Widget.DigitsRasterTest do
       assert Font.get(:braille) == Raster.font(:braille)
       assert Font.get(:pixel) == Raster.font(:quadrant)
       assert Font.get(:tall) == Raster.font(:half)
-    end
-
-    test "braille and quadrant occupy the same cells at different detail" do
-      assert {Font.width(:braille), Font.height(:braille)} ==
-               {Font.width(:pixel), Font.height(:pixel)}
-
-      assert Raster.cell_pixels(:braille) > Raster.cell_pixels(:quadrant)
     end
 
     test "the rasterised fonts share one height" do

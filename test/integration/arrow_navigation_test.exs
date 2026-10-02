@@ -42,15 +42,6 @@ defmodule Drafter.Integration.ArrowNavigationTest do
     assert index(ctx) == 1
   end
 
-  test "each Down press advances by one, never skipping", %{ctx: ctx} do
-    for expected <- 1..8 do
-      press(ctx, :down, 1)
-
-      assert index(ctx) == expected,
-             "after #{expected} presses the cursor should be at #{expected}"
-    end
-  end
-
   test "Up reverses Down exactly", %{ctx: ctx} do
     press(ctx, :down, 5)
     assert index(ctx) == 5

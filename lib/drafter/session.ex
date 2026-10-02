@@ -18,14 +18,12 @@ defmodule Drafter.Session do
   Start a `Drafter.Session.Worker` under the session supervisor in `:isolated` mode.
 
   `opts` are appended to the worker's options, so every key listed by
-  `Drafter.Session.Worker.start_link/1` may be passed here — including `:driver_pid`,
-  which the worker requires.
+  `Drafter.Session.Worker.start_link/1` may be passed here. `:driver_pid` is required:
+  the worker talks to a driver process, not to a configuration.
   """
-  @spec start_isolated(module(), map(), keyword()) :: DynamicSupervisor.on_start_child()
-  def start_isolated(app_module, driver_config, opts \\ []) do
-    spec =
-      {Drafter.Session.Worker,
-       [app_module: app_module, driver_config: driver_config, mode: :isolated] ++ opts}
+  @spec start_isolated(module(), keyword()) :: DynamicSupervisor.on_start_child()
+  def start_isolated(app_module, opts \\ []) do
+    spec = {Drafter.Session.Worker, [app_module: app_module, mode: :isolated] ++ opts}
 
     DynamicSupervisor.start_child(__MODULE__, spec)
   end

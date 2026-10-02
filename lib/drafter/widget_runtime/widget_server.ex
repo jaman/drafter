@@ -155,7 +155,19 @@ defmodule Drafter.WidgetServer do
   end
 
   @doc """
-  Move or resize a widget, notifying it through `on_rect_change/2` if it defines one.
+  Ask the server to reconsider drawing its image.
+
+  Sent when the renderer first marks a widget visible. `schedule_image/1` declines for a
+  widget the renderer has not placed yet, and until this arrives nothing asks again, so
+  the image would wait for the widget's next render.
+  """
+  @spec retry_image(pid() | nil) :: :ok
+  def retry_image(pid) when is_pid(pid), do: GenServer.cast(pid, :maybe_generate_image)
+  def retry_image(_pid), do: :ok
+
+  @doc """
+  Move or resize a widget, notifying it through `on_rect_change/2` if it defines one
+  and rendering it at the new rect. A rect equal to the current one changes nothing.
 
   Synchronous, so the widget has taken the new rect before this returns.
   """
@@ -313,13 +325,13 @@ defmodule Drafter.WidgetServer do
   end
 
   def handle_cast({:push_data, item}, %{data_channel: ch} = state) when not is_nil(ch) do
-    {:noreply, %{state | data_channel: DataChannel.push(ch, item)}}
+    {:noreply, pushed(state, DataChannel.push(ch, item))}
   end
 
   def handle_cast({:push_data, _item}, state), do: {:noreply, state}
 
   def handle_cast({:push_data_many, items}, %{data_channel: ch} = state) when not is_nil(ch) do
-    {:noreply, %{state | data_channel: DataChannel.push_many(ch, items)}}
+    {:noreply, pushed(state, DataChannel.push_many(ch, items))}
   end
 
   def handle_cast({:push_data_many, _items}, state), do: {:noreply, state}
@@ -341,6 +353,8 @@ defmodule Drafter.WidgetServer do
   end
 
   @impl true
+  def handle_call({:update_rect, rect}, _from, %{rect: rect} = state), do: {:reply, :ok, state}
+
   def handle_call({:update_rect, rect}, _from, state) do
     new_widget_state = maybe_on_rect_change(state, rect)
     new_channel = maybe_resize_auto_buffer(state, rect)
@@ -614,9 +628,12 @@ defmodule Drafter.WidgetServer do
     request_image(server_state)
   end
 
-  defp request_image(%{module: module, state: widget_state, image_placed: placed}) do
-    if placed or Drafter.Widget.image_active?(module, widget_state) do
-      GenServer.cast(self(), :maybe_generate_image)
+  defp request_image(%{module: module, state: widget_state, image_placed: placed, id: id}) do
+    if function_exported?(module, :image, 3) do
+      active? = Drafter.Widget.image_active?(module, widget_state)
+      WidgetStripCache.mark_image_active(id, active?)
+
+      if placed or active?, do: GenServer.cast(self(), :maybe_generate_image)
     end
   end
 
@@ -765,6 +782,14 @@ defmodule Drafter.WidgetServer do
     else
       []
     end
+  end
+
+  defp pushed(state, channel) do
+    state = %{state | data_channel: channel}
+
+    if due_for_push?(:low, state.last_event_render_at),
+      do: push_now(state),
+      else: defer_push(state)
   end
 
   defp notify_render_needed(widget_id) do

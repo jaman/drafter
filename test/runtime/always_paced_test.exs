@@ -79,12 +79,27 @@ defmodule Drafter.Runtime.AlwaysPacedTest do
 
   test "timer ticks are paced too" do
     ctx = Drafter.Test.start_headless(Ticking, %{}, size: {20, 4})
+    before = Drafter.Test.get_state(ctx).ticks
 
-    renders = renders_during(fn -> Process.sleep(400) end)
+    renders = renders_during(fn -> until_ticked(ctx, before + 20) end)
+    ticked = Drafter.Test.get_state(ctx).ticks - before
 
-    assert renders <= 4
-    assert Drafter.Test.get_state(ctx).ticks > 20
+    assert ticked >= 20, "the app stopped ticking"
+
+    assert renders * 4 < ticked,
+           "#{ticked} ticks drew #{renders} frames, which is not pacing"
+
     Drafter.Test.stop(ctx)
+  end
+
+  defp until_ticked(ctx, wanted, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 5000
+
+    cond do
+      Drafter.Test.get_state(ctx).ticks >= wanted -> :ok
+      System.monotonic_time(:millisecond) >= deadline -> :timeout
+      true -> Process.sleep(5) && until_ticked(ctx, wanted, deadline)
+    end
   end
 
   defmodule TwoScreens do

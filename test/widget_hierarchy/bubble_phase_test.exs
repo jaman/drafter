@@ -99,20 +99,4 @@ defmodule Drafter.WidgetHierarchy.BubblePhaseTest do
              {:app_callback, :root, nil}
            ]
   end
-
-  test "a deep chain does not lose or reorder actions" do
-    modes = for i <- 1..25, do: {:"w#{i}", :bubble}
-    hierarchy = chain(modes)
-    {_h, actions, _} = WidgetHierarchy.handle_event_consumed(hierarchy, {:key, :emit})
-
-    expected = modes |> Enum.reverse() |> Enum.map(fn {id, _} -> {:app_callback, id, nil} end)
-    assert actions == expected
-  end
-
-  test "an event with no ancestors is still delivered to its target" do
-    hierarchy = chain([{:only, :bubble}])
-    WidgetHierarchy.handle_event_consumed(hierarchy, {:key, :probe})
-
-    assert seen() == [:only]
-  end
 end

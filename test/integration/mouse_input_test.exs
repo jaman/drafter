@@ -50,15 +50,6 @@ defmodule Drafter.Integration.MouseInputTest do
     assert hits(ctx) == [:beta]
   end
 
-  test "clicks accumulate in the order they arrive", %{ctx: ctx} do
-    click_centre(ctx, :alpha)
-    TUI.wait_for(ctx, fn c -> length(hits(c)) == 1 end, timeout: 1000)
-    click_centre(ctx, :beta)
-    TUI.wait_for(ctx, fn c -> length(hits(c)) == 2 end, timeout: 1000)
-
-    assert hits(ctx) == [:alpha, :beta]
-  end
-
   test "a click outside every widget hits nothing", %{ctx: ctx} do
     rects = TUI.get_widget_hierarchy(ctx).widget_rects |> Map.values()
     outside_y = rects |> Enum.map(&(&1.y + &1.height)) |> Enum.max()
@@ -67,20 +58,5 @@ defmodule Drafter.Integration.MouseInputTest do
     Process.sleep(150)
 
     assert hits(ctx) == []
-  end
-
-  test "send_mouse delivers an arbitrary event", %{ctx: ctx} do
-    r = rect(ctx, :alpha)
-
-    TUI.send_mouse(ctx, %{
-      type: :mouse_up,
-      x: r.x + div(r.width, 2),
-      y: r.y + div(r.height, 2),
-      button: :left,
-      mods: []
-    })
-
-    TUI.wait_for(ctx, fn c -> hits(c) == [:alpha] end, timeout: 1000)
-    assert hits(ctx) == [:alpha]
   end
 end

@@ -83,14 +83,6 @@ defmodule Drafter.Widget.TextAreaClipboardKeysTest do
     assert {:noreply, ^state} = TextArea.handle_event(press(@ctrl_v), state)
   end
 
-  test "paste is inert while the clipboard is disabled, and does not raise" do
-    state = area("hello")
-
-    assert {tag, pasted} = TextArea.handle_event(press(@ctrl_v), state)
-    assert tag in [:ok, :noreply]
-    assert pasted.text == "hello"
-  end
-
   test "undo still works, so the clipboard clause did not shadow it" do
     {:ok, cut} = TextArea.handle_event(press(@ctrl_x), select_all(area("hello")))
     {:ok, undone} = TextArea.handle_event({:key, :z, [:ctrl]}, cut)

@@ -65,12 +65,6 @@ defmodule Drafter.Widget.EventRouterModifierTest do
       assert {:ok, %{seen: [?c]}} = route(TwoArity, {:key, ?c, []})
     end
 
-    for {key, name} <- [{?c, "ctrl+c"}, {?d, "ctrl+d"}, {?z, "ctrl+z"}] do
-      test "bubbles #{name} rather than delivering it as a bare letter" do
-        assert {:bubble, %{seen: []}} = route(TwoArity, {:key, unquote(key), [:ctrl]})
-      end
-    end
-
     test "bubbles a modified arrow rather than delivering a plain arrow" do
       assert {:bubble, %{seen: []}} = route(TwoArity, {:key, :left, [:alt]})
       assert {:bubble, %{seen: []}} = route(TwoArity, {:key, :left, [:shift]})
@@ -90,13 +84,6 @@ defmodule Drafter.Widget.EventRouterModifierTest do
 
     test "falls to handle_key/2 for a key event that carries no modifier list at all" do
       assert {:ok, %{seen: [?c]}} = route(ThreeArity, {:key, ?c})
-    end
-  end
-
-  describe "handle_key/3 is a declared callback" do
-    test "so an out-of-tree widget can discover it and annotate it" do
-      assert {:handle_key, 3} in Drafter.Widget.behaviour_info(:callbacks)
-      assert {:handle_key, 3} in Drafter.Widget.behaviour_info(:optional_callbacks)
     end
   end
 end

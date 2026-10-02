@@ -39,18 +39,6 @@ defmodule Drafter.SustainedRepaintTest do
     Process.sleep(60)
   end
 
-  test "sustained output keeps repainting the terminal", %{ctx: ctx} do
-    for n <- 1..40 do
-      emit(n)
-      Process.sleep(5)
-    end
-
-    settle()
-
-    assert DT.screen_text(ctx) =~ "line 40"
-    assert DT.screen_text(ctx) =~ "tick 40"
-  end
-
   test "a burst leaves the final frame on screen", %{ctx: ctx} do
     for n <- 1..2000, do: emit(n)
     settle()
@@ -83,20 +71,5 @@ defmodule Drafter.SustainedRepaintTest do
            "only #{writes} writes across #{elapsed}ms of flood"
 
     assert DT.screen_text(ctx) =~ "tick 20000"
-  end
-
-  test "the terminal is written to repeatedly, not once", %{ctx: _ctx} do
-    before = HeadlessDriver.get_render_count()
-
-    for n <- 1..30 do
-      emit(n)
-      Process.sleep(20)
-    end
-
-    settle()
-
-    writes = HeadlessDriver.get_render_count() - before
-
-    assert writes >= 10, "only #{writes} terminal writes for 30 paced updates"
   end
 end

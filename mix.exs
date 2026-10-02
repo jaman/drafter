@@ -41,8 +41,7 @@ defmodule Drafter.MixProject do
           ],
           Events: [
             Drafter.Event,
-            Drafter.Event.Object,
-            Drafter.Event.Delegation
+            Drafter.Event.Object
           ],
           Theming: [
             Drafter.Theme,
@@ -135,12 +134,18 @@ defmodule Drafter.MixProject do
     [
       {:elixir_make, "~> 0.9"},
       {:spark, "~> 2.6"},
-      {:french_curve, "~> 0.1"},
+      family(:french_curve, "~> 0.1.5", "../french_curve"),
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:plumb, "~> 0.1", only: :dev, runtime: false},
       {:phoenix_pubsub, "~> 2.1"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
+  end
+
+  defp family(app, requirement, path) do
+    if System.get_env("PLUMB_HEX") == nil and File.dir?(Path.expand(path, __DIR__)),
+      do: {app, path: path},
+      else: {app, requirement}
   end
 
   defp package do

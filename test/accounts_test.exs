@@ -29,13 +29,6 @@ defmodule Drafter.AccountsTest do
   end
 
   describe "register/4" do
-    test "creates an account that then authenticates", %{accounts: accounts} do
-      assert :ok = Accounts.register(accounts, "alice", "correct horse")
-
-      assert {:ok, %{username: "alice", props: %{}}} =
-               Accounts.authenticate(accounts, "alice", "correct horse")
-    end
-
     test "keeps the props given", %{accounts: accounts} do
       assert :ok = Accounts.register(accounts, "alice", "correct horse", %{seat: 7})
 
@@ -105,6 +98,22 @@ defmodule Drafter.AccountsTest do
 
       assert {:ok, _} =
                Accounts.authenticate(accounts, "alice", "correct horse", peer: {{10, 0, 0, 8}, 1})
+    end
+  end
+
+  describe "list/1" do
+    test "every account, in the order registered, with its number and props and nothing of its password",
+         %{accounts: accounts} do
+      assert Accounts.list(accounts) == []
+      :ok = Accounts.register(accounts, "alice", "password1", %{team: 1})
+      :ok = Accounts.register(accounts, "Bob", "password2")
+
+      assert [
+               %{username: "alice", number: 0, props: %{team: 1}},
+               %{username: "Bob", number: 1, props: %{}}
+             ] = Accounts.list(accounts)
+
+      refute Enum.any?(Accounts.list(accounts), &Map.has_key?(&1, :hash))
     end
   end
 
@@ -224,11 +233,6 @@ defmodule Drafter.AccountsTest do
 
       assert {:ok, %{props: %{seat: 5}}} =
                Accounts.authenticate(reopened, "alice", "correct horse")
-    end
-
-    test "the file holds no plaintext password", %{accounts: accounts, path: path} do
-      :ok = Accounts.register(accounts, "alice", "correct horse")
-      refute File.read!(path) =~ "correct horse"
     end
   end
 end

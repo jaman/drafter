@@ -150,6 +150,12 @@ state %{count: 0}
 - `:mode` - global chart rendering mode: `:auto`, `:pixel`, `:kitty`, `:iterm2`,
   `:sixel`, `:braille`, or `:text`. A per-widget `:renderer` overrides it, and the
   `DRAFTER_MODE` env var overrides both
+  - **iTerm2** is drawn with its own inline images. Animated images flicker in iTerm2
+    while its GPU renderer is on — each new frame's cells show as background until it
+    is decoded — and are smooth with **GPU rendering** off (Settings → General →
+    Magic); nothing the program sends changes that. `FRENCH_CURVE_ITERM2=kitty` draws
+    with kitty graphics instead; on iTerm2 older than 3.7.3 that grows its memory for
+    as long as the window lives
 - `:log` - `false` (default) silences the console handler so logs cannot corrupt the
   display; `true` writes `drafter.log` in the current directory; a path string
   writes there

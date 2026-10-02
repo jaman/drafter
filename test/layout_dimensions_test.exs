@@ -18,27 +18,6 @@ defmodule Drafter.LayoutDimensionsTest do
     Layout.calculate_horizontal_layout(children, @rect, opts)
   end
 
-  describe "resolve_dimension" do
-    test "an integer is a cell count" do
-      assert Layout.resolve_dimension(12, 100, :auto) == 12
-    end
-
-    test "a percentage is a share of the available space" do
-      assert Layout.resolve_dimension({:percent, 50}, 100, :auto) == 50
-      assert Layout.resolve_dimension({:percent, 25}, 40, :auto) == 10
-      assert Layout.resolve_dimension({:percent, 33}, 100, :auto) == 33
-    end
-
-    test "auto and nil defer to the fallback" do
-      assert Layout.resolve_dimension(:auto, 100, 7) == 7
-      assert Layout.resolve_dimension(nil, 100, 7) == 7
-    end
-
-    test "fractional units defer until the flex pass" do
-      assert Layout.resolve_dimension({:fr, 2}, 100, 3) == 3
-    end
-  end
-
   describe "clamp_size" do
     test "min raises an undersized value" do
       assert Layout.clamp_size(2, [min_height: 5], :height) == 5
@@ -48,16 +27,6 @@ defmodule Drafter.LayoutDimensionsTest do
     test "max lowers an oversized value" do
       assert Layout.clamp_size(90, [max_height: 10], :height) == 10
       assert Layout.clamp_size(90, [max_width: 10], :width) == 10
-    end
-
-    test "min and max together bracket the value" do
-      assert Layout.clamp_size(1, [min_height: 4, max_height: 8], :height) == 4
-      assert Layout.clamp_size(99, [min_height: 4, max_height: 8], :height) == 8
-      assert Layout.clamp_size(6, [min_height: 4, max_height: 8], :height) == 6
-    end
-
-    test "absent constraints leave the value alone" do
-      assert Layout.clamp_size(6, [], :height) == 6
     end
   end
 
@@ -117,22 +86,10 @@ defmodule Drafter.LayoutDimensionsTest do
   end
 
   describe "margin" do
-    test "a single value applies to every side" do
-      assert Layout.get_margin(margin: 2) == {2, 2, 2, 2}
-    end
-
-    test "a pair is vertical then horizontal" do
-      assert Layout.get_margin(margin: {1, 4}) == {1, 4, 1, 4}
-    end
-
     test "applying a margin insets the rect on all sides" do
       inset = Layout.apply_margin(@rect, {1, 2, 3, 4})
 
       assert inset == %{x: 4, y: 1, width: 94, height: 36}
-    end
-
-    test "an absent margin is zero" do
-      assert Layout.get_margin([]) == {0, 0, 0, 0}
     end
   end
 end

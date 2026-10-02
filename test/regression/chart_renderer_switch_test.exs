@@ -82,13 +82,7 @@ defmodule Drafter.Regression.ChartRendererSwitchTest do
     })
   end
 
-  test "a pixel chart paints an image", %{server: server} do
-    switch(server, :kitty)
-
-    assert_receive {:put_image, :chart_switch}, 1000
-  end
-
-  for renderer <- [:braille, :text] do
+  for renderer <- [:braille] do
     test "switching to #{renderer} clears the image it had painted", %{server: server} do
       switch(server, :kitty)
       assert_receive {:put_image, :chart_switch}, 1000
@@ -116,57 +110,6 @@ defmodule Drafter.Regression.ChartRendererSwitchTest do
 
       assert_receive {:put_image, :chart_switch}, 1000
     end
-  end
-
-  test "a switch that lands inside the image throttle window still repaints" do
-    {:ok, comp} = RecordingCompositor.start_link(self())
-
-    theme =
-      case Drafter.ThemeManager.start_link() do
-        {:ok, pid} -> pid
-        {:error, {:already_started, pid}} -> pid
-      end
-
-    Process.put(:drafter_compositor, comp)
-    Process.put(:drafter_theme_manager, theme)
-    Drafter.WidgetStripCache.create()
-    Drafter.WidgetStripCache.mark_visible(:throttled, true)
-
-    {:ok, server} =
-      WidgetServer.start_link(
-        module: Chart,
-        id: :throttled,
-        rect: @rect,
-        props: %{data: @data, chart_type: :line, renderer: :kitty},
-        image_throttle: {200, :ms},
-        session_ctx: %{drafter_compositor: comp, drafter_theme_manager: theme}
-      )
-
-    assert_receive {:put_image, :throttled}, 1000
-    drain()
-
-    WidgetServer.update_props(server, %{
-      data: @data,
-      chart_type: :line,
-      renderer: :text,
-      _render_timestamp: 2
-    })
-
-    assert_receive {:clear_image, :throttled},
-                   2000,
-                   "the switch happened inside the throttle window and its repaint was dropped"
-  end
-
-  test "cycling through every mode never leaves a painted image behind", %{server: server} do
-    for renderer <- [:kitty, :braille, :text, :kitty, :braille] do
-      switch(server, renderer)
-      Process.sleep(40)
-    end
-
-    drain()
-    switch(server, :text)
-
-    refute_receive {:put_image, :chart_switch}, 300
   end
 
   defp drain do

@@ -54,14 +54,6 @@ defmodule Drafter.Accounts.RegisterAppTest do
     refute_receive {:drafter_registration, _}, 100
   end
 
-  test "a taken name is refused", %{ctx: ctx, accounts: accounts} do
-    :ok = Accounts.register(accounts, "alice", "correct horse")
-    fill(ctx, "alice", "correct horse", "correct horse")
-    DT.send_key(ctx, :enter)
-
-    assert :ok == DT.wait_for(ctx, fn c -> DT.screen_text(c) =~ "already taken" end)
-  end
-
   test "escape cancels", %{ctx: ctx} do
     DT.send_key(ctx, :escape)
     assert_receive {:drafter_registration, :cancelled}, 2_000

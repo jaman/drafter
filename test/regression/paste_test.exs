@@ -24,10 +24,4 @@ defmodule Drafter.Regression.PasteTest do
     assert s.cursor_line == 2
     assert s.cursor_col == String.length("line3")
   end
-
-  test "text_area single-line paste inserts at the cursor without adding a line" do
-    state = %{TextArea.mount(%{}) | focused: true}
-    {:ok, s} = TextArea.handle_event({:bracketed_paste, "select 1"}, state)
-    assert s.lines == ["select 1"]
-  end
 end

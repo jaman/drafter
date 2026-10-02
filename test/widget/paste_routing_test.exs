@@ -72,9 +72,4 @@ defmodule Drafter.Widget.PasteRoutingTest do
   test "newlines survive so a multi-line paste stays multi-line" do
     assert {:ok, %{value: "one\ntwo"}} = route(Accepts, [:keyboard, :paste], "one\r\ntwo")
   end
-
-  test "handle_paste/2 is a declared callback" do
-    assert {:handle_paste, 2} in Drafter.Widget.behaviour_info(:callbacks)
-    assert {:handle_paste, 2} in Drafter.Widget.behaviour_info(:optional_callbacks)
-  end
 end

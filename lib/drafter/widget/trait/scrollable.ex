@@ -82,8 +82,8 @@ defmodule Drafter.Widget.Trait.Scrollable do
     {:ok, %{trait_state | _scroll_offset_y: new_offset}}
   end
 
-  def handle_event({:key, :home}, _trait_state, _widget_state) do
-    {:ok, %{_scroll_offset_y: 0, _scroll_offset_x: 0}}
+  def handle_event({:key, :home}, trait_state, _widget_state) do
+    {:ok, %{trait_state | _scroll_offset_y: 0, _scroll_offset_x: 0}}
   end
 
   def handle_event({:key, :end}, trait_state, _widget_state) do

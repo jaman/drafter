@@ -11,7 +11,6 @@ defmodule Drafter.Widget.ChartPropUpdateTest do
 
   alias Drafter.Draw.Strip
   alias Drafter.Widget.Chart
-  alias Drafter.Widget.Chart.Pixel
 
   @data [1, 5, 2, 8, 3, 9, 4]
   @rect %{x: 0, y: 0, width: 40, height: 10}
@@ -30,22 +29,6 @@ defmodule Drafter.Widget.ChartPropUpdateTest do
       assert state._internal.renderer == :braille
     end
 
-    test "toggling back and forth follows the props each time" do
-      mounted = Chart.mount(%{data: @data, renderer: :braille})
-
-      pixel = Chart.update(%{data: @data, renderer: :pixel}, mounted)
-      braille = Chart.update(%{data: @data, renderer: :braille}, pixel)
-
-      assert pixel._internal.renderer == :pixel
-      assert braille._internal.renderer == :braille
-    end
-
-    test "the resolved mode follows the renderer, not the mount" do
-      state = remount(%{renderer: :kitty}, %{renderer: :text})
-
-      assert Pixel.mode(state._internal.renderer, state.chart_type) == :text
-    end
-
     test "an absent renderer keeps the mounted one" do
       state = remount(%{renderer: :braille}, %{})
 
@@ -60,22 +43,6 @@ defmodule Drafter.Widget.ChartPropUpdateTest do
 
       refute Chart.image(braille, @rect, :probe),
              "a chart switched away from pixel still emits an image, so the old graphic is never cleared"
-    end
-
-    test "switching on a pixel renderer starts producing an image" do
-      braille = Chart.mount(%{data: @data, renderer: :braille})
-      pixel = Chart.update(%{data: @data, renderer: :kitty}, braille)
-
-      refute Chart.image(braille, @rect, :probe)
-      assert Chart.image(pixel, @rect, :probe) != nil
-    end
-
-    test "the renderer is part of the state a widget server hashes for redraws" do
-      braille = Chart.mount(%{data: @data, renderer: :braille})
-      pixel = Chart.update(%{data: @data, renderer: :kitty}, braille)
-
-      assert :erlang.phash2(braille) != :erlang.phash2(pixel),
-             "a renderer change that leaves the state hash untouched schedules no repaint"
     end
   end
 

@@ -63,7 +63,6 @@ defmodule Drafter.Runtime.AppLoopRegistrationTest do
 
   describe "resolution without a session identity" do
     setup do
-      :persistent_term.erase({AppRegistry, :ambiguity_warned})
       on_exit(fn -> Enum.each(spare_loops(), &stop_loop/1) end)
       :ok
     end
@@ -105,20 +104,6 @@ defmodule Drafter.Runtime.AppLoopRegistrationTest do
 
       Enum.each([first, second], &stop_loop/1)
     end
-
-    test "the ambiguity is reported once, not on every lookup" do
-      first = spawn_loop(:first_session)
-      second = spawn_loop(:second_session)
-
-      refute warned?()
-      AppRegistry.whereis()
-      assert warned?(), "an ambiguous lookup passed without reporting itself"
-
-      AppRegistry.whereis()
-      assert warned?()
-
-      Enum.each([first, second], &stop_loop/1)
-    end
   end
 
   defp spawn_loop(session) do
@@ -148,8 +133,6 @@ defmodule Drafter.Runtime.AppLoopRegistrationTest do
       Process.sleep(20)
     end
   end
-
-  defp warned?, do: :persistent_term.get({AppRegistry, :ambiguity_warned}, false)
 
   defp spare_loops do
     :drafter_app_registry

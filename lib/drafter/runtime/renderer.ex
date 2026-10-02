@@ -788,14 +788,31 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
-  defp overlay_image(widget_id, %{module: module, state: state} = widget_info, rect, region) do
-    if Drafter.Widget.image_active?(module, state) do
-      WidgetStripCache.mark_visible(widget_id, region)
-      do_overlay_image(widget_id, widget_info, rect, region)
-    else
-      :ok
+  defp overlay_image(widget_id, %{module: module} = widget_info, rect, region) do
+    cond do
+      image_active?(widget_id, widget_info) ->
+        unseen? = region != false and not WidgetStripCache.visible?(widget_id)
+        WidgetStripCache.mark_visible(widget_id, region)
+        if unseen?, do: WidgetServer.retry_image(Map.get(widget_info, :pid))
+        do_overlay_image(widget_id, widget_info, rect, region)
+
+      function_exported?(module, :image, 3) ->
+        Drafter.Compositor.clear_image(widget_id)
+
+      true ->
+        :ok
     end
   end
+
+  defp image_active?(widget_id, %{pid: pid, module: module, state: state}) when is_pid(pid) do
+    case WidgetStripCache.image_active(widget_id) do
+      nil -> Drafter.Widget.image_active?(module, state)
+      active? -> active?
+    end
+  end
+
+  defp image_active?(_widget_id, %{module: module, state: state}),
+    do: Drafter.Widget.image_active?(module, state)
 
   defp do_overlay_image(widget_id, _widget_info, _rect, false) do
     Drafter.Compositor.clear_image(widget_id)

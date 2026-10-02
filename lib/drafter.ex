@@ -1257,6 +1257,7 @@ defmodule Drafter do
 
     {_, hierarchy} = Renderer.render_app(app_module, app_state, screen_rect)
     ready_app_state = Runtime.for_app(app_module).ready(app_module, app_state)
+    hierarchy = AppLoop.settle_focus(hierarchy)
     {_, hierarchy} = Renderer.render_app(app_module, ready_app_state, screen_rect, hierarchy)
 
     AppLoop.enter_loop(app_module, ready_app_state, screen_rect, %{}, hierarchy, [])
@@ -1304,22 +1305,73 @@ defmodule Drafter do
       Process.put(:drafter_event_handler, eh_pid)
       Process.put(:drafter_skin_manager, skin_pid)
       Process.put(:drafter_mouse_opts, mouse_opts)
+      start_controller(Keyword.get(opts, :controller, false), em_pid)
       Terminal.Driver.setup(driver_opts)
     end
+  end
+
+  defp start_controller(false, _manager), do: :ok
+
+  defp start_controller(true, manager) do
+    case Code.ensure_loaded(Gamepad) do
+      {:module, gamepad} ->
+        start_gamepad(gamepad, manager)
+
+      {:error, _absent} ->
+        IO.puts(:stderr, "controller: true needs the :gamepad package in the app's deps")
+    end
+
+    :ok
+  end
+
+  defp start_gamepad(gamepad, manager) do
+    sink = fn event -> GenServer.cast(manager, {:event, {:controller, event}}) end
+
+    case gamepad.start_link(sink: sink) do
+      {:ok, pid} -> Process.put(:drafter_controller, pid)
+      :ignore -> :ok
+      {:error, reason} -> IO.puts(:stderr, "controller not started: #{inspect(reason)}")
+    end
+  end
+
+  defp close_compositor do
+    case Process.get(:drafter_compositor) do
+      pid when is_pid(pid) ->
+        if Process.alive?(pid) do
+          Compositor.sync(pid)
+          GenServer.stop(pid, :normal, 2_000)
+        end
+
+      _none ->
+        :ok
+    end
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp stop_controller do
+    case Process.delete(:drafter_controller) do
+      pid when is_pid(pid) -> GenServer.stop(pid, :normal, 1_000)
+      _none -> :ok
+    end
+  catch
+    :exit, _reason -> :ok
   end
 
   @doc """
   The terminal settings an app module declares with `use Drafter.App`.
 
-  A keyword with `:mouse_hover` (default `true`), `:key_release` (default `false`) and
-  `:cell_size` (default `false`), read from the module's `__mouse_hover__/0`,
-  `__key_release__/0` and `__cell_size__/0` when it defines them. Transports pass this
-  to their driver's setup.
+  A keyword with `:mouse_hover` (default `true`), `:key_release` (default `false`),
+  `:cell_size` (default `false`) and `:controller` (default `false`), read from the
+  module's `__mouse_hover__/0`, `__key_release__/0`, `__cell_size__/0` and
+  `__controller__/0` when it defines them. Transports pass this to their driver's
+  setup; `:controller` is acted on by the local terminal session alone.
   """
   @spec terminal_opts(module()) :: [
           mouse_hover: boolean(),
           key_release: boolean(),
-          cell_size: boolean()
+          cell_size: boolean(),
+          controller: boolean()
         ]
   def terminal_opts(app_module) do
     Code.ensure_loaded(app_module)
@@ -1327,7 +1379,8 @@ defmodule Drafter do
     [
       mouse_hover: app_setting(app_module, :__mouse_hover__, true),
       key_release: app_setting(app_module, :__key_release__, false),
-      cell_size: app_setting(app_module, :__cell_size__, false)
+      cell_size: app_setting(app_module, :__cell_size__, false),
+      controller: app_setting(app_module, :__controller__, false)
     ]
   end
 
@@ -1373,7 +1426,9 @@ defmodule Drafter do
         Drafter.Trace.log_sync(["Q down ", Drafter.Trace.ts(), "\n"])
         Event.Manager.drain_queue()
         Drafter.Trace.log_sync(["Q drained ", Drafter.Trace.ts(), "\n"])
+        close_compositor()
         Terminal.Driver.cleanup()
+        stop_controller()
         Drafter.Trace.log_sync(["Q cleanup_done ", Drafter.Trace.ts(), "\n"])
         Event.Manager.drain_queue()
         Drafter.Trace.log_sync(["Q run_returns ", Drafter.Trace.ts(), "\n"])

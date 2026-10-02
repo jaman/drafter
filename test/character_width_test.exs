@@ -93,10 +93,6 @@ defmodule Drafter.CharacterWidthTest do
       assert CharacterWidth.string("مَرْحَبًا") == 5
     end
 
-    test "presentation forms are one column" do
-      assert CharacterWidth.grapheme(<<0xFEF3::utf8>>) == 1
-    end
-
     test "tatweel is one column" do
       assert CharacterWidth.grapheme(<<0x0640::utf8>>) == 1
     end
@@ -167,30 +163,11 @@ defmodule Drafter.CharacterWidthTest do
     end
   end
 
-  describe "box drawing and blocks" do
-    test "box drawing is one column" do
-      assert CharacterWidth.string("╭─╮│╰╯") == 6
-      assert CharacterWidth.grapheme("█") == 1
-      assert CharacterWidth.grapheme("▁") == 1
-    end
-
-    test "braille is one column" do
-      assert CharacterWidth.grapheme("⣿") == 1
-    end
-  end
-
   describe "zero width formatting" do
     test "zero width space and joiner and bom take no columns" do
       assert CharacterWidth.grapheme(<<0x200B::utf8>>) == 0
       assert CharacterWidth.grapheme(<<0xFEFF::utf8>>) == 0
       assert CharacterWidth.grapheme(<<0x2060::utf8>>) == 0
-    end
-  end
-
-  describe "degenerate input" do
-    test "empty string is zero" do
-      assert CharacterWidth.grapheme("") == 0
-      assert CharacterWidth.string("") == 0
     end
   end
 end

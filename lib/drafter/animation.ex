@@ -332,9 +332,9 @@ defmodule Drafter.Animation do
 
   defp apply_easing(t, :ease_in_out) do
     if t < 0.5 do
-      4 * t * t * t
+      2 * t * t
     else
-      1 - :math.pow(-2 * t + 2, 3) / 2
+      1 - :math.pow(-2 * t + 2, 2) / 2
     end
   end
 

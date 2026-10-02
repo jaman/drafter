@@ -146,8 +146,9 @@ defmodule Drafter.Pty do
     * `:kill_after` — milliseconds to wait before sending `SIGKILL` to the
       program's process group, for a program that ignores `SIGHUP`. Omitted by
       default, which sends nothing further. The signal goes to the group, so
-      children the program started go with it. A group that has already gone
-      takes the signal harmlessly.
+      children the program started go with it. The group is probed with signal
+      `0` first and left alone when it has already gone, so an exited program
+      whose id the system has since reused is not signalled in its place.
 
   Background jobs a shell placed in their own process groups are not reached,
   which is also true of the terminal emulator you are reading this in.
@@ -183,7 +184,7 @@ defmodule Drafter.Pty do
   defp escalate(os_pid, after_ms) when is_integer(after_ms) and after_ms >= 0 do
     Kernel.spawn(fn ->
       Process.sleep(after_ms)
-      TermiosNif.killpg(os_pid, @sigkill)
+      if TermiosNif.killpg(os_pid, 0) == :ok, do: TermiosNif.killpg(os_pid, @sigkill)
     end)
 
     :ok

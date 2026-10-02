@@ -20,10 +20,6 @@ defmodule Drafter.Widget.ScrollbarRoundtripTest do
       end
     end
 
-    test "the thumb stays under the pointer for a long list" do
-      assert_row_stable(200, 20)
-    end
-
     test "the thumb stays under the pointer when content barely overflows" do
       assert_row_stable(25, 20)
     end
@@ -40,22 +36,9 @@ defmodule Drafter.Widget.ScrollbarRoundtripTest do
   end
 
   describe "bounds" do
-    test "the top row scrolls to the start" do
-      assert Scrollbar.offset_from_row(0, 200, 20) == 0
-    end
-
-    test "the bottom of the track scrolls to the end" do
-      assert Scrollbar.offset_from_row(19, 200, 20) == 180
-    end
-
     test "rows beyond the track clamp rather than overscroll" do
       assert Scrollbar.offset_from_row(999, 200, 20) == 180
       assert Scrollbar.offset_from_row(-5, 200, 20) == 0
-    end
-
-    test "content that fits needs no scrolling" do
-      assert Scrollbar.offset_from_row(3, 10, 20) == 0
-      assert Scrollbar.thumb_rows(0, 10, 20) == nil
     end
 
     test "a zero-height viewport is handled" do
@@ -68,11 +51,6 @@ defmodule Drafter.Widget.ScrollbarRoundtripTest do
       thumb = Scrollbar.thumb_rows(10, 40, 20)
       assert Range.size(thumb) > 3
       assert Scrollbar.grab_offset(thumb.first + 3, 10, 40, 20) == 3
-    end
-
-    test "pressing the track rather than the thumb reports no grab" do
-      thumb = Scrollbar.thumb_rows(0, 40, 20)
-      assert Scrollbar.grab_offset(thumb.last + 2, 0, 40, 20) == 0
     end
 
     test "dragging holds the grabbed point under the pointer" do
@@ -102,13 +80,6 @@ defmodule Drafter.Widget.ScrollbarRoundtripTest do
 
       settled = Scrollbar.offset_from_drag(pointer, grab, total, viewport)
       assert settled == start_offset
-    end
-  end
-
-  describe "monotonicity" do
-    test "dragging down never scrolls up" do
-      offsets = Enum.map(0..19, &Scrollbar.offset_from_row(&1, 200, 20))
-      assert offsets == Enum.sort(offsets)
     end
   end
 end

@@ -18,6 +18,8 @@ defmodule Drafter.WidgetServerRectTest do
 
     def handle_event(_event, state), do: {:noreply, state}
 
+    def update(props, state), do: Map.merge(state, props)
+
     def on_rect_change(_rect, state), do: %{state | rect_changes: state.rect_changes + 1}
 
     defp send_count(_state, _rect) do
@@ -50,8 +52,7 @@ defmodule Drafter.WidgetServerRectTest do
     pid
   end
 
-  test "each rect update re-renders the widget, which is how live content refreshes",
-       %{counter: counter} do
+  test "an unchanged rect does not re-render the widget", %{counter: counter} do
     rect = %{x: 0, y: 0, width: 10, height: 1}
     pid = start_probe(rect)
     before = renders(counter)
@@ -60,7 +61,19 @@ defmodule Drafter.WidgetServerRectTest do
     WidgetServer.update_rect(pid, rect)
     WidgetServer.update_rect(pid, rect)
 
-    assert renders(counter) == before + 3
+    assert renders(counter) == before
+  end
+
+  test "a frame that keeps the rect and changes the props renders once", %{counter: counter} do
+    rect = %{x: 0, y: 0, width: 10, height: 1}
+    pid = start_probe(rect)
+    before = renders(counter)
+
+    WidgetServer.update_rect(pid, rect)
+    WidgetServer.update_props(pid, %{label: "y"})
+    WidgetServer.get_state(pid)
+
+    assert renders(counter) == before + 1
   end
 
   test "a changed rect re-renders the widget", %{counter: counter} do
@@ -77,17 +90,6 @@ defmodule Drafter.WidgetServerRectTest do
     assert WidgetServer.get_state(pid).rect_changes == 1
   end
 
-  test "an unchanged rect does not re-invoke on_rect_change" do
-    rect = %{x: 0, y: 0, width: 10, height: 1}
-    pid = start_probe(rect)
-    at_mount = WidgetServer.get_state(pid).rect_changes
-
-    WidgetServer.update_rect(pid, rect)
-    WidgetServer.update_rect(pid, rect)
-
-    assert WidgetServer.get_state(pid).rect_changes == at_mount
-  end
-
   test "a changed rect invokes on_rect_change once" do
     pid = start_probe(%{x: 0, y: 0, width: 10, height: 1})
     at_mount = WidgetServer.get_state(pid).rect_changes
@@ -98,14 +100,13 @@ defmodule Drafter.WidgetServerRectTest do
     assert WidgetServer.get_state(pid).rect_changes == at_mount + 1
   end
 
-  test "a rect update notifies the loop so the frame picks up the new strips" do
-    rect = %{x: 0, y: 0, width: 10, height: 1}
-    pid = start_probe(rect)
+  test "a rect change notifies the loop so the frame picks up the new strips" do
+    pid = start_probe(%{x: 0, y: 0, width: 10, height: 1})
 
     Drafter.AppRegistry.ensure_table()
     Drafter.AppRegistry.register()
 
-    WidgetServer.update_rect(pid, rect)
+    WidgetServer.update_rect(pid, %{x: 0, y: 0, width: 12, height: 1})
 
     assert_receive {:widget_render_needed, _}, 500
   after

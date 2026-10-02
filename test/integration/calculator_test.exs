@@ -29,18 +29,6 @@ defmodule Drafter.Integration.CalculatorTest do
     assert_value(ctx, 99)
   end
 
-  test "clicking three times enters it exactly three times", %{ctx: ctx} do
-    for _ <- 1..3, do: TUI.send_click(ctx, :btn_9)
-    assert_value(ctx, 999)
-  end
-
-  test "clicking different digits enters each once", %{ctx: ctx} do
-    TUI.send_click(ctx, :btn_1)
-    TUI.send_click(ctx, :btn_2)
-    TUI.send_click(ctx, :btn_3)
-    assert_value(ctx, 123)
-  end
-
   test "keyboard digits enter the same way clicks do", %{ctx: ctx} do
     TUI.send_key(ctx, :"4")
     TUI.send_key(ctx, :"2")

@@ -234,19 +234,19 @@ defmodule Drafter.Widget do
 
   @doc """
   Handles a mouse button press. Requires `:press` (or its alias `:click`) in
-  `:handles`. `x` and `y` are absolute zero-based screen cells.
+  `:handles`. `x` and `y` are zero-based cells relative to the widget's rect.
   """
   @callback handle_press(x :: integer(), y :: integer(), state()) :: event_result()
 
   @doc """
   Handles a mouse button release, the event that activates a widget. Requires
-  `:mouse_up` in `:handles`. `x` and `y` are absolute zero-based screen cells.
+  `:mouse_up` in `:handles`. `x` and `y` are zero-based cells relative to the widget's rect.
   """
   @callback handle_mouse_up(x :: integer(), y :: integer(), state()) :: event_result()
 
   @doc """
   Handles mouse motion with a button held. Requires `:drag` in `:handles`.
-  `x` and `y` are absolute zero-based screen cells.
+  `x` and `y` are zero-based cells relative to the widget's rect.
   """
   @callback handle_drag(x :: integer(), y :: integer(), state()) :: event_result()
 
@@ -448,7 +448,7 @@ defmodule Drafter.Widget do
 
       @__trait_modules__ Trait.resolve_all(unquote(trait_specs), unquote(escaped_opts))
       @__extra_handles__ unquote(extra_handles)
-      @__trait_handles__ Enum.uniq(
+      @__trait_handles__ Drafter.Widget.normalize_handles(
                            Trait.collect_handles(@__trait_modules__) ++ @__extra_handles__
                          )
       @__trait_focusable__ Trait.any_focusable?(@__trait_modules__)

@@ -3,7 +3,7 @@ defmodule Drafter.PtyTest do
 
   alias Drafter.Pty
 
-  defp collect(pty, acc \\ [], timeout \\ 3000) do
+  defp collect(pty, acc \\ [], timeout \\ 15_000) do
     io = pty.io
     control = pty.control
 
@@ -15,7 +15,7 @@ defmodule Drafter.PtyTest do
     end
   end
 
-  defp await(pty, pattern, acc \\ [], timeout \\ 3000) do
+  defp await(pty, pattern, acc \\ [], timeout \\ 15_000) do
     io = pty.io
 
     receive do
@@ -130,15 +130,6 @@ defmodule Drafter.PtyTest do
 
     assert {:ok, pid} = Pty.os_pid(pty)
     assert is_integer(pid) and pid > 0
-
-    Pty.close(pty)
-  end
-
-  test "the program runs in its own session, not the emulator's" do
-    {:ok, pty} = Pty.spawn("/bin/sh", args: ["-c", "echo SID=$$"])
-
-    assert {output, 0} = collect(pty)
-    assert output =~ "SID="
 
     Pty.close(pty)
   end

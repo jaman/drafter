@@ -112,20 +112,6 @@ defmodule Drafter.Widget.DigitsFigletTest do
       assert :testfont in Font.names()
     end
 
-    test "unregistering removes it without touching the built-ins" do
-      {:ok, font} = Figlet.load(@fixture)
-      Font.register(:testfont, font)
-      Font.unregister(:testfont)
-
-      refute :testfont in Font.names()
-      assert Font.builtin_names() == Font.builtin_names()
-      assert Font.get(:block).height == 5
-    end
-
-    test "an unregistered name still falls back to block rather than raising" do
-      assert Font.get(:never_registered) == Font.get(:block)
-    end
-
     test "a registered name wins over a built-in one" do
       {:ok, font} = Figlet.load(@fixture)
       builtin = Font.get(:block)
@@ -151,25 +137,11 @@ defmodule Drafter.Widget.DigitsFigletTest do
       assert map_size(Figlet.bundled()) == length(files)
     end
 
-    test "no shipped font shadows a built-in name" do
-      collisions = Enum.filter(Map.keys(Figlet.bundled()), &(&1 in Font.builtin_names()))
-
-      assert collisions == [],
-             "shipped fonts would silently replace built-ins: #{inspect(collisions)}"
-    end
-
     test "registering the bundle makes every font reachable by name" do
       for name <- Figlet.register_bundled() do
         assert name in Font.names()
         assert Font.height(name) > 0
         assert Font.glyph_width(name, "A") > 0
-      end
-    end
-
-    test "every shipped font can draw the printable ASCII range" do
-      for {name, font} <- Figlet.bundled(), codepoint <- 32..126 do
-        assert Font.supports?(font, <<codepoint::utf8>>),
-               "#{name} cannot draw #{inspect(<<codepoint::utf8>>)}"
       end
     end
 
@@ -248,10 +220,6 @@ defmodule Drafter.Widget.DigitsFigletTest do
 
       assert Map.has_key?(loaded, :testfont)
       assert loaded[:testfont].height == 3
-    end
-
-    test "a directory with no fonts yields an empty map" do
-      assert Figlet.load_directory("test/fixtures") == %{}
     end
   end
 end

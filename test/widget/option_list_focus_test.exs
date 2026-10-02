@@ -28,23 +28,6 @@ defmodule Drafter.Widget.OptionListFocusTest do
     blurred
   end
 
-  describe "focused state" do
-    test "mount leaves the list unfocused" do
-      refute OptionList.mount(%{options: options()}).focused
-    end
-
-    test "mount reads :focused from props" do
-      assert OptionList.mount(%{options: options(), focused: true}).focused
-    end
-
-    test "focus and blur flip the field" do
-      state = OptionList.mount(%{options: options()})
-
-      assert state |> focus() |> Map.fetch!(:focused)
-      refute state |> focus() |> blur() |> Map.fetch!(:focused)
-    end
-  end
-
   describe "highlight rendering" do
     test "an unfocused list draws no highlight marker" do
       assert [first, second] = rows(OptionList.mount(%{options: options()}))

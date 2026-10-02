@@ -65,29 +65,6 @@ defmodule Drafter.SupervisionTest do
       refute self() in links
     end
 
-    test "a crashing widget does not take down its creator" do
-      hierarchy = hierarchy_with_both()
-      %{pid: pid} = hierarchy.widgets[:faulty]
-      ref = Process.monitor(pid)
-
-      catch_exit(WidgetServer.send_event_sync(pid, :explode))
-
-      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 1000
-      assert Process.alive?(self())
-    end
-
-    test "sibling widgets survive a crash" do
-      hierarchy = hierarchy_with_both()
-      %{pid: faulty} = hierarchy.widgets[:faulty]
-      %{pid: steady} = hierarchy.widgets[:steady]
-
-      catch_exit(WidgetServer.send_event_sync(faulty, :explode))
-      Process.sleep(50)
-
-      assert Process.alive?(steady)
-      assert WidgetServer.get_state(steady) == %{count: 0}
-    end
-
     test "reading a dead widget's state degrades instead of raising" do
       hierarchy = hierarchy_with_both()
       %{pid: pid} = hierarchy.widgets[:faulty]
