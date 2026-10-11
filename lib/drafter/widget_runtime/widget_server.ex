@@ -3,6 +3,7 @@ defmodule Drafter.WidgetServer do
 
   use GenServer
 
+  alias Drafter.Render.Picture
   alias Drafter.Session.Context
   alias Drafter.Widget.DataChannel
   alias Drafter.Widget.Trait.Pipeline
@@ -22,12 +23,15 @@ defmodule Drafter.WidgetServer do
     pending_push_ref: nil,
     image_task: nil,
     image_hash: nil,
+    picture: nil,
+    picture_window: nil,
     image_placed: false,
     image_stamp: 0,
     last_image_ms: nil,
     image_retry_ref: nil,
     image_throttle_ms: 50,
-    image_priority: :low
+    image_priority: :low,
+    session_pids: []
   ]
 
   @doc """
@@ -166,6 +170,14 @@ defmodule Drafter.WidgetServer do
   def retry_image(_pid), do: :ok
 
   @doc """
+  Draw the widget again as it is, its picture included, for a change outside its props
+  that alters how it looks, such as a new theme or skin. Asynchronous.
+  """
+  @spec restyle(pid() | nil) :: :ok
+  def restyle(pid) when is_pid(pid), do: GenServer.cast(pid, :restyle)
+  def restyle(_pid), do: :ok
+
+  @doc """
   Move or resize a widget, notifying it through `on_rect_change/2` if it defines one
   and rendering it at the new rect. A rect equal to the current one changes nothing.
 
@@ -249,6 +261,7 @@ defmodule Drafter.WidgetServer do
     session_ctx = Keyword.get(opts, :session_ctx, %{})
 
     Context.adopt(session_ctx)
+    session_pids = monitor_session(session_ctx)
 
     WidgetStripCache.create()
     if id, do: WidgetPidRegistry.register(id, self())
@@ -265,7 +278,8 @@ defmodule Drafter.WidgetServer do
       auto_buffer: auto_buffer?(opts),
       image_throttle_ms:
         resolve_throttle(Keyword.get(opts, :image_throttle, @default_image_throttle)),
-      image_priority: Keyword.get(opts, :image_priority, gen_priority())
+      image_priority: Keyword.get(opts, :image_priority, gen_priority()),
+      session_pids: session_pids
     }
 
     strips = module.render(widget_state, rect)
@@ -350,6 +364,12 @@ defmodule Drafter.WidgetServer do
 
   def handle_cast(:maybe_generate_image, state) do
     {:noreply, schedule_image(state)}
+  end
+
+  def handle_cast(:restyle, state) do
+    state = %{state | image_hash: nil}
+    render_and_push(state)
+    {:noreply, state}
   end
 
   @impl true
@@ -491,6 +511,12 @@ defmodule Drafter.WidgetServer do
     {:noreply, push_now(%{state | pending_push_ref: nil})}
   end
 
+  def handle_info({:picture_ready, hash, picture}, %{image_hash: hash} = state) do
+    {:noreply, %{state | picture: picture}}
+  end
+
+  def handle_info({:picture_ready, _hash, _picture}, state), do: {:noreply, state}
+
   def handle_info(:image_task_done, state) do
     done = %{state | image_task: nil, last_image_ms: System.monotonic_time(:millisecond)}
     {:noreply, schedule_image(done)}
@@ -500,7 +526,15 @@ defmodule Drafter.WidgetServer do
     {:noreply, schedule_image(%{state | image_retry_ref: nil})}
   end
 
-  def handle_info(msg, state) do
+  def handle_info({:DOWN, _ref, :process, pid, _reason} = msg, state) do
+    if pid in state.session_pids,
+      do: {:stop, :normal, state},
+      else: widget_info(msg, state)
+  end
+
+  def handle_info(msg, state), do: widget_info(msg, state)
+
+  defp widget_info(msg, state) do
     result =
       if function_exported?(state.module, :handle_info, 2) do
         state.module.handle_info(msg, state.state)
@@ -591,7 +625,6 @@ defmodule Drafter.WidgetServer do
     since_last_push(last_at) >= push_interval(priority)
   end
 
-  defp since_last_push(nil), do: :infinity
   defp since_last_push(last_at), do: System.monotonic_time(:millisecond) - last_at
 
   defp push_interval(priority) do
@@ -629,7 +662,7 @@ defmodule Drafter.WidgetServer do
   end
 
   defp request_image(%{module: module, state: widget_state, image_placed: placed, id: id}) do
-    if function_exported?(module, :image, 3) do
+    if Drafter.Widget.draws_images?(module) do
       active? = Drafter.Widget.image_active?(module, widget_state)
       WidgetStripCache.mark_image_active(id, active?)
 
@@ -651,7 +684,7 @@ defmodule Drafter.WidgetServer do
 
   defp withdraw_image(state) do
     Drafter.Compositor.clear_image(state.id)
-    %{state | image_placed: false, image_hash: nil}
+    %{state | image_placed: false, image_hash: nil, picture: nil, picture_window: nil}
   end
 
   defp defer_image(%{image_retry_ref: ref} = state) when is_reference(ref), do: state
@@ -681,32 +714,36 @@ defmodule Drafter.WidgetServer do
   end
 
   defp maybe_start_image(state) do
-    rect = image_rect(state)
-    hash = :erlang.phash2({state.state, rect})
+    hash = :erlang.phash2({state.state, state.rect})
+    window = WidgetStripCache.visible_rect(state.id)
 
-    if hash == state.image_hash do
+    cond do
+      hash != state.image_hash -> start_image_task(state, {:draw, hash, window}, hash, window)
+      reencode?(state, window) -> start_image_task(state, {:encode, state.picture}, hash, window)
+      true -> state
+    end
+  end
+
+  defp reencode?(%{picture: nil}, _window), do: false
+
+  defp reencode?(state, window) do
+    window != state.picture_window and Picture.window_dependent?(state.picture)
+  end
+
+  defp start_image_task(state, job, hash, window) do
+    stamp = state.image_stamp + 1
+
+    %{
       state
-    else
-      stamp = state.image_stamp + 1
-
-      %{
-        state
-        | image_task: spawn_image_task(state, rect, stamp),
-          image_hash: hash,
-          image_placed: true,
-          image_stamp: stamp
-      }
-    end
+      | image_task: spawn_image_task(state, job, stamp),
+        image_hash: hash,
+        picture_window: window,
+        image_placed: true,
+        image_stamp: stamp
+    }
   end
 
-  defp image_rect(state) do
-    case WidgetStripCache.visible_rect(state.id) do
-      nil -> state.rect
-      visible -> %{state.rect | height: min(state.rect.height, visible.height)}
-    end
-  end
-
-  defp spawn_image_task(%{module: module, state: widget_state, id: id} = state, rect, stamp) do
+  defp spawn_image_task(state, job, stamp) do
     parent = self()
     ctx = session_context()
     priority = state.image_priority
@@ -714,10 +751,29 @@ defmodule Drafter.WidgetServer do
     spawn(fn ->
       Process.flag(:priority, priority)
       Context.adopt(ctx)
-      store_image(id, safe_image(module, widget_state, rect, id), stamp)
+      store_image(state.id, run_image_job(state, job, parent), stamp)
       send(parent, :image_task_done)
     end)
   end
+
+  defp run_image_job(%{module: module} = state, {:draw, hash, window}, parent) do
+    if function_exported?(module, :image_raster, 2) do
+      picture = safe_call(state.id, fn -> module.image_raster(state.state, state.rect) end)
+      send(parent, {:picture_ready, hash, picture})
+      encode_picture(state.id, picture, window)
+    else
+      safe_call(state.id, fn -> module.image(state.state, state.rect, state.id) end)
+    end
+  end
+
+  defp run_image_job(state, {:encode, picture}, _parent) do
+    encode_picture(state.id, picture, WidgetStripCache.visible_rect(state.id))
+  end
+
+  defp encode_picture(_id, nil, _window), do: nil
+
+  defp encode_picture(id, picture, window),
+    do: safe_call(id, fn -> Picture.encode(picture, id, window) end)
 
   defp gen_priority do
     case System.get_env("DRAFTER_GEN_PRIORITY") do
@@ -743,8 +799,8 @@ defmodule Drafter.WidgetServer do
     Drafter.Compositor.clear_image(id)
   end
 
-  defp safe_image(module, widget_state, rect, id) do
-    module.image(widget_state, rect, id)
+  defp safe_call(id, fun) do
+    fun.()
   rescue
     error ->
       trace_image(id, ["raised ", Exception.format(:error, error, __STACKTRACE__)])
@@ -761,6 +817,13 @@ defmodule Drafter.WidgetServer do
   end
 
   defp session_context, do: Context.capture()
+
+  defp monitor_session(session_ctx) do
+    for {_key, pid} <- session_ctx, is_pid(pid) do
+      Process.monitor(pid)
+      pid
+    end
+  end
 
   defp maybe_apply_buffer(%{data_channel: nil, state: widget_state}), do: widget_state
 

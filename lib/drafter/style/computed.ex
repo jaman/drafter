@@ -156,14 +156,6 @@ defmodule Drafter.Style.Computed do
     Map.get(state, key, false)
   end
 
-  defp get_state_value(state, key) when is_struct(state) do
-    if Map.has_key?(state, key) do
-      Map.get(state, key, false)
-    else
-      false
-    end
-  end
-
   defp get_state_value(_, _), do: false
 
   defp get_stylesheet(opts) do

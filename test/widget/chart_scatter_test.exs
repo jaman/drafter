@@ -1,6 +1,7 @@
 defmodule Drafter.Widget.ChartScatterTest do
   use ExUnit.Case, async: false
 
+  alias Drafter.Render.Picture
   alias Drafter.Widget.Chart
 
   @rect %{x: 0, y: 0, width: 40, height: 10}
@@ -14,10 +15,17 @@ defmodule Drafter.Widget.ChartScatterTest do
     :ok
   end
 
+  defp encoded(state) do
+    case Chart.image_raster(state, @rect) do
+      nil -> nil
+      picture -> Picture.encode(picture, :probe, nil)
+    end
+  end
+
   defp rendered?(type, data) do
     state = Chart.mount(%{data: data, chart_type: type, renderer: :kitty})
 
-    case Chart.image(state, @rect, :probe) do
+    case encoded(state) do
       nil -> false
       {paint, _clear, _geom} -> IO.iodata_length(paint) > 0
     end
@@ -25,7 +33,7 @@ defmodule Drafter.Widget.ChartScatterTest do
 
   defp fingerprint(type, data) do
     state = Chart.mount(%{data: data, chart_type: type, renderer: :kitty})
-    {paint, _, _} = Chart.image(state, @rect, :probe)
+    {paint, _, _} = encoded(state)
     :crypto.hash(:sha, IO.iodata_to_binary(paint))
   end
 

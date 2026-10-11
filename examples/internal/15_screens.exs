@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule ScreensExample do
   use Drafter.App
@@ -23,7 +23,7 @@ defmodule ScreensExample do
       header("Screens & Modals Example"),
       scrollable(
         [
-          label("Last result: #{inspect(state.last_result)}", style: %{fg: :bright_black}),
+          label("Last result: #{shown(state.last_result)}", style: %{fg: :bright_black}),
           label(""),
           label("Modals", style: %{bold: true, fg: :cyan}),
           horizontal([
@@ -62,6 +62,9 @@ defmodule ScreensExample do
   def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
   def handle_event(_event, state), do: {:noreply, state}
+
+  defp shown(nil), do: "none yet"
+  defp shown(value), do: inspect(value)
 end
 
 defmodule ScreensExample.InfoModal do
@@ -115,23 +118,22 @@ defmodule ScreensExample.ConfirmModal do
     ], padding: 1)
   end
 
-  def handle_event(:confirm, _data, _state) do
-    Drafter.send_app_event(:modal_result, :confirmed)
-    {:pop, :confirmed}
-  end
-
-  def handle_event(:cancel,          _data, _state), do: {:pop, :cancelled}
-  def handle_event({:key, :escape},  _data, _state), do: {:pop, :cancelled}
+  def handle_event(:confirm,         _data, _state), do: close_with(:confirmed)
+  def handle_event(:cancel,          _data, _state), do: close_with(:cancelled)
+  def handle_event({:key, :escape},  _data, _state), do: close_with(:cancelled)
   def handle_event({:key, :left},    _data, state),  do: {:ok, %{state | selected: :yes}}
   def handle_event({:key, :right},   _data, state),  do: {:ok, %{state | selected: :no}}
 
   def handle_event({:key, :enter}, _data, state) do
-    result = if state.selected == :yes, do: :confirmed, else: :cancelled
-    Drafter.send_app_event(:modal_result, result)
-    {:pop, result}
+    close_with(if state.selected == :yes, do: :confirmed, else: :cancelled)
   end
 
   def handle_event(_event, _data, state), do: {:noreply, state}
+
+  defp close_with(result) do
+    Drafter.send_app_event(:modal_result, result)
+    {:pop, result}
+  end
 end
 
 Drafter.run(ScreensExample)

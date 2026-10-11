@@ -126,7 +126,9 @@ defmodule Drafter.Widget.Chart do
       Default `false`
     * `:fill_opacity` — brightness of the area fill body relative to the series
       colour, `0.0` (invisible) to `1.0` (same as edge). Default `0.6`
-    * `:animated` — `t:boolean/0`, animate new data points. Default `false`
+    * `:animated` — `t:boolean/0`. A `:line`, `:area` or `:step` chart of one series
+      rotates its points by one every `:animation_speed` milliseconds, in every
+      renderer. Default `false`
     * `:animation_speed` — milliseconds per animation frame. Default `100`
     * `:width` — chart width in columns. The element defaults it to the rect the
       parent allocated, but rendering always uses `rect.width`, so this only reaches
@@ -366,8 +368,12 @@ defmodule Drafter.Widget.Chart do
       zero_center: Map.get(props, :zero_center, :symmetric),
       _internal: %{
         precision: Map.get(props, :precision, 3),
-        render_timestamp: Map.get(props, :_render_timestamp, 0),
-        animation_offset: 0,
+        animation_offset:
+          animation_frame(
+            Map.get(props, :animated, false),
+            Map.get(props, :_render_timestamp),
+            Map.get(props, :animation_speed, 100)
+          ),
         live_candle: live_candle,
         scroll_offset: 0,
         drag_last_x: nil,
@@ -504,8 +510,9 @@ defmodule Drafter.Widget.Chart do
   which is what lets `chart(chart_type: :line, data: values)` work. `:width` and
   `:height` default to the parent rect passed as `:__rect__`, itself defaulting to
   `%{width: 80, height: 20}`. `:class` is normalised into `:classes`,
-  `:__app_module__` becomes `:app_module`, and a `:_render_timestamp` is stamped
-  from the monotonic clock.
+  `:__app_module__` becomes `:app_module`, and `:_render_timestamp` is stamped
+  from the monotonic clock for an `:animated` chart and is `0` otherwise, so a chart
+  that is not animated keeps the same props while its data does not change.
 
   `:precision` is not forwarded; pass it directly to `mount/1` or `update/2`.
 
@@ -559,26 +566,12 @@ defmodule Drafter.Widget.Chart do
       raw_data: Keyword.get(opts, :raw_data, false),
       renderer: Keyword.get(opts, :renderer),
       image_scale: Keyword.get(opts, :image_scale, 4),
-      _render_timestamp: System.monotonic_time(:millisecond)
+      _render_timestamp: render_timestamp(Keyword.get(opts, :animated, false))
     }
   end
 
-  @doc """
-  Returns `mount_props`, re-stamping `:_render_timestamp` from the monotonic clock
-  when the chart resolves to the text renderer so that animation keeps advancing.
-  Pixel and braille charts get the props through unchanged.
-  """
-  @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
-  def update_props_from_mount(mount_props, _existing_state, _opts) do
-    renderer = Map.get(mount_props, :renderer)
-    chart_type = Map.get(mount_props, :chart_type, :line)
-
-    if Pixel.mode(renderer, chart_type) == :text do
-      Map.put(mount_props, :_render_timestamp, System.monotonic_time(:millisecond))
-    else
-      mount_props
-    end
-  end
+  defp render_timestamp(true), do: System.monotonic_time(:millisecond)
+  defp render_timestamp(false), do: 0
 
   @doc """
   Replaces `:data` with everything the widget's data channel has buffered.
@@ -630,18 +623,23 @@ defmodule Drafter.Widget.Chart do
     List.duplicate(blank, max(1, rect.height))
   end
 
-  @doc false
-  def image(state, rect, id) do
+  @doc """
+  The chart as a `Drafter.Render.Picture` filling `rect`, or `nil` when the chart does
+  not resolve to the pixel renderer or cannot be drawn.
+  """
+  @spec image_raster(t() | Drafter.Widget.props(), Drafter.Widget.rect()) ::
+          Drafter.Render.Picture.t() | nil
+  @impl Drafter.Widget
+  def image_raster(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
-    cols = max(1, rect.width)
-    rows = max(1, rect.height)
 
     case Pixel.mode(renderer(state), state.chart_type) do
       :pixel ->
-        case Pixel.image(pixel_spec(state), Pixel.protocol(renderer(state)), {cols, rows}, id) do
-          nil -> nil
-          {paint, clear} -> {paint, clear, %{dx: 0, dy: 0, cols: cols, rows: rows}}
-        end
+        Pixel.picture(
+          pixel_spec(state),
+          Pixel.protocol(renderer(state)),
+          {max(1, rect.width), max(1, rect.height)}
+        )
 
       _ ->
         nil
@@ -665,12 +663,7 @@ defmodule Drafter.Widget.Chart do
     chart_width =
       if state.show_axes, do: max(1, rect.width - axis_label_width - 1), else: rect.width
 
-    animation_offset =
-      if state.animated do
-        div(state._internal.render_timestamp, state.animation_speed)
-      else
-        0
-      end
+    animation_offset = state._internal.animation_offset
 
     horizontal? = state.orientation == :horizontal
 
@@ -709,7 +702,7 @@ defmodule Drafter.Widget.Chart do
   defp pixel_spec(state) do
     %{
       type: state.chart_type,
-      data: state.data,
+      data: animated_data(state),
       color: pixel_color(state),
       colors: state.colors,
       smooth: Map.get(state._internal, :smooth, true),
@@ -718,6 +711,34 @@ defmodule Drafter.Widget.Chart do
       max: state.max_value,
       scale: Map.get(state._internal, :image_scale, 4)
     }
+  end
+
+  @animated_types [:line, :area, :step]
+
+  defp animated_data(%{chart_type: type, data: [first | _] = data} = state)
+       when type in @animated_types and is_number(first),
+       do: Line.apply_animation_shift(data, state._internal.animation_offset)
+
+  defp animated_data(state), do: state.data
+
+  defp animation_frame(true, timestamp, speed)
+       when is_integer(timestamp) and is_integer(speed) and speed > 0,
+       do: div(timestamp, speed)
+
+  defp animation_frame(_animated, _timestamp, _speed), do: 0
+
+  defp updated_animation_frame(props, state) do
+    case Map.get(props, :_render_timestamp) do
+      nil ->
+        state._internal.animation_offset
+
+      timestamp ->
+        animation_frame(
+          Map.get(props, :animated, state.animated),
+          timestamp,
+          Map.get(props, :animation_speed, state.animation_speed)
+        )
+    end
   end
 
   defp pixel_color(state) do
@@ -811,8 +832,7 @@ defmodule Drafter.Widget.Chart do
         _internal:
           Map.merge(state._internal, %{
             precision: Map.get(props, :precision, state._internal[:precision] || 3),
-            render_timestamp:
-              Map.get(props, :_render_timestamp, state._internal.render_timestamp),
+            animation_offset: updated_animation_frame(props, state),
             live_candle: live_candle,
             data_tuple: new_tuple,
             data_hash: new_hash,

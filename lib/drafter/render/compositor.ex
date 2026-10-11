@@ -28,7 +28,16 @@ defmodule Drafter.Compositor do
   `clear_image/1`. Images are drawn after the text of a frame, and are redrawn when
   their bytes or position changed. A text row an image lies on is written around the
   image, the cells it covers left alone, so text changing beside an image never touches
-  it. An image whose rectangle does not fit entirely on screen is not drawn at all.
+  it. When the text under an image changes, it is written and the image placed again over
+  it in the same frame (by its placement bytes where it has them, else in full), so what
+  lies beneath an image on the terminal is always the text of the screen.
+
+  An image is shown inside the window `place_image/4` gives it and inside the screen. A
+  region carrying `:crop` is a stored kitty image: the compositor draws whatever part
+  of it is inside those bounds with a placement, and moves it with a placement, never
+  sending its pixels again. Any other region is drawn only when its whole rectangle is
+  inside them. An image that stops being drawable while on the terminal is taken off
+  with its `clear` sequence.
 
   Stamps order concurrent generations: a `put_image/4` whose `stamp` is not greater
   than the highest stamp already accepted for that id is discarded. `clear_image/1`
@@ -38,10 +47,14 @@ defmodule Drafter.Compositor do
 
   use GenServer
 
+  require Logger
+
   alias Drafter.Draw.Strip
-  alias Drafter.Render.Writer
+  alias Drafter.Render.{Picture, RowDamage, Writer}
+  alias FrenchCurve.Backend.Kitty
 
   @behind_poll_ms 4
+  @stall_report_ms 5_000
   alias Drafter.{Event, Terminal}
   alias Drafter.Session.Context
 
@@ -57,7 +70,9 @@ defmodule Drafter.Compositor do
     image_regions: %{},
     painted_images: %{},
     image_stamps: %{},
-    pending_image_clears: []
+    pending_image_clears: [],
+    stalled_since: nil,
+    stall_reported: false
   ]
 
   @typedoc "The screen as one padded `Drafter.Draw.Strip` per row, top row first."
@@ -81,7 +96,7 @@ defmodule Drafter.Compositor do
   @typedoc """
   Where an image sits and how big it is, as a widget's `image/3` returns it.
 
-  `:stamp` and `:place` are optional, defaulting to `0` and `nil`.
+  `:stamp`, `:place` and `:crop` are optional, defaulting to `0`, `nil` and `nil`.
   """
   @type image_region :: %{
           required(:dx) => integer(),
@@ -89,7 +104,16 @@ defmodule Drafter.Compositor do
           required(:cols) => non_neg_integer(),
           required(:rows) => non_neg_integer(),
           optional(:stamp) => integer(),
-          optional(:place) => iodata() | nil
+          optional(:place) => iodata() | nil,
+          optional(:crop) => Picture.crop() | nil
+        }
+
+  @typedoc "A rectangle of screen cells an image may be drawn inside."
+  @type window :: %{
+          x: integer(),
+          y: integer(),
+          width: non_neg_integer(),
+          height: non_neg_integer()
         }
 
   @doc """
@@ -178,6 +202,10 @@ defmodule Drafter.Compositor do
       * `:stamp` — generation counter for this `id`, default `0`
       * `:place` — sequence that redraws the image the terminal is already holding,
         default `nil`
+      * `:crop` — `Drafter.Render.Picture.crop/0` naming the stored kitty image, default
+        `nil`. With it, `paint` must store the image under that id without drawing it;
+        the compositor draws it with placements it builds, of the whole image or of
+        the part inside the window, and `:place` is not used
 
   A call is discarded outright, changing nothing, when `:stamp` is less than or equal
   to the stamp of the last accepted call for the same `id`. The first call for an
@@ -205,21 +233,27 @@ defmodule Drafter.Compositor do
       cols: Map.fetch!(region, :cols),
       rows: Map.fetch!(region, :rows),
       stamp: Map.get(region, :stamp, 0),
-      place: Map.get(region, :place)
+      place: Map.get(region, :place),
+      crop: Map.get(region, :crop)
     }
   end
 
   @doc """
   Position the image region `id` with its anchor at cell `x`, `y` and mark it visible.
 
+  `window` is the rectangle of screen cells the image may be drawn inside, such as the
+  visible part of a scrolled widget; `nil` (the default) is the whole screen. The
+  anchor may lie outside the window, as it does for a widget scrolled partly out of
+  view.
+
   Carries no image bytes. Calling it for an `id` that has no bytes yet records the
   position; nothing is drawn until `put_image/4` supplies them. The image is drawn
-  after the text of a frame, and only when its bytes or position changed or a text
-  row under it was redrawn. Asynchronous.
+  after the text of a frame, and only when its bytes, its position or its window
+  changed or a text row under it was redrawn. Asynchronous.
   """
-  @spec place_image(term(), non_neg_integer(), non_neg_integer()) :: :ok
-  def place_image(id, x, y) do
-    GenServer.cast(resolve(), {:place_image, id, x, y})
+  @spec place_image(term(), integer(), integer(), window() | nil) :: :ok
+  def place_image(id, x, y, window \\ nil) do
+    GenServer.cast(resolve(), {:place_image, id, x, y, window})
   end
 
   @doc """
@@ -373,17 +407,7 @@ defmodule Drafter.Compositor do
     else
       trace_paint(id, "stored")
 
-      base =
-        Map.get(state.image_regions, id, %{
-          x: 0,
-          y: 0,
-          visible: false,
-          version: 0,
-          clear: "",
-          place: nil,
-          digest: nil
-        })
-
+      base = Map.get(state.image_regions, id, unplaced_region(0, 0, nil, false))
       digest = digest(paint)
 
       region =
@@ -391,6 +415,7 @@ defmodule Drafter.Compositor do
           bytes: paint,
           clear: clear,
           place: placement.place,
+          crop: placement.crop,
           dx: placement.dx,
           dy: placement.dy,
           cols: placement.cols,
@@ -399,7 +424,7 @@ defmodule Drafter.Compositor do
           version: base.version + if(repeat?(base, digest, placement), do: 0, else: 1)
         })
 
-      state = if covers?(base, region), do: state, else: invalidate_region(state, base)
+      state = invalidate_uncovered(state, id, shown_rect(region, state.screen_size))
 
       schedule_render(%{
         state
@@ -409,35 +434,18 @@ defmodule Drafter.Compositor do
     end
   end
 
-  def handle_cast({:place_image, id, x, y}, state) do
+  def handle_cast({:place_image, id, x, y, window}, state) do
     case Map.get(state.image_regions, id) do
-      %{x: ^x, y: ^y, visible: true} ->
+      %{x: ^x, y: ^y, window: ^window, visible: true} ->
         {:noreply, state}
 
       nil ->
-        region = %{
-          bytes: nil,
-          clear: "",
-          dx: 0,
-          dy: 0,
-          cols: 0,
-          rows: 0,
-          x: x,
-          y: y,
-          visible: true,
-          version: 0
-        }
-
+        region = unplaced_region(x, y, window, true)
         schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
 
       region ->
-        moved = %{region | x: x, y: y, visible: true}
-
-        state =
-          if (region.x != x or region.y != y) and not is_nil(region.bytes),
-            do: invalidate_region(state, region),
-            else: state
-
+        moved = %{region | x: x, y: y, window: window, visible: true}
+        state = invalidate_uncovered(state, id, shown_rect(moved, state.screen_size))
         schedule_render(%{state | image_regions: Map.put(state.image_regions, id, moved)})
     end
   end
@@ -452,16 +460,11 @@ defmodule Drafter.Compositor do
       %{visible: true, bytes: bytes} = region when not is_nil(bytes) ->
         hidden = %{region | visible: false}
 
-        schedule_render(%{
-          state
-          | image_regions: Map.put(state.image_regions, id, hidden),
-            painted_images: Map.delete(state.painted_images, id),
-            image_stamps: Map.delete(state.image_stamps, id),
-            pending_image_clears: [region.clear | state.pending_image_clears],
-            dirty_regions: [image_rect(region) | state.dirty_regions],
-            rendered_buffer:
-              invalidate_rows(state.rendered_buffer, region.y + region.dy, region.rows)
-        })
+        state
+        |> take_off(id, region)
+        |> Map.update!(:image_regions, &Map.put(&1, id, hidden))
+        |> Map.update!(:image_stamps, &Map.delete(&1, id))
+        |> schedule_render()
 
       %{} = region ->
         {:noreply,
@@ -499,10 +502,10 @@ defmodule Drafter.Compositor do
 
       Writer.behind?(state.writer) ->
         Process.send_after(self(), :render_frame, @behind_poll_ms)
-        {:noreply, state}
+        {:noreply, stalled(state, System.monotonic_time(:millisecond))}
 
       true ->
-        {:noreply, write_frame(state)}
+        {:noreply, state |> drained(System.monotonic_time(:millisecond)) |> write_frame()}
     end
   end
 
@@ -515,6 +518,29 @@ defmodule Drafter.Compositor do
     Writer.flush(writer)
     :ok
   end
+
+  defp stalled(%__MODULE__{stalled_since: nil} = state, now), do: %{state | stalled_since: now}
+
+  defp stalled(%__MODULE__{stall_reported: false, stalled_since: since} = state, now)
+       when now - since >= @stall_report_ms do
+    Logger.warning(
+      "terminal #{inspect(state.terminal_driver)} has taken no output for #{now - since} ms; frames are skipped until it does"
+    )
+
+    %{state | stall_reported: true}
+  end
+
+  defp stalled(state, _now), do: state
+
+  defp drained(%__MODULE__{stall_reported: true, stalled_since: since} = state, now) do
+    Logger.warning(
+      "terminal #{inspect(state.terminal_driver)} takes output again after #{now - since} ms"
+    )
+
+    %{state | stalled_since: nil, stall_reported: false}
+  end
+
+  defp drained(state, _now), do: %{state | stalled_since: nil}
 
   defp resize_event?({:resize, _}), do: true
   defp resize_event?(_), do: false
@@ -599,6 +625,7 @@ defmodule Drafter.Compositor do
   end
 
   defp write_frame(state) do
+    state = withdraw_undrawable(state)
     {new_rendered, new_painted} = render_to_terminal(state)
 
     %{
@@ -621,14 +648,19 @@ defmodule Drafter.Compositor do
   end
 
   defp render_to_terminal(state) do
-    covers = covers(state.image_regions, state.painted_images, state.screen_size)
+    replace = under_changed_text(state)
+
+    covers =
+      covers(Map.drop(state.image_regions, replace), state.painted_images, state.screen_size)
+
     text_rows = build_terminal_output(state.screen_buffer, state.rendered_buffer, covers)
 
     {image_rows, new_painted} =
       build_image_output(
         state.image_regions,
         state.painted_images,
-        state.screen_size
+        state.screen_size,
+        replace
       )
 
     image_block = Enum.reverse(state.pending_image_clears) ++ image_rows
@@ -640,11 +672,8 @@ defmodule Drafter.Compositor do
     end
 
     if image_block != [] do
-      Writer.write_image(state.writer, [
-        image_block,
-        Terminal.ANSI.cursor_to(1, 1),
-        Terminal.ANSI.hide_cursor()
-      ])
+      images = [image_block, Terminal.ANSI.cursor_to(1, 1), Terminal.ANSI.hide_cursor()]
+      Writer.write_image(state.writer, if(swapping?(state), do: synced(images), else: images))
     end
 
     {state.screen_buffer, new_painted}
@@ -693,11 +722,32 @@ defmodule Drafter.Compositor do
       if prev_strip && prev_strip.cache_key == strip.cache_key do
         rows
       else
-        Enum.reverse(row_output(strip, line_index, covers)) ++ rows
+        Enum.reverse(changed_output(prev_strip, strip, line_index, covers)) ++ rows
       end
     end)
     |> Enum.reverse()
   end
+
+  defp changed_output(nil, strip, line_index, covers), do: row_output(strip, line_index, covers)
+
+  defp changed_output(previous, strip, line_index, covers) do
+    if covered?(covers, line_index),
+      do: row_output(strip, line_index, covers),
+      else: damaged_output(RowDamage.runs(previous, strip), strip, line_index, covers)
+  end
+
+  defp covered?(covers, line_index),
+    do:
+      Enum.any?(covers, fn {top, bottom, _left, _cols} ->
+        line_index >= top and line_index <= bottom
+      end)
+
+  defp damaged_output(:whole, strip, line_index, covers),
+    do: row_output(strip, line_index, covers)
+
+  defp damaged_output(runs, strip, line_index, _covers),
+    do:
+      Enum.flat_map(runs, fn {from, width} -> segment(strip, line_index, from, from + width) end)
 
   defp row_output(strip, line_index, covers) do
     spans =
@@ -716,6 +766,9 @@ defmodule Drafter.Compositor do
     Enum.reverse(segment(strip, line_index, from, Strip.width(strip)) ++ segments)
   end
 
+  defp swapping?(state),
+    do: Enum.any?(state.image_regions, fn {_id, region} -> match?(%{spare: _}, region.crop) end)
+
   defp segment(_strip, _line_index, from, to) when to <= from, do: []
 
   defp segment(strip, line_index, 0, to) when to >= strip.width,
@@ -729,21 +782,55 @@ defmodule Drafter.Compositor do
       ]
     ]
 
+  defp under_changed_text(state) do
+    previous = List.to_tuple(state.rendered_buffer)
+    current = List.to_tuple(state.screen_buffer)
+
+    for {id, {_version, shown, _image}} <- state.painted_images,
+        Map.has_key?(state.image_regions, id),
+        text_changed_under?(shown, previous, current),
+        do: id
+  end
+
+  defp text_changed_under?(shown, previous, current) do
+    Enum.any?(shown.y..(shown.y + shown.height - 1)//1, fn row ->
+      row < tuple_size(previous) and row < tuple_size(current) and
+        span_changed?(elem(previous, row), elem(current, row), shown.x, shown.width)
+    end)
+  end
+
+  defp span_changed?(nil, _current, _left, _cols), do: true
+  defp span_changed?(_previous, nil, _left, _cols), do: false
+
+  defp span_changed?(previous, current, _left, _cols)
+       when previous.cache_key == current.cache_key,
+       do: false
+
+  defp span_changed?(previous, current, left, cols),
+    do:
+      Strip.to_ansi(Strip.slice(previous, left, cols)) !=
+        Strip.to_ansi(Strip.slice(current, left, cols))
+
   defp covers(image_regions, painted, screen_size) do
     for {id, region} <- image_regions,
         paintable?(region, screen_size),
-        not needs_paint?(region, Map.get(painted, id)) do
-      top = region.y + region.dy
-      {top, top + region.rows - 1, region.x + region.dx, region.cols}
+        not needs_paint?(region, Map.get(painted, id), screen_size) do
+      shown = shown_rect(region, screen_size)
+      {shown.y, shown.y + shown.height - 1, shown.x, shown.width}
     end
   end
 
-  defp build_image_output(image_regions, painted, screen_size) do
+  defp build_image_output(image_regions, painted, screen_size, replace) do
     Enum.reduce(image_regions, {[], painted}, fn {id, region}, {rows, painted_acc} ->
-      if should_paint?(region, Map.get(painted_acc, id), screen_size) do
-        paint_region(id, region, rows, painted_acc)
-      else
-        {rows, painted_acc}
+      cond do
+        should_paint?(region, Map.get(painted_acc, id), screen_size) ->
+          paint_region(id, region, {rows, painted_acc}, screen_size)
+
+        id in replace and paintable?(region, screen_size) ->
+          paint_region(id, region, {rows, painted_acc}, screen_size)
+
+        true ->
+          {rows, painted_acc}
       end
     end)
   end
@@ -765,48 +852,182 @@ defmodule Drafter.Compositor do
       ])
     end
 
-    paintable and needs_paint?(region, painted)
+    paintable and needs_paint?(region, painted, screen_size)
   end
 
-  defp paint_region(id, region, rows, painted_acc) do
-    changed? = needs_paint?(region, Map.get(painted_acc, id))
+  defp paint_region(id, region, {rows, painted_acc}, screen_size) do
+    painted = Map.get(painted_acc, id)
+    shown = shown_rect(region, screen_size)
+    changed? = needs_paint?(region, painted, screen_size)
     trace_paint(id, if(changed?, do: "v", else: "o"))
 
-    bytes = if changed?, do: region.bytes, else: Map.get(region, :place) || region.bytes
-
-    cmd = [Terminal.ANSI.cursor_to(region.x + region.dx + 1, region.y + region.dy + 1), bytes]
-
-    {[cmd | rows], Map.put(painted_acc, id, {region.version, {region.x, region.y}})}
+    {cmd, image} = paint_command(region, shown, changed?, painted)
+    {[cmd | rows], Map.put(painted_acc, id, {region.version, shown, image})}
   end
+
+  defp paint_command(%{crop: %{spare: spare} = crop} = region, shown, _changed?, painted) do
+    showing = showing(painted)
+
+    if new_content?(region, painted) do
+      image = if showing == crop.image, do: spare, else: crop.image
+      retire = if showing in [nil, image], do: [], else: Kitty.delete(id: showing)
+
+      {[
+         region.bytes,
+         Kitty.transmit_encoded(crop.encoded, image),
+         placed(region, shown, image),
+         retire
+       ], image}
+    else
+      image = showing || crop.image
+      {placed(region, shown, image), image}
+    end
+  end
+
+  defp paint_command(%{crop: crop} = region, shown, _changed?, painted) when is_map(crop) do
+    bytes = if new_content?(region, painted), do: region.bytes, else: []
+    {[bytes, placed(region, shown, crop.image)], crop.image}
+  end
+
+  defp paint_command(region, shown, changed?, _painted) do
+    bytes = if changed?, do: region.bytes, else: Map.get(region, :place) || region.bytes
+    {[Terminal.ANSI.cursor_to(shown.x + 1, shown.y + 1), bytes], nil}
+  end
+
+  defp placed(region, shown, image) do
+    full = image_rect(region)
+    cells = {shown.x - full.x, shown.y - full.y, shown.width, shown.height}
+    crop = region.crop
+
+    [
+      Terminal.ANSI.cursor_to(shown.x + 1, shown.y + 1),
+      Kitty.place(image,
+        placement: 1,
+        fit: {shown.width, shown.height},
+        source: Picture.source({crop.width, crop.height}, {region.cols, region.rows}, cells)
+      )
+    ]
+  end
+
+  defp showing(nil), do: nil
+  defp showing({_version, _shown, image}), do: image
+
+  defp new_content?(_region, nil), do: true
+  defp new_content?(region, {version, _shown, _image}), do: region.version != version
 
   defp paintable?(region, screen_size) do
-    region.visible and not is_nil(region.bytes) and on_screen?(region, screen_size)
+    region.visible and not is_nil(region.bytes) and shown_rect(region, screen_size) != nil
   end
 
-  defp on_screen?(region, {width, height}) do
-    left = region.x + region.dx
-    top = region.y + region.dy
-    left >= 0 and top >= 0 and left + region.cols <= width and top + region.rows <= height
+  defp shown_rect(region, {width, height}) do
+    full = image_rect(region)
+    screen = %{x: 0, y: 0, width: width, height: height}
+    bounds = if region.window, do: intersect(region.window, screen), else: screen
+
+    case bounds && intersect(full, bounds) do
+      nil -> nil
+      ^full -> full
+      partial -> if croppable?(region), do: partial, else: nil
+    end
+  end
+
+  defp croppable?(region), do: is_map(Map.get(region, :crop))
+
+  defp intersect(a, b) do
+    left = max(a.x, b.x)
+    top = max(a.y, b.y)
+    right = min(a.x + a.width, b.x + b.width)
+    bottom = min(a.y + a.height, b.y + b.height)
+
+    if right > left and bottom > top,
+      do: %{x: left, y: top, width: right - left, height: bottom - top},
+      else: nil
   end
 
   defp repeat?(%{bytes: bytes, digest: digest} = base, digest, placement)
        when not is_nil(bytes) and not is_nil(digest) do
     Map.get(base, :dx) == placement.dx and Map.get(base, :dy) == placement.dy and
       Map.get(base, :cols) == placement.cols and Map.get(base, :rows) == placement.rows and
-      Map.get(base, :place) == placement.place
+      Map.get(base, :place) == placement.place and Map.get(base, :crop) == placement.crop
   end
 
   defp repeat?(_base, _digest, _placement), do: false
 
   defp digest(paint), do: :erlang.phash2(:erlang.iolist_to_binary(paint))
 
-  defp needs_paint?(_region, nil), do: true
+  defp needs_paint?(_region, nil, _screen_size), do: true
 
-  defp needs_paint?(region, {version, pos}),
-    do: region.version != version or {region.x, region.y} != pos
+  defp needs_paint?(region, {version, shown, _image}, screen_size),
+    do: region.version != version or shown_rect(region, screen_size) != shown
 
   defp image_rect(region) do
     %{x: region.x + region.dx, y: region.y + region.dy, width: region.cols, height: region.rows}
+  end
+
+  defp unplaced_region(x, y, window, visible) do
+    %{
+      bytes: nil,
+      clear: "",
+      place: nil,
+      crop: nil,
+      digest: nil,
+      dx: 0,
+      dy: 0,
+      cols: 0,
+      rows: 0,
+      x: x,
+      y: y,
+      window: window,
+      visible: visible,
+      version: 0
+    }
+  end
+
+  defp withdraw_undrawable(state) do
+    Enum.reduce(state.painted_images, state, fn {id, _painted}, acc ->
+      region = Map.get(acc.image_regions, id)
+
+      if region && paintable?(region, acc.screen_size),
+        do: acc,
+        else: take_off(acc, id, region)
+    end)
+  end
+
+  defp take_off(state, id, region) do
+    clears =
+      if region, do: [region.clear | state.pending_image_clears], else: state.pending_image_clears
+
+    state
+    |> invalidate_painted(id)
+    |> Map.put(:pending_image_clears, clears)
+    |> Map.update!(:painted_images, &Map.delete(&1, id))
+  end
+
+  defp invalidate_uncovered(state, id, shown) do
+    case Map.get(state.painted_images, id) do
+      {_version, painted, _image} when shown != nil and painted != nil ->
+        if intersect(painted, shown) == painted, do: state, else: invalidate_painted(state, id)
+
+      {_version, _painted, _image} ->
+        invalidate_painted(state, id)
+
+      nil ->
+        state
+    end
+  end
+
+  defp invalidate_painted(state, id) do
+    case Map.get(state.painted_images, id) do
+      {_version, %{} = painted, _image} ->
+        %{
+          state
+          | dirty_regions: [painted | state.dirty_regions],
+            rendered_buffer: invalidate_rows(state.rendered_buffer, painted.y, painted.height)
+        }
+
+      _ ->
+        state
+    end
   end
 
   defp compose_output([]), do: []
@@ -826,8 +1047,12 @@ defmodule Drafter.Compositor do
   defp images_pending?(state) do
     Enum.any?(state.image_regions, fn {id, region} ->
       paintable?(region, state.screen_size) and
-        needs_paint?(region, Map.get(state.painted_images, id))
-    end)
+        needs_paint?(region, Map.get(state.painted_images, id), state.screen_size)
+    end) or
+      Enum.any?(state.painted_images, fn {id, _painted} ->
+        region = Map.get(state.image_regions, id)
+        region == nil or not paintable?(region, state.screen_size)
+      end)
   end
 
   defp stale_stamp?(stamps, id, stamp) do
@@ -836,23 +1061,6 @@ defmodule Drafter.Compositor do
       last -> stamp <= last
     end
   end
-
-  defp covers?(old, new) do
-    is_nil(Map.get(old, :bytes)) or
-      (Map.get(old, :x) == new.x and Map.get(old, :y) == new.y and
-         Map.get(old, :dx) == new.dx and Map.get(old, :dy) == new.dy and
-         Map.get(old, :cols, 0) <= new.cols and Map.get(old, :rows, 0) <= new.rows)
-  end
-
-  defp invalidate_region(state, %{bytes: bytes} = region) when not is_nil(bytes) do
-    %{
-      state
-      | dirty_regions: [image_rect(region) | state.dirty_regions],
-        rendered_buffer: invalidate_rows(state.rendered_buffer, region.y + region.dy, region.rows)
-    }
-  end
-
-  defp invalidate_region(state, _region), do: state
 
   defp discard_image_state(state) do
     clears =

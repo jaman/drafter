@@ -35,15 +35,26 @@ defmodule Drafter.Terminal.Driver do
   use GenServer
 
   alias Drafter.Event
-  alias Drafter.Terminal.{ANSI, InputBuffer, KittyKeyboard, Probe, Reports, TermiosNif}
+
+  alias Drafter.Terminal.{
+    ANSI,
+    InputBuffer,
+    KittyKeyboard,
+    PixelMouse,
+    Probe,
+    Reports,
+    TermiosNif
+  }
 
   defstruct [
     :shell_pid,
     :stdin_reader_pid,
+    :input_owner,
     :terminal_mode,
     buffer: %InputBuffer{},
     mouse_enabled: false,
     key_release: false,
+    pixel_mouse: :off,
     queries: [],
     alt_screen: false,
     raw_mode: false,
@@ -69,6 +80,7 @@ defmodule Drafter.Terminal.Driver do
           buffer: InputBuffer.t(),
           mouse_enabled: boolean(),
           key_release: boolean(),
+          pixel_mouse: PixelMouse.t(),
           alt_screen: boolean(),
           raw_mode: boolean(),
           size: {pos_integer(), pos_integer()}
@@ -110,6 +122,8 @@ defmodule Drafter.Terminal.Driver do
   `key_release: true` turns on the kitty keyboard protocol with
   `Drafter.Terminal.KittyKeyboard.push/0` and asks the terminal whether it took,
   so key presses are followed by `:key_down` and releases arrive as `:key_up`.
+  `pixel_mouse: true` asks the terminal for its cell size and, once it answers, turns
+  on pixel mouse reports as `pixel_mouse/1` does.
 
   Terminal size is measured again on success, and `SIGWINCH` starts being watched.
   On a system where the signal cannot be watched, size is polled instead and a
@@ -126,8 +140,9 @@ defmodule Drafter.Terminal.Driver do
   @doc """
   Restore the terminal to the state it was in before `setup/1`.
 
-  Disables bracketed paste, mouse reporting and the kitty keyboard protocol when
-  `setup/1` turned it on, shows the cursor, leaves the
+  Disables bracketed paste, pixel mouse reports when they were turned on, mouse
+  reporting and the kitty keyboard protocol when `setup/1` turned it on, shows the
+  cursor, leaves the
   alternate screen, restores the saved terminal mode and stops the stdin reader.
   Safe to call when `setup/1` was never called or already undone.
 
@@ -180,7 +195,9 @@ defmodule Drafter.Terminal.Driver do
   @doc """
   Start reading stdin and emitting events.
 
-  Idempotent: a second call while a reader is running does nothing.
+  Idempotent: a second call while a reader is running does nothing. When stdin ends
+  or fails — the terminal closed — the process that called this is sent
+  `:drafter_end_session`, so its app loop stops.
   """
   @spec start_input() :: :ok
   def start_input do
@@ -244,6 +261,22 @@ defmodule Drafter.Terminal.Driver do
     GenServer.cast(__MODULE__, {:disable_mouse, opts})
   end
 
+  @doc """
+  Turn pixel mouse reports on or off for the local terminal.
+
+  With `true`, SGR mouse reports switch to pixels (DECSET 1016) once the terminal's
+  cell size is known, asking for it first when it is not. Each mouse payload then
+  carries `px: {x, y}`, the zero-based pixel under the pointer, beside its cell `x`
+  and `y`. The terminal's answer arrives as `{:pixel_mouse, boolean}`; from a terminal
+  that ignores the mode it is `false` and reports stay in cells, without `:px`. With
+  `false`, reports return to cells.
+
+  Asynchronous, and does nothing when raw mode is not in force or the reports are
+  already in the state asked for. Requires mouse reporting to be on.
+  """
+  @spec pixel_mouse(boolean()) :: :ok
+  def pixel_mouse(on?) when is_boolean(on?), do: GenServer.cast(__MODULE__, {:pixel_mouse, on?})
+
   @impl GenServer
   def init(opts) do
     event_manager = Keyword.get(opts, :event_manager, Event.Manager)
@@ -302,12 +335,12 @@ defmodule Drafter.Terminal.Driver do
     {:reply, :ok, %{state | queries: []}}
   end
 
-  def handle_call(:start_input, _from, state) do
+  def handle_call(:start_input, {owner, _tag}, state) do
     if state.stdin_reader_pid do
-      {:reply, :ok, state}
+      {:reply, :ok, %{state | input_owner: owner}}
     else
       pid = setup_stdin()
-      {:reply, :ok, %{state | stdin_reader_pid: pid}}
+      {:reply, :ok, %{state | stdin_reader_pid: pid, input_owner: owner}}
     end
   end
 
@@ -345,6 +378,17 @@ defmodule Drafter.Terminal.Driver do
     end
   end
 
+  def handle_cast({:pixel_mouse, _on?}, %__MODULE__{raw_mode: false} = state),
+    do: {:noreply, state}
+
+  def handle_cast({:pixel_mouse, true}, state),
+    do:
+      {:noreply,
+       write_pixel_mouse(state, PixelMouse.enable(state.pixel_mouse, state.buffer.cell_size))}
+
+  def handle_cast({:pixel_mouse, false}, state),
+    do: {:noreply, write_pixel_mouse(state, PixelMouse.disable(state.pixel_mouse))}
+
   def handle_cast({:disable_mouse, opts}, state) do
     if state.raw_mode and state.mouse_enabled do
       write_synchronously(ANSI.disable_mouse(opts))
@@ -377,19 +421,25 @@ defmodule Drafter.Terminal.Driver do
 
     {events, buffer} = InputBuffer.feed(state.buffer, data)
     emit_events(events)
-    {:noreply, %{state | buffer: buffer}}
+    {:noreply, pixel_mouse_after_input(%{state | buffer: buffer})}
   end
 
   def handle_info(:input_flush, state) do
     {events, buffer} = InputBuffer.flush(state.buffer)
     emit_events(events)
-    {:noreply, %{state | buffer: buffer}}
+    {:noreply, pixel_mouse_after_input(%{state | buffer: buffer})}
+  end
+
+  def handle_info(:stdin_closed, %__MODULE__{input_owner: owner} = state) do
+    if is_pid(owner), do: send(owner, :drafter_end_session)
+    {:noreply, %{state | input_owner: nil, stdin_reader_pid: nil}}
   end
 
   def handle_info({:signal, :winch}, state) do
     new_size = detect_terminal_size()
     event_manager = Process.get(:event_manager)
     GenServer.cast(event_manager, {:event, {:resize, new_size}})
+    write_synchronously(PixelMouse.resized(state.pixel_mouse))
 
     {:noreply, %{state | size: new_size}}
   end
@@ -406,6 +456,8 @@ defmodule Drafter.Terminal.Driver do
 
   defp setup_terminal(state, opts) do
     key_release = Keyword.get(opts, :key_release, false)
+    pixel_mouse = PixelMouse.start(Keyword.get(opts, :pixel_mouse, false))
+    cell_size? = Keyword.get(opts, :cell_size, false) or pixel_mouse == :waiting
     shell_pid = :shell.start_interactive({:noshell, :raw})
 
     case enter_terminal_mode() do
@@ -432,8 +484,8 @@ defmodule Drafter.Terminal.Driver do
             alt_screen: true,
             mouse_enabled: true,
             key_release: key_release,
-            queries:
-              keyboard_query(key_release) ++ cell_size_query(Keyword.get(opts, :cell_size, false)),
+            pixel_mouse: pixel_mouse,
+            queries: keyboard_query(key_release) ++ cell_size_query(cell_size?),
             buffer: InputBuffer.new(key_release: key_release),
             size: detect_terminal_size()
         }
@@ -468,7 +520,6 @@ defmodule Drafter.Terminal.Driver do
       {:ok, {:stty, String.trim(saved_mode)}}
     else
       {output, _code} -> {:error, {:stty_failed, String.trim(output)}}
-      other -> {:error, {:stty_failed, other}}
     end
   end
 
@@ -511,13 +562,23 @@ defmodule Drafter.Terminal.Driver do
   defp keyboard_protocol_off(true), do: [KittyKeyboard.pop()]
   defp keyboard_protocol_off(false), do: []
 
+  defp pixel_mouse_after_input(state),
+    do:
+      write_pixel_mouse(state, PixelMouse.after_input(state.pixel_mouse, state.buffer.cell_size))
+
+  defp write_pixel_mouse(state, {pixel_mouse, bytes}) do
+    write_synchronously(bytes)
+    %{state | pixel_mouse: pixel_mouse}
+  end
+
   defp cleanup_terminal(state) do
     TermiosNif.set_tui_inactive()
 
     if state.raw_mode do
       cleanup_sequences = keyboard_protocol_off(state.key_release)
 
-      cleanup_sequences = cleanup_sequences ++ ["\e[?2004l"]
+      cleanup_sequences =
+        cleanup_sequences ++ ["\e[?2004l", PixelMouse.cleanup(state.pixel_mouse)]
 
       cleanup_sequences =
         if state.mouse_enabled do
@@ -550,6 +611,7 @@ defmodule Drafter.Terminal.Driver do
         alt_screen: false,
         mouse_enabled: false,
         key_release: false,
+        pixel_mouse: :off,
         shell_pid: nil,
         stdin_reader_pid: nil,
         terminal_mode: nil
@@ -599,8 +661,8 @@ defmodule Drafter.Terminal.Driver do
         send(__MODULE__, {:stdin, data})
         stdin_reader()
 
-      _ ->
-        :ok
+      _closed ->
+        send(__MODULE__, :stdin_closed)
     end
   end
 
@@ -625,14 +687,14 @@ defmodule Drafter.Terminal.Driver do
     {events, buffer} = InputBuffer.feed(state.buffer, leftover)
     emit_events(events)
 
-    %{
+    pixel_mouse_after_input(%{
       state
       | probing: false,
         probe_replies: "",
         probe_result: {:ok, protocol},
         probe_waiters: [],
         buffer: buffer
-    }
+    })
   end
 
   defp drain_stdin_messages do

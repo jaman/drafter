@@ -47,8 +47,10 @@ defmodule Drafter.Widget.DataTable.Selection do
   end
 
   def action_cursor_last(state) do
-    new_index = find_last_enabled(state.data)
-    change_selection(state, new_index, false)
+    case find_last_enabled(state.data) do
+      nil -> {:ok, state, []}
+      new_index -> change_selection(state, new_index, false)
+    end
   end
 
   def action_page_up(state, data_height) do
@@ -227,9 +229,8 @@ defmodule Drafter.Widget.DataTable.Selection do
     Enum.find_index(data, fn _row -> true end)
   end
 
-  def find_last_enabled(data) do
-    length(data) - 1
-  end
+  def find_last_enabled([]), do: nil
+  def find_last_enabled(data), do: length(data) - 1
 
   def find_next_enabled(data, current_index) do
     start_index = if current_index, do: current_index + 1, else: 0

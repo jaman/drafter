@@ -39,9 +39,9 @@ defmodule Drafter.Widget.ChartPropUpdateTest do
       pixel = Chart.mount(%{data: @data, renderer: :kitty})
       braille = Chart.update(%{data: @data, renderer: :braille}, pixel)
 
-      assert Chart.image(pixel, @rect, :probe) != nil
+      assert Chart.image_raster(pixel, @rect) != nil
 
-      refute Chart.image(braille, @rect, :probe),
+      refute Chart.image_raster(braille, @rect),
              "a chart switched away from pixel still emits an image, so the old graphic is never cleared"
     end
   end
@@ -124,6 +124,35 @@ defmodule Drafter.Widget.ChartPropUpdateTest do
       assert state._internal.y_offset == 3
       assert state._internal.animation_offset == 7
       assert state._internal.renderer == :pixel
+    end
+  end
+
+  describe "re-rendering with the same props" do
+    defp rerender(opts, state) do
+      Chart.update(Chart.from_component_opts(@data, opts), state)
+    end
+
+    test "leaves a chart that is not animated unchanged" do
+      opts = [chart_type: :bar, renderer: :kitty]
+      first = rerender(opts, Chart.mount(Chart.from_component_opts(@data, opts)))
+      Process.sleep(2)
+
+      assert rerender(opts, first) === first
+    end
+
+    test "advances an animated chart one frame per animation_speed milliseconds" do
+      opts = [chart_type: :line, animated: true, animation_speed: 1]
+      first = rerender(opts, Chart.mount(Chart.from_component_opts(@data, opts)))
+      Process.sleep(3)
+
+      assert rerender(opts, first)._internal.animation_offset > first._internal.animation_offset
+    end
+
+    test "shifts the points of an animated pixel chart" do
+      state = Chart.mount(%{data: @data, chart_type: :line, renderer: :kitty, animated: true})
+      frame = put_in(state._internal.animation_offset, 2)
+
+      refute Chart.image_raster(frame, @rect).raster == Chart.image_raster(state, @rect).raster
     end
   end
 end

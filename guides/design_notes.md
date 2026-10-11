@@ -196,20 +196,26 @@ frame was computed. So offsets move the layer rather than redrawing its contents
 
 ### Partial visibility is still visibility
 
-Visibility is recorded as a rect rather than a boolean because, for an
-image-backed widget, the on-screen region is the portion worth generating. A
-chart taller than its viewport is never fully visible, so treating "not fully
-visible" as "not visible" would erase it outright. A widget clipped by a scroll
-viewport still shows the rows that survived clipping, and the image should cover
-those rows. Only a widget with nothing left on screen, or one mid-scroll or
-mid-resize where the image would lag the text, is skipped.
+Visibility is recorded as the visible cells rather than a boolean, because a
+chart taller than its viewport is never fully visible and must still show the
+rows that survived clipping. A widget exporting `image_raster/2` hands over a
+raster, so any part of it can be shown. On a kitty terminal that stores images
+by id, the image is transmitted once and the compositor shows the visible part
+with a placement source rectangle: scrolling sends placements, never pixels. On
+iTerm2 and sixel, which draw pixels into cells, the widget server keeps the
+raster and encodes only its visible rows, again when the visible rows change.
+Rasters are a whole number of pixels per cell so a crop lands exactly on a row
+boundary. A widget exporting only `image/3` hands over finished bytes, which
+cannot be cut, so it is drawn only while all of it is visible. Only a widget
+with nothing left on screen, or one mid-resize, is skipped.
 
 ### Image placement carries no bytes
 
 Terminal-graphics bytes are stored once per generation by
 `Drafter.Compositor.put_image/4`, from the widget's async render task, so they
-never travel through the render loop. `place_image/3` is then a per-frame update
-that only positions the region and marks it visible.
+never travel through the render loop. `place_image/4` is then a per-frame update
+that only positions the region, gives it the window it may be drawn in, and marks
+it visible.
 
 ### Layer depth from id prefix
 

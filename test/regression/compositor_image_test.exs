@@ -126,7 +126,7 @@ defmodule Drafter.Regression.CompositorImageTest do
     assert poll(cap, &String.contains?(&1, "FRESH_SEVEN"))
   end
 
-  test "text on an image's row is written around the image, the cells it covers left alone, and the image is not sent again",
+  test "text changing under an image is written and the image placed again over it, not sent again in full",
        %{cap: cap} do
     Compositor.put_image(:field, "FULL_IMAGE", "DEL", %{
       dx: 0,
@@ -144,11 +144,72 @@ defmodule Drafter.Regression.CompositorImageTest do
     Compositor.render_strips([Strip.from_text("abcdefghijklmnop")], 0, 4)
     assert poll(cap, &String.contains?(&1, "jklmnop"))
     out = settled(cap)
-    assert String.contains?(out, "abc")
-    refute String.contains?(out, "defghi"), "the cells under the image were written"
-    assert String.contains?(out, "\e[5;10H"), "the text after the image resumes at its column"
-    refute String.contains?(out, "PLACE_ONLY")
+    assert String.contains?(out, "abcdefghijklmnop"), "the cells under the image were not written"
+    assert String.contains?(out, "PLACE_ONLY"), "the image was not placed again over the new text"
     refute String.contains?(out, "FULL_IMAGE")
+  end
+
+  test "text changing beside an image, not under it, leaves the image alone", %{cap: cap} do
+    Compositor.put_image(:aside, "ASIDE_IMAGE", "DEL", %{
+      dx: 0,
+      dy: 0,
+      cols: 6,
+      rows: 2,
+      stamp: 1,
+      place: "ASIDE_PLACE"
+    })
+
+    Compositor.place_image(:aside, 3, 4)
+    assert poll(cap, &String.contains?(&1, "ASIDE_IMAGE"))
+
+    Cap.clear(cap)
+
+    Compositor.render_strips(
+      [Strip.from_text("   " <> String.duplicate(" ", 6) <> "jklmnop")],
+      0,
+      4
+    )
+
+    assert poll(cap, &String.contains?(&1, "jklmnop"))
+    out = settled(cap)
+    refute String.contains?(out, "ASIDE_PLACE")
+    refute String.contains?(out, "ASIDE_IMAGE")
+  end
+
+  test "clearing one image on rows another image still covers redraws those rows and keeps the other image",
+       %{cap: cap, comp: comp} do
+    Compositor.put_image(:left, "LEFT_IMAGE", "LEFT_DEL", %{
+      dx: 0,
+      dy: 0,
+      cols: 6,
+      rows: 2,
+      place: "LEFT_PLACE"
+    })
+
+    Compositor.place_image(:left, 2, 4)
+
+    Compositor.put_image(:right, "RIGHT_IMAGE", "RIGHT_DEL", %{
+      dx: 0,
+      dy: 0,
+      cols: 6,
+      rows: 2,
+      place: "RIGHT_PLACE"
+    })
+
+    Compositor.place_image(:right, 20, 4)
+
+    assert poll(
+             cap,
+             &(String.contains?(&1, "LEFT_IMAGE") and String.contains?(&1, "RIGHT_IMAGE"))
+           )
+
+    Cap.clear(cap)
+    Compositor.clear_image(:left)
+    assert poll(cap, &String.contains?(&1, "LEFT_DEL"))
+    settled(cap)
+
+    assert Process.alive?(comp)
+    refute String.contains?(Cap.dump(cap), "RIGHT_IMAGE")
   end
 
   test "clear_image resets the stamp so a lower-or-equal stamp paints again", %{cap: cap} do
@@ -220,5 +281,79 @@ defmodule Drafter.Regression.CompositorImageTest do
     assert List.last(image_writes) =~ "IMG6"
     assert length(image_writes) < 6
     assert Enum.all?(image_writes, &(not String.contains?(&1, "row")))
+  end
+
+  describe "a stored kitty image" do
+    @stored %{dx: 0, dy: 0, cols: 10, rows: 4, crop: %{image: 7, width: 40, height: 32}}
+
+    test "is placed after it is stored, and moves with a placement alone", %{cap: cap} do
+      Compositor.put_image(:stored, "STORED_PIXELS", "DEL", @stored)
+      Compositor.place_image(:stored, 2, 3)
+      assert poll(cap, &(&1 =~ "STORED_PIXELS" and &1 =~ "\e[4;3H\e_Ga=p,i=7"))
+
+      Cap.clear(cap)
+      Compositor.place_image(:stored, 2, 6)
+      assert poll(cap, &String.contains?(&1, "\e[7;3H\e_Ga=p,i=7"))
+      refute settled(cap) =~ "STORED_PIXELS"
+    end
+
+    test "with a spare id, a new frame goes under the id not on screen before the old is deleted",
+         %{cap: cap} do
+      frame = fn n ->
+        encoded = %{control: "f=32,s=1,v=1", chunks: ["FRAME#{n}"]}
+        crop = %{image: 7, spare: 8, width: 40, height: 32, encoded: encoded}
+        Map.merge(@stored, %{crop: crop, stamp: n})
+      end
+
+      Compositor.put_image(:swapped, "ONE", "DEL", frame.(1))
+      Compositor.place_image(:swapped, 0, 0)
+      assert poll(cap, &(&1 =~ "\e_Ga=p,i=7"))
+      first = settled(cap)
+      assert first =~ "a=t,i=7,f=32,s=1,v=1,q=2,m=0;FRAME1"
+      refute first =~ "a=d"
+
+      Cap.clear(cap)
+      Compositor.put_image(:swapped, "TWO", "DEL", frame.(2))
+      assert poll(cap, &(&1 =~ "a=d,d=i,i=7"))
+      second = settled(cap)
+      assert second =~ ~r/\e\[\?2026h.*a=t,i=8,[^;]*;FRAME2.*a=p,i=8.*a=d,d=i,i=7.*\e\[\?2026l/s
+
+      Cap.clear(cap)
+      Compositor.put_image(:swapped, "THREE", "DEL", frame.(3))
+      assert poll(cap, &(&1 =~ "a=d,d=i,i=8"))
+      assert settled(cap) =~ ~r/a=t,i=7,[^;]*;FRAME3.*a=p,i=7.*a=d,d=i,i=8/s
+    end
+
+    test "partly inside its window shows only the visible rows", %{cap: cap} do
+      Compositor.put_image(:part, "STORED_PIXELS", "DEL", @stored)
+      Compositor.place_image(:part, 0, 2, %{x: 0, y: 4, width: 80, height: 10})
+
+      assert poll(cap, &String.contains?(&1, "\e[5;1H\e_Ga=p,i=7"))
+      out = settled(cap)
+      assert out =~ "c=10,r=2,x=0,y=16,w=40,h=16"
+    end
+
+    test "is taken off when it leaves its window entirely", %{cap: cap} do
+      Compositor.put_image(:gone, "STORED_PIXELS", "STORED_DEL", @stored)
+      Compositor.place_image(:gone, 0, 2)
+      assert poll(cap, &String.contains?(&1, "STORED_PIXELS"))
+
+      Cap.clear(cap)
+      Compositor.place_image(:gone, 0, 2, %{x: 0, y: 10, width: 80, height: 10})
+      assert poll(cap, &String.contains?(&1, "STORED_DEL"))
+    end
+  end
+
+  test "an image without a stored copy is taken off when only part of it is inside its window",
+       %{cap: cap} do
+    region = %{dx: 0, dy: 0, cols: 6, rows: 4}
+    Compositor.put_image(:whole_only, "WHOLE_PIXELS", "WHOLE_DEL", region)
+    Compositor.place_image(:whole_only, 0, 2, %{x: 0, y: 0, width: 80, height: 20})
+    assert poll(cap, &String.contains?(&1, "WHOLE_PIXELS"))
+
+    Cap.clear(cap)
+    Compositor.place_image(:whole_only, 0, 2, %{x: 0, y: 4, width: 80, height: 20})
+    assert poll(cap, &String.contains?(&1, "WHOLE_DEL"))
+    refute settled(cap) =~ "WHOLE_PIXELS"
   end
 end

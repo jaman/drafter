@@ -264,19 +264,18 @@ defmodule Drafter.Widget.Digits do
   end
 
   @doc """
-  Builds the terminal-graphics payload for the text, or `nil`.
+  The text as a `Drafter.Render.Picture` filling `rect`, or `nil`.
 
   Returns `nil` when `:renderer` is `:text`, when `rect` has no area, or when no
-  supported graphics protocol is available. Otherwise returns
-  `{paint, clear, placement}`, where `placement` is
-  `%{dx: 0, dy: 0, cols: rect.width, rows: rect.height}`.
+  supported graphics protocol is available.
   """
-  @spec image(t(), Drafter.Widget.rect(), term()) :: {iodata(), iodata(), map()} | nil
-  def image(state, rect, id) do
+  @spec image_raster(t(), Drafter.Widget.rect()) :: Drafter.Render.Picture.t() | nil
+  @impl Drafter.Widget
+  def image_raster(state, rect) do
     with renderer when renderer != :text <- Map.get(state, :renderer, :text),
          cols when cols > 0 <- rect.width,
          rows when rows > 0 <- rect.height do
-      paint_image(state, {cols, rows}, renderer, id)
+      digits_picture(state, {cols, rows}, renderer)
     else
       _ -> nil
     end
@@ -297,17 +296,14 @@ defmodule Drafter.Widget.Digits do
     end
   end
 
-  defp paint_image(state, {cols, rows}, renderer, id) do
+  defp digits_picture(state, {cols, rows}, renderer) do
     color =
       Map.get(
         Computed.to_segment_style(Computed.for_widget(:digits, state, style: state.style)),
         :fg
       )
 
-    case Image.render(state.text, {cols, rows}, color, image_renderer(renderer), id) do
-      nil -> nil
-      {paint, clear} -> {paint, clear, %{dx: 0, dy: 0, cols: cols, rows: rows}}
-    end
+    Image.picture(state.text, {cols, rows}, color, image_renderer(renderer))
   end
 
   defp image_renderer(:graphics), do: :auto

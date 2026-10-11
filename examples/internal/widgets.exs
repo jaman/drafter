@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule WidgetsShowcase do
   use Drafter.App
@@ -71,7 +71,7 @@ defmodule WidgetsShowcase do
             ],
             on_select: :option_selected
           ),
-          label("Selected: #{inspect(state.selected)}"),
+          label("Selected: #{shown(state.selected)}"),
           label(""),
           label("Progress Bar", style: %{bold: true, fg: :cyan}),
           progress_bar(value: 65, max: 100),
@@ -98,6 +98,9 @@ defmodule WidgetsShowcase do
   def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
   def handle_event(_event, state), do: {:noreply, state}
+
+  defp shown(nil), do: "none yet"
+  defp shown(value), do: inspect(value)
 end
 
 Drafter.run(WidgetsShowcase)

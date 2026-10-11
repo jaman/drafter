@@ -24,7 +24,9 @@ defmodule Drafter.Runtime.AppLoop do
 
   Registers the caller with `Drafter.AppRegistry` and applies `:refresh_rate`
   from `opts`, then receives and dispatches events until the application returns
-  `{:stop, reason}` or the session shuts down.
+  `{:stop, reason}` or the session shuts down. The message `:drafter_end_session`
+  sent to the loop's process stops its app and every app beneath it, so the call
+  returns.
 
   Remote sessions call this directly. A local terminal goes through `run/2`,
   which sets the terminal up first.
@@ -185,6 +187,14 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg(
+         {:tui_event, {:pixel_mouse, on?} = event},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
+    Context.put_pixel_mouse(on?)
+    handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
+  end
+
+  defp dispatch_loop_msg(
          {:tui_event, {:cell_size, size} = event},
          {app_module, app_state, rect, timers, wh, ss}
        ) do
@@ -255,6 +265,7 @@ defmodule Drafter.Runtime.AppLoop do
       end
 
     RenderCache.invalidate()
+    restyle_widgets(wh)
     {_, new_wh} = immediate_render(app_module, new_state, rect, wh)
     app_event_loop(app_module, new_state, rect, timers, new_wh, ss)
   end
@@ -267,6 +278,7 @@ defmodule Drafter.Runtime.AppLoop do
   defp dispatch_loop_msg({:skin_updated, skin}, {app_module, app_state, rect, timers, wh, ss}) do
     Process.put(:drafter_skin, skin)
     RenderCache.invalidate()
+    restyle_widgets(wh)
     {_, new_wh} = immediate_render(app_module, app_state, rect, wh)
     app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
@@ -598,20 +610,6 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg(
-         {:widget_click, widget_id},
-         {app_module, app_state, rect, timers, wh, ss}
-       ) do
-    case widget_center(wh, widget_id) do
-      nil ->
-        app_event_loop(app_module, app_state, rect, timers, wh, ss)
-
-      {x, y} ->
-        event = {:mouse, %{type: :mouse_up, x: x, y: y, button: :left, mods: []}}
-        handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
-    end
-  end
-
-  defp dispatch_loop_msg(
          {:shared_state_updated, incoming},
          {app_module, _app_state, rect, timers, wh, ss}
        ) do
@@ -626,6 +624,11 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg(:shutdown, {app_module, app_state, rect, timers, wh, ss}) do
+    handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
+  end
+
+  defp dispatch_loop_msg(:drafter_end_session, {app_module, app_state, rect, timers, wh, ss}) do
+    if ss != [], do: send(self(), :drafter_end_session)
     handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
   end
 
@@ -813,17 +816,20 @@ defmodule Drafter.Runtime.AppLoop do
         {_, done_h} = immediate_render(app_module, post_widget_state, screen_rect, updated_h)
         app_event_loop(app_module, post_widget_state, screen_rect, timers, done_h, session_stack)
 
-      :scroll_fast_render in actions and scroll_optimization_enabled?() ->
+      :scroll_fast_render in actions ->
         scrolled_app_state = maybe_scroll_active(app_module, post_widget_state)
-        Renderer.render_hierarchy(new_hierarchy, screen_rect)
         reschedule_scroll_debounce()
+        Process.put(:render_cache_layout_dirty, true)
+
+        {_, final_hierarchy} =
+          immediate_render(app_module, scrolled_app_state, screen_rect, new_hierarchy)
 
         app_event_loop(
           app_module,
           scrolled_app_state,
           screen_rect,
           timers,
-          new_hierarchy,
+          final_hierarchy,
           session_stack
         )
 
@@ -967,6 +973,12 @@ defmodule Drafter.Runtime.AppLoop do
     app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
   end
 
+  defp restyle_widgets(%{widgets: widgets}),
+    do:
+      Enum.each(widgets, fn {_id, info} -> Drafter.WidgetServer.restyle(Map.get(info, :pid)) end)
+
+  defp restyle_widgets(_hierarchy), do: :ok
+
   defp handle_stop(reason, app_module, app_state, _screen_rect, timers, widget_hierarchy, []) do
     Drafter.Trace.log_sync(["Q stop_start ", Drafter.Trace.ts(), "\n"])
     unmount(app_module, app_state)
@@ -997,6 +1009,8 @@ defmodule Drafter.Runtime.AppLoop do
     Drafter.ScreenManager.reset()
     if prev_from, do: send(prev_from, {:session_result, prev_ref, :ok})
     Drafter.ActionRegistry.init(prev_handlers)
+    RenderCache.invalidate()
+    restyle_widgets(prev_hierarchy)
 
     {_, restored_hierarchy} =
       Renderer.render_app(prev_module, prev_state, screen_rect, prev_hierarchy)
@@ -1224,8 +1238,6 @@ defmodule Drafter.Runtime.AppLoop do
     if error, do: {:error, error}, else: :ok
   end
 
-  defp scroll_optimization_enabled?, do: Process.get(:scroll_optimization, true) != false
-
   defp maybe_on_message(app_module, msg, app_state) do
     Runtime.for_app(app_module).on_message(app_module, msg, app_state)
   end
@@ -1269,15 +1281,6 @@ defmodule Drafter.Runtime.AppLoop do
 
   defp make_screen_rect(width, height) do
     %{x: 0, y: 0, width: width, height: height}
-  end
-
-  defp widget_center(nil, _widget_id), do: nil
-
-  defp widget_center(hierarchy, widget_id) do
-    case Map.get(hierarchy.widget_rects, widget_id) do
-      nil -> nil
-      rect -> {rect.x + div(rect.width, 2), rect.y + div(rect.height, 2)}
-    end
   end
 
   defp setup_frame_rate(app_module, opts) do

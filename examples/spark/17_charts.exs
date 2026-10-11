@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule Charts do
   use Drafter
@@ -11,6 +11,8 @@ defmodule Charts do
     %{
       data: data,
       scope_data: generate_scope_data(200, 0),
+      heatmap_data: generate_heatmap_data(),
+      bubble_data: generate_bubble_data(),
       renderer: :auto,
       candlestick_data: candlestick_data,
       timestamp: 0,
@@ -122,8 +124,7 @@ defmodule Charts do
             height: 6,
             color: {100, 200, 255},
             animated: true,
-            animation_speed: 150,
-            _render_timestamp: state.timestamp
+            animation_speed: 150
           ),
           label(""),
           label("Smooth Line Chart (Catmull-Rom, thickness: 2)", style: %{fg: {100, 150, 255}, bold: true}),
@@ -135,8 +136,7 @@ defmodule Charts do
             smooth: true,
             line_thickness: 2,
             animated: true,
-            animation_speed: 150,
-            _render_timestamp: state.timestamp
+            animation_speed: 150
           ),
           label(""),
           label("Oscilloscope (multi-series, smooth, connected)", style: %{fg: {100, 150, 255}, bold: true}),
@@ -149,8 +149,7 @@ defmodule Charts do
             connect_lines: true,
             colors: [{0, 255, 120}, {255, 220, 0}, {0, 180, 255}, {255, 80, 200}],
             min_value: -1.5,
-            max_value: 1.5,
-            _render_timestamp: state.timestamp
+            max_value: 1.5
           ),
           label(""),
           label("Bar Chart", style: %{fg: {100, 150, 255}, bold: true}),
@@ -163,8 +162,7 @@ defmodule Charts do
             height: 5,
             color: {255, 121, 198},
             animated: true,
-            animation_speed: 100,
-            _render_timestamp: state.timestamp
+            animation_speed: 100
           ),
           label(""),
           label("Candlestick Chart (EUR/USD - Live)", style: %{fg: {100, 150, 255}, bold: true}),
@@ -175,8 +173,7 @@ defmodule Charts do
             renderer: state.renderer,
             chart_type: :candlestick,
             height: 40,
-            animated: true,
-            _render_timestamp: state.timestamp
+            animated: true
           ),
           label(""),
           label("Scatter Plot", style: %{fg: {100, 150, 255}, bold: true}),
@@ -187,22 +184,21 @@ defmodule Charts do
             renderer: state.renderer,
             chart_type: :step,
             height: 6,
-            color: {180, 255, 100},
-            _render_timestamp: state.timestamp
+            color: {180, 255, 100}
           ),
           label(""),
           label("Histogram", style: %{fg: {100, 150, 255}, bold: true}),
           chart(state.data, renderer: state.renderer, chart_type: :histogram, height: 6, color: {100, 200, 180}),
           label(""),
           label("Heatmap", style: %{fg: {100, 150, 255}, bold: true}),
-          chart(generate_heatmap_data(),
+          chart(state.heatmap_data,
             renderer: state.renderer,
             chart_type: :heatmap,
             height: 8
           ),
           label(""),
           label("Bubble Chart", style: %{fg: {100, 150, 255}, bold: true}),
-          chart(generate_bubble_data(),
+          chart(state.bubble_data,
             renderer: state.renderer,
             chart_type: :bubble,
             height: 6,

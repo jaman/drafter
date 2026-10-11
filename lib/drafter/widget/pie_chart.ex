@@ -171,24 +171,23 @@ defmodule Drafter.Widget.PieChart do
     end
   end
 
-  @doc false
-  @spec image(t() | Drafter.Widget.props(), Drafter.Widget.rect(), term()) ::
-          {iodata(), iodata(), %{dx: 0, dy: 0, cols: pos_integer(), rows: non_neg_integer()}}
-          | nil
-  def image(state, rect, id) do
+  @doc """
+  The pie, without its legend, as a `Drafter.Render.Picture` at the left of `rect`, or
+  `nil` when the pie is not drawn as an image.
+  """
+  @spec image_raster(t() | Drafter.Widget.props(), Drafter.Widget.rect()) ::
+          Drafter.Render.Picture.t() | nil
+  @impl Drafter.Widget
+  def image_raster(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
-    if pie_pixel?(state) do
+    if pie_pixel?(state) and rect.height > 0 do
       slices = build_slices(state)
       legend_width = if state.show_legend, do: compute_legend_width(slices, state), else: 0
       chart_width = max(1, rect.width - legend_width)
-      chart_height = rect.height
       spec = %{type: :pie, slices: pie_slices(slices)}
 
-      case Pixel.image(spec, Pixel.protocol(state.renderer), {chart_width, chart_height}, id) do
-        nil -> nil
-        {paint, clear} -> {paint, clear, %{dx: 0, dy: 0, cols: chart_width, rows: chart_height}}
-      end
+      Pixel.picture(spec, Pixel.protocol(state.renderer), {chart_width, rect.height})
     else
       nil
     end

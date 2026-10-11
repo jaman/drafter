@@ -12,7 +12,8 @@ defmodule Drafter.TableOwner do
   @owned [
     Drafter.WidgetStripCache,
     Drafter.WidgetPidRegistry,
-    Drafter.AppRegistry
+    Drafter.AppRegistry,
+    Drafter.Transport.SSH.Sessions
   ]
 
   @spec start_link(keyword()) :: GenServer.on_start()

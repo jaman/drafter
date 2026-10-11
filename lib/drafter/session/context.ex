@@ -22,6 +22,7 @@ defmodule Drafter.Session.Context do
   @protocol_key :drafter_terminal_protocol
   @key_release_key :drafter_key_release
   @cell_size_key :drafter_cell_size
+  @pixel_mouse_key :drafter_pixel_mouse
 
   @roles %{
     event_manager: {:drafter_event_manager, Drafter.Event.Manager},
@@ -51,7 +52,8 @@ defmodule Drafter.Session.Context do
       @env_key,
       @protocol_key,
       @key_release_key,
-      @cell_size_key | Enum.map(@roles, fn {_role, {key, _fallback}} -> key end)
+      @cell_size_key,
+      @pixel_mouse_key | Enum.map(@roles, fn {_role, {key, _fallback}} -> key end)
     ]
   end
 
@@ -115,6 +117,28 @@ defmodule Drafter.Session.Context do
   """
   @spec cell_size() :: {pos_integer(), pos_integer()} | nil
   def cell_size, do: Process.get(@cell_size_key)
+
+  @doc """
+  Record whether the terminal sends mouse reports in pixels.
+
+  The app loop calls this when `{:pixel_mouse, on?}` arrives, before handing the
+  event to the app.
+  """
+  @spec put_pixel_mouse(boolean()) :: :ok
+  def put_pixel_mouse(on?) do
+    Process.put(@pixel_mouse_key, on?)
+    :ok
+  end
+
+  @doc """
+  Whether this session's mouse events carry `px`, the pixel under the pointer.
+
+  `true` only after the terminal has confirmed pixel reports to an app that asked
+  with `pixel_mouse: true`; `false` before that, for an app that did not ask, and for
+  a terminal that ignores the mode.
+  """
+  @spec pixel_mouse?() :: boolean()
+  def pixel_mouse?, do: Process.get(@pixel_mouse_key, false)
 
   @doc """
   Record the environment of the terminal this session is attached to.

@@ -71,6 +71,7 @@ defmodule Drafter.Runtime.KeyReleaseEventsTest do
              mouse_hover: true,
              key_release: true,
              cell_size: false,
+             pixel_mouse: false,
              controller: false
            ]
 
@@ -78,6 +79,7 @@ defmodule Drafter.Runtime.KeyReleaseEventsTest do
              mouse_hover: true,
              key_release: false,
              cell_size: false,
+             pixel_mouse: false,
              controller: false
            ]
   end

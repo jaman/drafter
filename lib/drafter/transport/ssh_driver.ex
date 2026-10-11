@@ -3,7 +3,7 @@ defmodule Drafter.Transport.SSHDriver do
 
   use GenServer
 
-  alias Drafter.Terminal.{ANSI, InputBuffer, KittyKeyboard, Probe, Reports}
+  alias Drafter.Terminal.{ANSI, InputBuffer, KittyKeyboard, PixelMouse, Probe, Reports}
 
   defstruct [
     :event_manager,
@@ -13,10 +13,17 @@ defmodule Drafter.Transport.SSHDriver do
     raw_mode: false,
     mouse_enabled: false,
     key_release: false,
+    pixel_mouse: :off,
     probing: false,
     probe_replies: "",
     probe_result: :unprobed,
-    probe_waiters: []
+    probe_waiters: [],
+    finished: false,
+    started_at: nil,
+    last_input_at: nil,
+    last_output_at: nil,
+    bytes_out: 0,
+    client_closed: false
   ]
 
   @default_probe_timeout 250
@@ -29,6 +36,27 @@ defmodule Drafter.Transport.SSHDriver do
   @spec setup(pid(), pid(), keyword()) :: :ok
   def setup(server, event_manager, opts \\ []),
     do: GenServer.call(server, {:setup, event_manager, opts})
+
+  @doc """
+  Restore the client's terminal as `cleanup/1` does, then print `notice` on it. Output
+  written afterwards is dropped, and a later `finish/2` does nothing.
+  """
+  @spec finish(pid(), String.t()) :: :ok
+  def finish(server, notice), do: GenServer.call(server, {:finish, notice})
+
+  @doc """
+  What the session has done: its age in `seconds`, the seconds `since_input` the
+  client last sent anything and `since_output` output last went out (`nil` for never),
+  `bytes_out` written, and whether the client closed its input (`client_closed`).
+  """
+  @spec activity(pid()) :: %{
+          seconds: float(),
+          since_input: float() | nil,
+          since_output: float() | nil,
+          bytes_out: non_neg_integer(),
+          client_closed: boolean()
+        }
+  def activity(server), do: GenServer.call(server, :activity)
 
   @spec cleanup(pid()) :: :ok
   def cleanup(server), do: GenServer.call(server, :cleanup)
@@ -60,7 +88,12 @@ defmodule Drafter.Transport.SSHDriver do
     size = detect_size()
 
     {:ok,
-     %__MODULE__{size: size, buffer: InputBuffer.new(), session: Keyword.get(opts, :session)}}
+     %__MODULE__{
+       size: size,
+       buffer: InputBuffer.new(),
+       session: Keyword.get(opts, :session),
+       started_at: now()
+     }}
   end
 
   @impl GenServer
@@ -68,6 +101,8 @@ defmodule Drafter.Transport.SSHDriver do
     :io.setopts([:binary, {:encoding, :unicode}, {:echo, false}])
     size = detect_size()
     key_release = Keyword.get(opts, :key_release, false)
+    pixel_mouse = PixelMouse.start(Keyword.get(opts, :pixel_mouse, false))
+    cell_size? = Keyword.get(opts, :cell_size, false) or pixel_mouse == :waiting
 
     IO.write([
       ANSI.enter_alt_screen(),
@@ -76,7 +111,7 @@ defmodule Drafter.Transport.SSHDriver do
       ANSI.hide_cursor(),
       ANSI.enable_mouse(),
       keyboard_protocol_on(key_release),
-      cell_size_query(Keyword.get(opts, :cell_size, false))
+      cell_size_query(cell_size?)
     ])
 
     driver_pid = self()
@@ -94,6 +129,7 @@ defmodule Drafter.Transport.SSHDriver do
          raw_mode: true,
          mouse_enabled: true,
          key_release: key_release,
+         pixel_mouse: pixel_mouse,
          buffer: InputBuffer.new(key_release: key_release),
          probing: true
      }}
@@ -109,22 +145,37 @@ defmodule Drafter.Transport.SSHDriver do
 
   def handle_call(:probe_result, _from, state), do: {:reply, :unprobed, state}
 
-  def handle_call(:cleanup, _from, state) do
-    if state.raw_mode do
-      IO.write([
-        keyboard_protocol_off(state.key_release),
-        ANSI.disable_mouse(),
-        ANSI.show_cursor(),
-        ANSI.exit_alt_screen()
-      ])
-    end
+  def handle_call({:finish, _notice}, _from, %__MODULE__{finished: true} = state),
+    do: {:reply, :ok, state}
 
-    {:reply, :ok, %{state | raw_mode: false, mouse_enabled: false, key_release: false}}
+  def handle_call({:finish, notice}, _from, state) do
+    state = restored(state)
+    IO.write(["\r\n", notice, "\r\n"])
+    {:reply, :ok, %{state | finished: true}}
   end
 
-  def handle_call({:driver_write, data}, _from, state) do
-    if state.raw_mode, do: IO.write(data)
-    {:reply, :ok, state}
+  def handle_call(:cleanup, _from, state), do: {:reply, :ok, restored(state)}
+
+  def handle_call({:driver_write, data}, _from, %__MODULE__{raw_mode: true} = state) do
+    IO.write(data)
+
+    {:reply, :ok,
+     %{state | last_output_at: now(), bytes_out: state.bytes_out + IO.iodata_length(data)}}
+  end
+
+  def handle_call({:driver_write, _data}, _from, state), do: {:reply, :ok, state}
+
+  def handle_call(:activity, _from, state) do
+    at = now()
+
+    {:reply,
+     %{
+       seconds: since(state.started_at, at),
+       since_input: since(state.last_input_at, at),
+       since_output: since(state.last_output_at, at),
+       bytes_out: state.bytes_out,
+       client_closed: state.client_closed
+     }, state}
   end
 
   def handle_call(:get_size, _from, state) do
@@ -142,6 +193,7 @@ defmodule Drafter.Transport.SSHDriver do
 
   @impl GenServer
   def handle_info({:stdin, data}, %__MODULE__{probing: true} = state) do
+    state = %{state | last_input_at: now()}
     replies = state.probe_replies <> data
 
     if Probe.settled?(replies) do
@@ -154,12 +206,12 @@ defmodule Drafter.Transport.SSHDriver do
   def handle_info({:stdin, data}, state) do
     {events, buffer} = InputBuffer.feed(state.buffer, data)
     emit_events(state.event_manager, events)
-    {:noreply, %{state | buffer: buffer}}
+    {:noreply, pixel_mouse_after_input(%{state | buffer: buffer, last_input_at: now()})}
   end
 
   def handle_info(:stdin_closed, %{session: session} = state) do
     if is_pid(session), do: send(session, :shutdown)
-    {:noreply, %{state | session: nil}}
+    {:noreply, %{state | session: nil, client_closed: true}}
   end
 
   def handle_info(:probe_deadline, %__MODULE__{probing: true} = state) do
@@ -171,7 +223,7 @@ defmodule Drafter.Transport.SSHDriver do
   def handle_info(:input_flush, state) do
     {events, buffer} = InputBuffer.flush(state.buffer)
     emit_events(state.event_manager, events)
-    {:noreply, %{state | buffer: buffer}}
+    {:noreply, pixel_mouse_after_input(%{state | buffer: buffer})}
   end
 
   def handle_info({:resize, new_size}, state) do
@@ -179,10 +231,30 @@ defmodule Drafter.Transport.SSHDriver do
       GenServer.cast(state.event_manager, {:event, {:resize, new_size}})
     end
 
+    if state.raw_mode, do: IO.write(PixelMouse.resized(state.pixel_mouse))
     {:noreply, %{state | size: new_size}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp restored(state) do
+    if state.raw_mode do
+      IO.write([
+        keyboard_protocol_off(state.key_release),
+        PixelMouse.cleanup(state.pixel_mouse),
+        ANSI.disable_mouse(),
+        ANSI.show_cursor(),
+        ANSI.exit_alt_screen()
+      ])
+    end
+
+    %{state | raw_mode: false, mouse_enabled: false, key_release: false, pixel_mouse: :off}
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
+
+  defp since(nil, _at), do: nil
+  defp since(then, at), do: Float.round((at - then) / 1000, 1)
 
   defp emit_events(nil, _events), do: :ok
   defp emit_events(_event_manager, []), do: :ok
@@ -200,6 +272,12 @@ defmodule Drafter.Transport.SSHDriver do
   defp keyboard_protocol_off(true), do: [KittyKeyboard.pop()]
   defp keyboard_protocol_off(false), do: []
 
+  defp pixel_mouse_after_input(state) do
+    {pixel_mouse, bytes} = PixelMouse.after_input(state.pixel_mouse, state.buffer.cell_size)
+    if state.raw_mode, do: IO.write(bytes)
+    %{state | pixel_mouse: pixel_mouse}
+  end
+
   defp finish_probe(state) do
     {protocol, leftover} = Probe.resolve(state.probe_replies)
     Enum.each(state.probe_waiters, &GenServer.reply(&1, {:ok, protocol}))
@@ -207,14 +285,14 @@ defmodule Drafter.Transport.SSHDriver do
     {events, buffer} = InputBuffer.feed(state.buffer, leftover)
     emit_events(state.event_manager, events)
 
-    %{
+    pixel_mouse_after_input(%{
       state
       | probing: false,
         probe_replies: "",
         probe_result: {:ok, protocol},
         probe_waiters: [],
         buffer: buffer
-    }
+    })
   end
 
   defp detect_size do

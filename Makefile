@@ -10,7 +10,7 @@ endif
 
 ERTS_INCLUDE_DIR ?= $(shell erl -noshell -eval 'io:format("~s/include", [code:root_dir() ++ "/erts-" ++ erlang:system_info(version)])' -s init stop)
 
-PRIV_DIR = priv
+PRIV_DIR ?= priv
 NIF_SO = $(PRIV_DIR)/termios_nif.so
 NIF_SRC = c_src/termios_nif.c
 PTY_SPAWN = $(PRIV_DIR)/pty_spawn
@@ -22,7 +22,7 @@ $(PRIV_DIR):
 	mkdir -p $(PRIV_DIR)
 
 $(NIF_SO): $(NIF_SRC) | $(PRIV_DIR)
-	$(CC) $(CFLAGS) -I$(ERTS_INCLUDE_DIR) -o $@.tmp $< $(LDFLAGS) && mv -f $@.tmp $@
+	$(CC) $(CFLAGS) -I$(ERTS_INCLUDE_DIR) -o $@.tmp $< $(LDFLAGS) && mv -f $@.tmp $@ && rm -rf $@.tmp.dSYM
 
 $(PTY_SPAWN): $(PTY_SPAWN_SRC) | $(PRIV_DIR)
 	$(CC) -O2 -o $@.tmp $< && mv -f $@.tmp $@

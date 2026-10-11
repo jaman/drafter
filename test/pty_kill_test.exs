@@ -12,7 +12,6 @@ defmodule Drafter.PtyKillTest do
   alias Drafter.Pty
   alias Drafter.Terminal.TermiosNif
 
-  # trap SIGHUP, then sit forever
   @stubborn "trap '' HUP; while :; do sleep 0.05; done"
 
   defp group_alive?(pid), do: TermiosNif.killpg(pid, 0) == :ok
@@ -72,8 +71,9 @@ defmodule Drafter.PtyKillTest do
   end
 
   test "a program that exits on its own needs no killing" do
-    {:ok, pty} = Pty.spawn("/bin/sh", args: ["-c", "exit 0"])
+    {:ok, pty} = Pty.spawn("/bin/sh", args: ["-c", "read line; exit 0"])
     {:ok, os_pid} = Pty.os_pid(pty)
+    Pty.write(pty, "\n")
 
     assert_receive {_port, {:exit_status, 0}}, 3000
 

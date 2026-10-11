@@ -248,14 +248,20 @@ defmodule Drafter.Widget.Slider do
   @impl Drafter.Widget
   def image_active?(state), do: Pixel.mode(normalize(state).renderer) == :pixel
 
-  @doc false
-  def image(state, rect, id) do
+  @doc """
+  The slider's track and thumb as a `Drafter.Render.Picture` in its shape box inside
+  `rect`, or `nil` when the slider is not drawn as an image.
+  """
+  @spec image_raster(t() | Drafter.Widget.props(), Drafter.Widget.rect()) ::
+          Drafter.Render.Picture.t() | nil
+  @impl Drafter.Widget
+  def image_raster(state, rect) do
     state = normalize(state)
 
     with :pixel <- Pixel.mode(state.renderer),
          {cols, rows, dx, dy} when cols > 0 and rows > 0 <- shape_box(state, rect),
-         {paint, clear} <- Pixel.image(spec(state), {cols, rows}, state.renderer, id) do
-      {paint, clear, %{dx: dx, dy: dy, cols: cols, rows: rows}}
+         %{} = picture <- Pixel.picture(spec(state), {cols, rows}, state.renderer) do
+      %{picture | dx: dx, dy: dy}
     else
       _ -> nil
     end

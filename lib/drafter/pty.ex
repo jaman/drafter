@@ -218,7 +218,7 @@ defmodule Drafter.Pty do
   end
 
   defp helper_path do
-    path = Path.join(:code.priv_dir(:drafter), "pty_spawn")
+    path = "pty_spawn" |> Drafter.Native.path() |> to_string()
 
     if File.exists?(path), do: {:ok, String.to_charlist(path)}, else: {:error, :helper_missing}
   end

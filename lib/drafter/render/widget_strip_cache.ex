@@ -81,8 +81,8 @@ defmodule Drafter.WidgetStripCache do
   @doc """
   Record the region of a widget that is on screen.
 
-  `false` means none of it is showing. A rect means that much of it is, and for an
-  image-backed widget is the portion worth generating.
+  `false` means none of it is showing. A rect is the visible cells, relative to the
+  widget's top left; an image-backed widget encodes the part of its picture inside it.
   """
   @spec mark_visible(term(), false | map()) :: true
   def mark_visible(widget_id, visible) do
@@ -91,7 +91,7 @@ defmodule Drafter.WidgetStripCache do
     ArgumentError -> true
   end
 
-  @doc "The on-screen region of a widget, or `nil` if none of it is showing."
+  @doc "The visible cells of a widget relative to its top left, or `nil` if none is showing."
   @spec visible_rect(term()) :: map() | nil
   def visible_rect(widget_id) do
     key = session_key(widget_id)

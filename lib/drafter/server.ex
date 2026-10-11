@@ -72,6 +72,14 @@ defmodule Drafter.Server do
       makes logs in from then on. Default `nil`: nobody registers over ssh.
     * `:register_app` - `{module, props}`, the app that form is. Default
       `{Drafter.Accounts.RegisterApp, %{}}`.
+    * `:send_buffer` - bytes of the operating system's send buffer for each
+      connection. Output beyond it waits, so a session drawing faster than its
+      connection carries skips frames instead of queueing them. Default `nil`, the
+      system's own, which may grow to megabytes and hold seconds of frames on a slow
+      connection.
+    * `:login_timeout` - milliseconds a client has from connecting to logging in,
+      answering ssh's host key question and typing the password included; past it
+      the connection is closed. Default `nil`, `:ssh`'s two minutes.
 
   """
   @spec start_ssh(module(), keyword()) :: {:ok, pid() | [pid()]} | {:error, term()}
@@ -79,9 +87,25 @@ defmodule Drafter.Server do
     Transport.SSH.start_link(app_module, opts)
   end
 
-  @doc "Stops what `start_ssh/2` returned: one listener, or every listener of a list."
+  @doc """
+  Stops what `start_ssh/2` returned: one listener, or every listener of a list. Each
+  connected session ends first, its client's terminal restored and `notice` printed
+  on it (default "The server closed this session."), then its connection closes.
+  Returns once every session has ended, so call it from a process the sessions do
+  not wait on as they end.
+  """
   @spec stop_ssh(pid() | [pid()]) :: :ok
   def stop_ssh(listener), do: Transport.SSH.stop(listener)
+
+  @spec stop_ssh(pid() | [pid()], String.t()) :: :ok
+  def stop_ssh(listener, notice), do: Transport.SSH.stop(listener, notice)
+
+  @doc """
+  Closes the port of what `start_ssh/2` returned, so it can be listened on again at
+  once, leaving the sessions already connected running until `stop_ssh/2`.
+  """
+  @spec stop_ssh_listening(pid() | [pid()]) :: :ok
+  def stop_ssh_listening(listener), do: Transport.SSH.stop_listening(listener)
 
   @doc """
   Starts a Telnet server hosting `app_module`, linked to the caller.

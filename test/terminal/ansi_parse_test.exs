@@ -16,7 +16,7 @@ defmodule Drafter.Terminal.ANSIParseTest do
     case binary do
       <<>> -> []
       _ when byte_size(binary) <= size -> [binary]
-      <<head::binary-size(size), rest::binary>> -> [head | chunks(rest, size)]
+      <<head::binary-size(^size), rest::binary>> -> [head | chunks(rest, size)]
     end
   end
 
@@ -60,6 +60,40 @@ defmodule Drafter.Terminal.ANSIParseTest do
     test "a wheel release between keys does not swallow them" do
       assert {[{:key, :a}, {:key, :b}], ""} =
                ANSI.parse_sequence("a\e[<65;1;1mb")
+    end
+  end
+
+  describe "pixel mouse reports" do
+    @pixel [pixel_mouse: true, cell_size: {8, 16}]
+
+    test "a report in pixel mode carries the cell under the pointer and its pixel" do
+      assert {[
+                {:mouse,
+                 %{type: :mouse_down, button: :left, x: 12, y: 3, px: {100, 50}, modifiers: []}}
+              ], ""} = ANSI.parse_sequence("\e[<0;101;51M", @pixel)
+    end
+
+    test "a report in cell mode carries the cell and no pixel" do
+      assert {[{:mouse, payload}], ""} = ANSI.parse_sequence("\e[<0;101;51M", cell_size: {8, 16})
+      assert %{type: :mouse_down, x: 100, y: 50} = payload
+      refute Map.has_key?(payload, :px)
+    end
+
+    test "the terminal's answer switches reading for the reports after it" do
+      assert {[{:mouse, before}, {:pixel_mouse, true}, {:mouse, later}], ""} =
+               ANSI.parse_sequence("\e[<35;3;2M\e[?1016;1$y\e[<35;101;51M", cell_size: {8, 16})
+
+      assert %{x: 2, y: 1} = before
+      refute Map.has_key?(before, :px)
+      assert %{x: 12, y: 3, px: {100, 50}} = later
+    end
+
+    test "a terminal that does not know the mode leaves reports in cells" do
+      assert {[{:pixel_mouse, false}, {:mouse, payload}], ""} =
+               ANSI.parse_sequence("\e[?1016;0$y\e[<35;3;2M", @pixel)
+
+      assert %{x: 2, y: 1} = payload
+      refute Map.has_key?(payload, :px)
     end
   end
 

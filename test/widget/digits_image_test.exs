@@ -1,11 +1,15 @@
 defmodule Drafter.Widget.DigitsImageTest do
   use ExUnit.Case, async: false
 
+  alias Drafter.Render.Picture
   alias Drafter.Widget.Digits
   alias Drafter.Widget.Digits.{Bitmap, Image}
   alias FrenchCurve.Raster
 
   defp rect(width, height), do: %{x: 0, y: 0, width: width, height: height}
+
+  defp encoded(nil, _id), do: nil
+  defp encoded(picture, id), do: Picture.encode(picture, id, nil)
 
   defp with_env(vars, fun) do
     kept = Map.new(vars, fn {name, _value} -> {name, System.get_env(name)} end)
@@ -78,11 +82,11 @@ defmodule Drafter.Widget.DigitsImageTest do
 
   describe "protocol negotiation" do
     test "an explicit protocol produces a paint and a clear" do
-      case Image.render("42", {20, 4}, {255, 255, 255}, :sixel, :id) do
+      case encoded(Image.picture("42", {20, 4}, {255, 255, 255}, :sixel), :id) do
         nil ->
           flunk("an explicitly requested protocol should still encode")
 
-        {paint, clear} ->
+        {paint, clear, _region} ->
           assert IO.iodata_length(paint) > 0
           assert is_binary(clear) or is_list(clear)
       end
@@ -97,7 +101,8 @@ defmodule Drafter.Widget.DigitsImageTest do
       }
 
       with_env(env, fn ->
-        {paint, clear} = Image.render("7", {10, 3}, {255, 255, 255}, :auto, :some_widget)
+        {paint, clear, _region} =
+          encoded(Image.picture("7", {10, 3}, {255, 255, 255}, :auto), :some_widget)
 
         assert IO.iodata_length(clear) > 0
         assert paint |> IO.iodata_to_binary() |> String.starts_with?(IO.iodata_to_binary(clear))
@@ -105,12 +110,12 @@ defmodule Drafter.Widget.DigitsImageTest do
     end
 
     test "empty text never produces an image" do
-      assert Image.render("", {20, 4}, {255, 255, 255}, :sixel, :id) == nil
+      assert Image.picture("", {20, 4}, {255, 255, 255}, :sixel) == nil
     end
 
     test "a zero-area box never produces an image" do
-      assert Image.render("42", {0, 4}, {255, 255, 255}, :sixel, :id) == nil
-      assert Image.render("42", {20, 0}, {255, 255, 255}, :sixel, :id) == nil
+      assert Image.picture("42", {0, 4}, {255, 255, 255}, :sixel) == nil
+      assert Image.picture("42", {20, 0}, {255, 255, 255}, :sixel) == nil
     end
   end
 
@@ -119,7 +124,7 @@ defmodule Drafter.Widget.DigitsImageTest do
       state = Digits.mount(%{text: "42", renderer: :sixel})
 
       assert {_paint, _clear, %{dx: 0, dy: 0, cols: 20, rows: 5}} =
-               Digits.image(state, rect(20, 5), :id)
+               encoded(Digits.image_raster(state, rect(20, 5)), :id)
     end
 
     test "the renderer survives a component re-mount" do

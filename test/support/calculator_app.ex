@@ -8,6 +8,7 @@ defmodule Drafter.TestApps.Calculator do
     :* => {:op, :*, :btn_multiply},
     :/ => {:op, :/, :btn_divide},
     := => {:equals, :btn_equals},
+    :enter => {:equals, :btn_equals},
     :. => {:point, :btn_point},
     :c => {:clear, :btn_clear},
     :% => {:percent, :btn_percent}
@@ -132,11 +133,6 @@ defmodule Drafter.TestApps.Calculator do
       nil ->
         {:noreply, state}
     end
-  end
-
-  defp do_handle({:key, :enter}, state) do
-    Drafter.activate_widget(:btn_equals)
-    {:noreply, state}
   end
 
   defp do_handle(_event, state), do: {:noreply, state}

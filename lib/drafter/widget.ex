@@ -276,12 +276,26 @@ defmodule Drafter.Widget do
               | {:prevent, Event.Object.t(), state()}
 
   @doc """
+  Draws the widget as a picture for the terminal's graphics protocol.
+
+  Returns a `t:Drafter.Render.Picture.t/0` — a `FrenchCurve.Raster`, the protocol to
+  draw it with, and the cell box inside `rect` it fills — or `nil` to draw no image.
+  The runtime encodes it, moves it as the widget moves, and shows only the part inside
+  the visible area when the widget is partly scrolled out of view.
+
+  A widget exports either this or `image/3`, which returns encoded bytes and is drawn
+  only when all of it is visible. Runs in a separate process, called again only when
+  the state or `rect` changes.
+  """
+  @callback image_raster(state(), rect()) :: Drafter.Render.Picture.t() | nil
+
+  @doc """
   Whether the widget is drawing a transmitted image right now.
 
-  A widget that exports `image/3` but only paints in some of its modes implements this
-  so the runtime can skip the image pipeline entirely in the others: no per-frame
-  placement, no generation task, no bytes. Absent, a widget exporting `image/3` counts
-  as always active.
+  A widget that exports `image_raster/2` or `image/3` but only paints in some of its modes
+  implements this so the runtime can skip the image pipeline entirely in the others: no
+  per-frame placement, no generation task, no bytes. Absent, such a widget counts as
+  always active.
 
   Called on the current state on every frame, so it must be cheap.
   """
@@ -311,16 +325,35 @@ defmodule Drafter.Widget do
     handle_custom_event: 2,
     handle_event_capture: 2,
     apply_data_buffer: 3,
+    image_raster: 2,
     image_active?: 1
   ]
 
   @doc """
+  Whether `module` draws images at all: it exports `c:image_raster/2` or `image/3`.
+
+  `module` must already be loaded, as a mounted widget's module is; an unloaded module
+  exports nothing and answers `false`.
+
+      iex> Drafter.Widget.draws_images?(Drafter.Widget.Label)
+      false
+
+      iex> Code.ensure_loaded!(Drafter.Widget.Chart)
+      iex> Drafter.Widget.draws_images?(Drafter.Widget.Chart)
+      true
+  """
+  @spec draws_images?(module()) :: boolean()
+  def draws_images?(module) do
+    function_exported?(module, :image_raster, 2) or function_exported?(module, :image, 3)
+  end
+
+  @doc """
   Whether `module` draws a transmitted image for `state`.
 
-  True only for a module exporting `image/3`, and then only when its `c:image_active?/1`
-  says so; a module without that callback is active whenever it exports `image/3`. The
-  runtime asks this before placing an image or asking one to be generated, so a widget
-  in a character-drawing mode costs nothing on the image path.
+  True only for a module that `draws_images?/1`, and then only when its
+  `c:image_active?/1` says so; a module without that callback is active whenever it
+  draws images. The runtime asks this before placing an image or asking one to be
+  generated, so a widget in a character-drawing mode costs nothing on the image path.
 
       iex> Drafter.Widget.image_active?(Drafter.Widget.Label, %{})
       false
@@ -330,7 +363,7 @@ defmodule Drafter.Widget do
   """
   @spec image_active?(module(), state()) :: boolean()
   def image_active?(module, state) do
-    function_exported?(module, :image, 3) and
+    draws_images?(module) and
       (not function_exported?(module, :image_active?, 1) or module.image_active?(state))
   end
 

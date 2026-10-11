@@ -63,16 +63,17 @@ defmodule Drafter.Widget.Slider.Pixel do
   def protocol(renderer), do: Pixel.protocol(renderer)
 
   @doc """
-  Renders `spec` into a `{paint, clear}` pair for a `cols` by `rows` cell box.
+  Renders `spec` as a `Drafter.Render.Picture` filling a `cols` by `rows` cell box at
+  the widget's top left, a whole number of pixels per cell.
 
   Returns `nil` when the terminal has no pixel protocol or the box has no area.
   """
-  @spec image(spec(), {pos_integer(), pos_integer()}, atom() | nil, term()) ::
-          {iodata(), iodata()} | nil
-  def image(spec, {cols, rows}, renderer, id) do
+  @spec picture(spec(), {pos_integer(), pos_integer()}, atom() | nil) ::
+          Drafter.Render.Picture.t() | nil
+  def picture(spec, {cols, rows}, renderer) do
     with protocol when not is_nil(protocol) <- protocol(renderer),
          raster when not is_nil(raster) <- raster(spec, image_pixels(cols, rows)) do
-      encode(Raster.finalize(raster), protocol, {cols, rows}, id)
+      %{raster: Raster.finalize(raster), protocol: protocol, dx: 0, dy: 0, cols: cols, rows: rows}
     else
       _ -> nil
     end
@@ -206,18 +207,9 @@ defmodule Drafter.Widget.Slider.Pixel do
 
   defp image_pixels(cols, rows) do
     {
-      min(cols * @image_scale, @max_raster_width),
-      min(rows * @image_scale * 2, @max_raster_height)
+      cols * Kernel.max(1, Kernel.min(@image_scale, div(@max_raster_width, cols))),
+      rows * Kernel.max(1, Kernel.min(@image_scale * 2, div(@max_raster_height, rows)))
     }
-  end
-
-  # See the note in Drafter.Widget.Chart.Pixel: not every terminal detected as :kitty keeps
-  # images under an id, so the frame is built by FrenchCurve rather than assembled here.
-  defp encode(raster, protocol, {cols, rows}, id) do
-    case FrenchCurve.frame(raster, id, fit: {cols, rows}, protocol: protocol) do
-      nil -> nil
-      {paint, clear, _place} -> {paint, clear}
-    end
   end
 
   defp rows_to_strips(rows) do

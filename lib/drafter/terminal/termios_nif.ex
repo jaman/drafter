@@ -38,7 +38,7 @@ defmodule Drafter.Terminal.TermiosNif do
   """
   @spec load_nif() :: :ok
   def load_nif do
-    nif_path = :filename.join(:code.priv_dir(:drafter), ~c"termios_nif")
+    nif_path = Drafter.Native.path("termios_nif")
 
     case :erlang.load_nif(nif_path, 0) do
       :ok ->

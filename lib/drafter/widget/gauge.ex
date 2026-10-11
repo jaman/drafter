@@ -142,14 +142,20 @@ defmodule Drafter.Widget.Gauge do
     if gauge_pixel?(state), do: render_pixel_base(state, rect), else: render_text(state, rect)
   end
 
-  @doc false
-  def image(state, rect, id) do
+  @doc """
+  The gauge's arc as a `Drafter.Render.Picture` between the label row and the value
+  row, or `nil` when the gauge is not drawn as an image.
+  """
+  @spec image_raster(t() | Drafter.Widget.props(), Drafter.Widget.rect()) ::
+          Drafter.Render.Picture.t() | nil
+  @impl Drafter.Widget
+  def image_raster(state, rect) do
     state = if is_struct(state, __MODULE__), do: state, else: mount(state)
 
-    if gauge_pixel?(state) do
+    if gauge_pixel?(state) and rect.width > 0 do
       label_rows = if state.label, do: 1, else: 0
       arc_rows = max(1, rect.height - label_rows - 1)
-      gauge_image(state, rect.width, arc_rows, label_rows, id)
+      gauge_picture(state, rect.width, arc_rows, label_rows)
     else
       nil
     end
@@ -179,7 +185,7 @@ defmodule Drafter.Widget.Gauge do
     {r, g, b}
   end
 
-  defp gauge_image(state, cols, rows, label_rows, id) do
+  defp gauge_picture(state, cols, rows, label_rows) do
     spec = %{
       type: :gauge,
       value: state.value,
@@ -187,9 +193,9 @@ defmodule Drafter.Widget.Gauge do
       track: to_rgba(state.track_color)
     }
 
-    case Pixel.image(spec, Pixel.protocol(state.renderer), {cols, rows}, id) do
+    case Pixel.picture(spec, Pixel.protocol(state.renderer), {cols, rows}) do
       nil -> nil
-      {paint, clear} -> {paint, clear, %{dx: 0, dy: label_rows, cols: cols, rows: rows}}
+      picture -> %{picture | dy: label_rows}
     end
   end
 

@@ -18,6 +18,11 @@ defmodule Drafter.Terminal.InputBuffer do
   `:drag`: a terminal in any-motion mode may encode a free pointer's motion with a
   button number rather than the "no button" code.
 
+  It also remembers the last `{:cell_size, size}` and `{:pixel_mouse, on?}` reports it
+  decoded, and passes both to every parse, so SGR mouse reports are read as pixels
+  while the terminal has confirmed pixel mode and the cell size is known. See "Pixel
+  mouse reports" in `Drafter.Terminal.ANSI`.
+
       iex> buffer = Drafter.Terminal.InputBuffer.new()
       iex> {events, buffer} = Drafter.Terminal.InputBuffer.feed(buffer, "ab\\e[")
       iex> events
@@ -35,10 +40,17 @@ defmodule Drafter.Terminal.InputBuffer do
           pending: binary(),
           timer: reference() | nil,
           key_release: boolean(),
-          held: MapSet.t(atom())
+          held: MapSet.t(atom()),
+          pixel_mouse: boolean(),
+          cell_size: {pos_integer(), pos_integer()} | nil
         }
 
-  defstruct pending: "", timer: nil, key_release: false, held: MapSet.new()
+  defstruct pending: "",
+            timer: nil,
+            key_release: false,
+            held: MapSet.new(),
+            pixel_mouse: false,
+            cell_size: nil
 
   @doc """
   An empty buffer, holding no bytes and with no flush scheduled.
@@ -78,12 +90,24 @@ defmodule Drafter.Terminal.InputBuffer do
   """
   @spec feed(t(), binary()) :: {[ANSI.event()], t()}
   def feed(%__MODULE__{} = buffer, data) do
-    {events, pending} =
-      ANSI.parse_sequence(buffer.pending <> data, key_release: buffer.key_release)
-
+    {events, pending} = ANSI.parse_sequence(buffer.pending <> data, parse_opts(buffer))
     {events, held} = track_buttons(events, buffer.held)
-    {events, reschedule(%{buffer | pending: pending, held: held})}
+    {events, reschedule(%{read_reports(buffer, events) | pending: pending, held: held})}
   end
+
+  defp parse_opts(buffer) do
+    [
+      key_release: buffer.key_release,
+      pixel_mouse: buffer.pixel_mouse,
+      cell_size: buffer.cell_size
+    ]
+  end
+
+  defp read_reports(buffer, events), do: Enum.reduce(events, buffer, &read_report/2)
+
+  defp read_report({:cell_size, size}, buffer), do: %{buffer | cell_size: size}
+  defp read_report({:pixel_mouse, on?}, buffer), do: %{buffer | pixel_mouse: on?}
+  defp read_report(_event, buffer), do: buffer
 
   defp track_buttons(events, held) do
     {events, held} =
@@ -126,8 +150,8 @@ defmodule Drafter.Terminal.InputBuffer do
   def flush(%__MODULE__{pending: ""} = buffer), do: {[], cancel(buffer)}
 
   def flush(%__MODULE__{} = buffer) do
-    {events, pending} = ANSI.flush_sequence(buffer.pending, key_release: buffer.key_release)
-    {events, %{cancel(buffer) | pending: pending}}
+    {events, pending} = ANSI.flush_sequence(buffer.pending, parse_opts(buffer))
+    {events, %{cancel(read_reports(buffer, events)) | pending: pending}}
   end
 
   @doc """

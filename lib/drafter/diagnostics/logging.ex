@@ -1,8 +1,6 @@
 defmodule Drafter.Logging do
   @moduledoc false
 
-  require Logger
-
   @doc """
   Configure logging for a TUI run.
 

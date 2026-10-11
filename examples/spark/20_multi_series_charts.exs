@@ -1,4 +1,4 @@
-Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:french_curve, github: "jaman/french_curve"}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
+Mix.install([{:drafter, path: Path.join(__DIR__, "../..")}, {:elixir_make, "~> 0.9"}, {:spark, "~> 2.6"}], consolidate_protocols: false)
 
 defmodule MultiSeriesCharts do
   use Drafter
@@ -13,7 +13,7 @@ defmodule MultiSeriesCharts do
   ]
 
   def mount(_props) do
-    %{timestamp: 0, phase: 0.0, renderer: :auto}
+    %{phase: 0.0, renderer: :auto}
   end
 
   keybinding :q, "quit" do
@@ -30,7 +30,7 @@ defmodule MultiSeriesCharts do
   end
 
   def on_timer(:fps, state) do
-    %{state | timestamp: state.timestamp + 1, phase: state.phase + 0.05}
+    %{state | phase: state.phase + 0.05}
   end
 
   def render(state) do
@@ -111,8 +111,7 @@ defmodule MultiSeriesCharts do
             renderer: state.renderer,
             chart_type: :line,
             height: 8,
-            colors: Enum.take(@palette, 4),
-            _render_timestamp: state.timestamp
+            colors: Enum.take(@palette, 4)
           ),
           gap(),
           section("Negative Values: Network IO — inbound (+) vs outbound (−)"),
@@ -127,8 +126,7 @@ defmodule MultiSeriesCharts do
             min_value: -150,
             max_value: 150,
             show_axes: true,
-            colors: [{80, 220, 140}, {255, 100, 100}],
-            _render_timestamp: state.timestamp
+            colors: [{80, 220, 140}, {255, 100, 100}]
           ),
           gap(),
           section("Clustered Bar: Monthly revenue — bar_gap: 0 (default) vs bar_gap: 1"),
@@ -197,8 +195,7 @@ defmodule MultiSeriesCharts do
             renderer: state.renderer,
             chart_type: :scatter,
             height: 8,
-            colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)],
-            _render_timestamp: state.timestamp
+            colors: [Enum.at(@palette, 0), Enum.at(@palette, 1), Enum.at(@palette, 2)]
           ),
           gap(),
           section("Weighted Scatter: Dot density shows data weight"),
@@ -207,8 +204,7 @@ defmodule MultiSeriesCharts do
             renderer: state.renderer,
             chart_type: :scatter,
             height: 8,
-            color: {100, 220, 255},
-            _render_timestamp: state.timestamp
+            color: {100, 220, 255}
           ),
           gap(),
           section("Braille Area Tiers: Flat | Gradient | Weighted + Gradient"),
@@ -221,7 +217,6 @@ defmodule MultiSeriesCharts do
                 height: 8,
                 fill_opacity: 1.0,
                 colors: [{80, 200, 100}, {100, 140, 255}],
-                _render_timestamp: state.timestamp,
                 flex: 1
               ),
               chart([plain_area, plain_area_b],
@@ -231,7 +226,6 @@ defmodule MultiSeriesCharts do
                 height: 8,
                 fill_opacity: 0.6,
                 colors: [{80, 200, 100}, {100, 140, 255}],
-                _render_timestamp: state.timestamp,
                 flex: 1
               ),
               chart([weighted_area, weighted_area_b],
@@ -241,7 +235,6 @@ defmodule MultiSeriesCharts do
                 height: 8,
                 fill_opacity: 0.6,
                 colors: [{80, 200, 100}, {100, 140, 255}],
-                _render_timestamp: state.timestamp,
                 flex: 1
               )
             ],

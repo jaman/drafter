@@ -33,6 +33,9 @@ defmodule Drafter.Terminal.ANSI do
       `Drafter.Terminal.KittyKeyboard`.
     * `{:cell_size, {width, height}}` — the terminal's answer, in pixels, to
       `Drafter.Terminal.Reports.cell_size_query/0`.
+    * `{:pixel_mouse, boolean}` — the terminal's answer to
+      `Drafter.Terminal.Reports.pixel_mouse_query/0`: whether mouse reports now come
+      in pixels.
 
   Control characters `\\x01`..`\\x1a` decode as `{:key, letter, [:ctrl]}`, except
   `\\x09` which is `{:key, :tab}` and `\\x0a`/`\\x0d` which are both `{:key, :enter}`.
@@ -49,6 +52,24 @@ defmodule Drafter.Terminal.ANSI do
 
   SGR (`ESC [ < …M/m`), legacy numeric and X10 (`ESC [ M` plus three bytes) encodings
   are all accepted. A final `H` in the SGR form is read as if it were `M`.
+
+  ## Pixel mouse reports
+
+  A terminal in SGR-Pixels mode (DECSET 1016) sends SGR reports whose coordinates are
+  pixels, not cells. They look the same as cell reports, so the parser reads SGR
+  reports as pixels only while pixel reading is on: from the start of a parse given
+  `pixel_mouse: true` and a `:cell_size`, or from a `{:pixel_mouse, true}` report
+  onward once a cell size is known. A `{:cell_size, size}` report in the buffer
+  replaces the cell size for the rest of it, and a `{:pixel_mouse, false}` report
+  turns pixel reading off.
+
+  A pixel report keeps the payload above, with `x` and `y` the zero-based cell under
+  the pointer, and adds `px: {x, y}`, the zero-based pixel counted from the terminal's
+  top-left corner. A cell report never carries `:px`, so its absence means the
+  position is known only to the cell.
+
+      iex> Drafter.Terminal.ANSI.parse_sequence("\\e[<0;25;37M", pixel_mouse: true, cell_size: {8, 16})
+      {[{:mouse, %{type: :mouse_down, button: :left, x: 3, y: 2, px: {24, 36}, modifiers: []}}], ""}
 
   ## Discarded input
 
@@ -87,7 +108,8 @@ defmodule Drafter.Terminal.ANSI do
   @typedoc """
   What a `{:mouse, payload}` event carries.
 
-  `:button` is absent on `:move`, and `:direction` is present only on `:scroll`.
+  `:button` is absent on `:move`, `:direction` is present only on `:scroll`, and `:px`
+  only on a pixel report.
   """
   @type mouse_payload :: %{
           required(:type) => :mouse_down | :mouse_up | :drag | :move | :scroll,
@@ -95,7 +117,8 @@ defmodule Drafter.Terminal.ANSI do
           required(:y) => non_neg_integer(),
           required(:modifiers) => modifiers(),
           optional(:button) => :left | :middle | :right | :scroll | :unknown,
-          optional(:direction) => :up | :down | :left | :right
+          optional(:direction) => :up | :down | :left | :right,
+          optional(:px) => {non_neg_integer(), non_neg_integer()}
         }
 
   @typedoc "Everything `parse_sequence/1` and `flush_sequence/1` can produce."
@@ -109,6 +132,7 @@ defmodule Drafter.Terminal.ANSI do
           | {:key_up, KittyKeyboard.key(), modifiers()}
           | {:key_release_support, boolean()}
           | {:cell_size, {pos_integer(), pos_integer()}}
+          | {:pixel_mouse, boolean()}
 
   alias Drafter.Terminal.{KittyKeyboard, Reports}
 
@@ -253,10 +277,13 @@ defmodule Drafter.Terminal.ANSI do
   ## Options
 
     * `:key_release` - `boolean()`, default `false`.
+    * `:pixel_mouse` - `boolean()`, default `false`. `true` reads SGR mouse reports
+      as pixels when a `:cell_size` is also given; see "Pixel mouse reports" in the
+      module documentation.
+    * `:cell_size` - `{width, height}` in pixels, or `nil` (the default).
   """
   @spec parse_sequence(binary(), keyword()) :: {[event()], binary()}
-  def parse_sequence(buffer, opts \\ []),
-    do: do_parse(buffer, [], {:partial, Keyword.get(opts, :key_release, false)})
+  def parse_sequence(buffer, opts \\ []), do: do_parse(buffer, [], {:partial, reading(opts)})
 
   @doc """
   Parse an input buffer, resolving any trailing ambiguity instead of retaining it.
@@ -277,11 +304,28 @@ defmodule Drafter.Terminal.ANSI do
       iex> Drafter.Terminal.ANSI.flush_sequence(<<0xC3>>)
       {[], <<0xC3>>}
 
-  Takes the same `:key_release` option as `parse_sequence/2`.
+  Takes the same options as `parse_sequence/2`.
   """
   @spec flush_sequence(binary(), keyword()) :: {[event()], binary()}
-  def flush_sequence(buffer, opts \\ []),
-    do: do_parse(buffer, [], {:flush, Keyword.get(opts, :key_release, false)})
+  def flush_sequence(buffer, opts \\ []), do: do_parse(buffer, [], {:flush, reading(opts)})
+
+  defp reading(opts) do
+    %{
+      key_release: Keyword.get(opts, :key_release, false),
+      pixel_mouse: Keyword.get(opts, :pixel_mouse, false),
+      cell_size: Keyword.get(opts, :cell_size)
+    }
+  end
+
+  defp read_reports({completeness, reading}, reports),
+    do: {completeness, Enum.reduce(reports, reading, &read_report/2)}
+
+  defp read_report({:cell_size, size}, reading), do: %{reading | cell_size: size}
+  defp read_report({:pixel_mouse, on?}, reading), do: %{reading | pixel_mouse: on?}
+  defp read_report(_report, reading), do: reading
+
+  defp pixel_cell({_, %{pixel_mouse: true, cell_size: {_, _} = cell_size}}), do: cell_size
+  defp pixel_cell(_mode), do: nil
 
   defp do_parse("", events, _mode), do: {Enum.reverse(events), ""}
 
@@ -311,16 +355,27 @@ defmodule Drafter.Terminal.ANSI do
       {Enum.reverse(events), buffer}
     else
       case find_longest_match(buffer, mode) do
-        {:ignore, rest} -> do_parse(rest, events, mode)
-        {:reports, reports, rest} -> do_parse(rest, Enum.reverse(reports, events), mode)
-        {event, rest} -> do_parse(rest, with_key_down(event, mode) ++ events, mode)
-        :no_match -> parse_sequence_char(buffer, events, mode)
+        {:ignore, rest} ->
+          do_parse(rest, events, mode)
+
+        {:reports, reports, rest} ->
+          do_parse(rest, Enum.reverse(reports, events), read_reports(mode, reports))
+
+        {event, rest} ->
+          do_parse(rest, with_key_down(event, mode) ++ events, mode)
+
+        :no_match ->
+          parse_sequence_char(buffer, events, mode)
       end
     end
   end
 
-  defp with_key_down({:key, _} = event, {_, true}), do: [KittyKeyboard.key_down(event), event]
-  defp with_key_down({:key, _, _} = event, {_, true}), do: [KittyKeyboard.key_down(event), event]
+  defp with_key_down({:key, _} = event, {_, %{key_release: true}}),
+    do: [KittyKeyboard.key_down(event), event]
+
+  defp with_key_down({:key, _, _} = event, {_, %{key_release: true}}),
+    do: [KittyKeyboard.key_down(event), event]
+
   defp with_key_down(event, _mode), do: [event]
 
   @doc """
@@ -413,13 +468,13 @@ defmodule Drafter.Terminal.ANSI do
   defp parse_bracketed_paste(_buffer), do: :no_match
 
   defp find_longest_match(buffer, mode) do
-    case parse_mouse_event(buffer) do
+    case parse_mouse_event(buffer, pixel_cell(mode)) do
       {mouse_event, rest} -> {mouse_event, rest}
       :no_match -> parse_string_sequence(buffer) || report_or_table(buffer, mode)
     end
   end
 
-  defp report_or_table(buffer, {_, key_release}) do
+  defp report_or_table(buffer, {_, %{key_release: key_release}}) do
     case KittyKeyboard.parse(buffer, key_release) do
       {reports, rest} -> {:reports, reports, rest}
       :no_match -> terminal_report_or_table(buffer)
@@ -480,12 +535,22 @@ defmodule Drafter.Terminal.ANSI do
 
   defp match_key_sequence(_buffer), do: :no_match
 
-  defp parse_mouse_event(buffer) do
-    parse_mouse_sgr(buffer) ||
-      parse_mouse_sgr_h(buffer) ||
+  defp parse_mouse_event(buffer, pixel_cell) do
+    in_pixels(parse_mouse_sgr(buffer), pixel_cell) ||
+      in_pixels(parse_mouse_sgr_h(buffer), pixel_cell) ||
       parse_x10_mouse_event_opt(buffer) ||
       parse_mouse_legacy(buffer) ||
       :no_match
+  end
+
+  defp in_pixels({{:mouse, payload}, rest}, {_, _} = cell_size),
+    do: {{:mouse, pixel_payload(payload, cell_size)}, rest}
+
+  defp in_pixels(result, _cell_size), do: result
+
+  defp pixel_payload(%{x: x, y: y} = payload, {cell_width, cell_height}) do
+    {px, py} = {max(x, 0), max(y, 0)}
+    %{payload | x: div(px, cell_width), y: div(py, cell_height)} |> Map.put(:px, {px, py})
   end
 
   defp parse_x10_mouse_event_opt(buffer) do
@@ -733,6 +798,27 @@ defmodule Drafter.Terminal.ANSI do
       "\e[?1006l\e[?1002l"
     end
   end
+
+  @doc """
+  Sequence that makes SGR mouse reports carry pixels instead of cells (DECSET 1016).
+
+  Takes effect only while SGR reporting from `enable_mouse/1` is on. Reports are read
+  as pixels only once the parser is told so; see "Pixel mouse reports".
+
+      iex> Drafter.Terminal.ANSI.enable_pixel_mouse()
+      "\\e[?1016h"
+  """
+  @spec enable_pixel_mouse() :: String.t()
+  def enable_pixel_mouse, do: "\e[?1016h"
+
+  @doc """
+  Sequence that returns SGR mouse reports to cells (DECRST 1016).
+
+      iex> Drafter.Terminal.ANSI.disable_pixel_mouse()
+      "\\e[?1016l"
+  """
+  @spec disable_pixel_mouse() :: String.t()
+  def disable_pixel_mouse, do: "\e[?1016l"
 
   @doc """
   Switch to the alternate screen buffer, keeping the scrollback of the main one.

@@ -23,20 +23,20 @@ defmodule Drafter.Widget.Digits.Image do
   def protocol(renderer), do: Pixel.protocol(renderer)
 
   @doc """
-  Renders text as a transmitted image sized to a cell box.
+  Renders text as a `Drafter.Render.Picture` filling a cell box at the widget's top
+  left.
 
-  Returns `{paint, clear}` as `Drafter.Widget`'s `image/3` expects, or `nil`
-  when the text is empty, the box has no area, or the terminal cannot display
-  an image.
+  Returns `nil` when the text is empty, the box has no area, or the terminal cannot
+  display an image.
   """
-  @spec render(String.t(), {pos_integer(), pos_integer()}, tuple(), atom() | nil, term()) ::
-          {iodata(), iodata()} | nil
-  def render(text, {cols, rows}, color, renderer, id) do
+  @spec picture(String.t(), {pos_integer(), pos_integer()}, tuple(), atom() | nil) ::
+          Drafter.Render.Picture.t() | nil
+  def picture(text, {cols, rows}, color, renderer) do
     with true <- cols > 0 and rows > 0,
          graphemes when graphemes != [] <- String.graphemes(text),
          protocol when not is_nil(protocol) <- protocol(renderer),
          raster when not is_nil(raster) <- raster(graphemes, {cols, rows}, color) do
-      encode(raster, protocol, {cols, rows}, id)
+      %{raster: raster, protocol: protocol, dx: 0, dy: 0, cols: cols, rows: rows}
     else
       _ -> nil
     end
@@ -87,13 +87,4 @@ defmodule Drafter.Widget.Digits.Image do
   defp rgba({r, g, b}), do: {r, g, b, 255}
   defp rgba({_r, _g, _b, _a} = color), do: color
   defp rgba(_), do: {255, 255, 255, 255}
-
-  # See the note in Drafter.Widget.Chart.Pixel: not every terminal detected as :kitty keeps
-  # images under an id, so the frame is built by FrenchCurve rather than assembled here.
-  defp encode(raster, protocol, {cols, rows}, id) do
-    case FrenchCurve.frame(raster, id, fit: {cols, rows}, protocol: protocol) do
-      nil -> nil
-      {paint, clear, _place} -> {paint, clear}
-    end
-  end
 end

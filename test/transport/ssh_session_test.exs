@@ -23,11 +23,11 @@ defmodule Drafter.Transport.SSHSessionTest do
 
   setup do
     :ssh.start()
-    port = 39_000 + :rand.uniform(900)
-    {:ok, daemon} = Drafter.Server.start_ssh(Echo, port: port)
+    {:ok, daemon} = Drafter.Server.start_ssh(Echo, port: 0)
+    [port: port] = :ssh.daemon_info(daemon, [:port])
     Process.sleep(500)
 
-    on_exit(fn -> :ssh.stop_daemon(daemon) end)
+    on_exit(fn -> Drafter.Server.stop_ssh(daemon) end)
 
     {:ok, port: port}
   end
@@ -109,6 +109,19 @@ defmodule Drafter.Transport.SSHSessionTest do
       :ok = Drafter.Server.stop_ssh(daemon)
       Process.sleep(100)
       refute reachable?(v4, port) or reachable?(v6, port)
+    end
+  end
+
+  test "stopping a daemon whose port is closed and whose last connection is ending returns :ok" do
+    for _attempt <- 1..20 do
+      {:ok, daemon} = Drafter.Server.start_ssh(Echo, port: 0, ip: {127, 0, 0, 1})
+      [port: port] = :ssh.daemon_info(daemon, [:port])
+      {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+      Process.sleep(5)
+      :ok = Drafter.Server.stop_ssh_listening(daemon)
+      :gen_tcp.close(socket)
+
+      assert :ok == Drafter.Server.stop_ssh(daemon)
     end
   end
 

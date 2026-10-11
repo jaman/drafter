@@ -22,6 +22,8 @@ An Elixir Terminal User Interface framework inspired by Python's Textual. Build 
 
 - Elixir ~> 1.18
 - Erlang/OTP 28 or later
+- `make` and a C compiler at build time: the package builds its terminal I/O native
+  code through `elixir_make`
 
 Drafter relies on OTP 28's raw terminal mode (`-noshell` raw input), improved ANSI escape sequence handling, and lazy input reading. Earlier OTP versions will not handle keyboard input or screen updates correctly.
 
@@ -32,7 +34,7 @@ Add `drafter` to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:drafter, "~> 0.4"}
+    {:drafter, "~> 0.5"}
   ]
 end
 ```
@@ -110,13 +112,27 @@ are required; everything else is optional.
 ```
 
 `use Drafter.App` imports every element constructor and the `keybinding/3` macro, so
-`vertical/2`, `label/2`, `button/2` and friends are available unqualified. It takes
-four options:
+`vertical/2`, `label/2`, `button/2` and friends are available unqualified. Its options
+are documented in `Drafter.App`:
 
 - `:css_path` - path to a CSS file used for widget styling. Default `nil`
 - `:styles` - map of inline style overrides. Default `%{}`
 - `:mouse_hover` - `true` (default) puts the terminal into hover tracking mode.
   `false` cuts mouse event volume for apps with no hover effects
+- `:key_release` - `false` (default). `true` turns on the kitty keyboard protocol
+  where the terminal supports it, so every press is followed by
+  `{:key_down, key, modifiers}` and every release arrives as
+  `{:key_up, key, modifiers}`; the `{:key, ...}` events are unchanged
+- `:cell_size` - `false` (default). `true` asks the terminal how many pixels a cell
+  is; the answer arrives as `{:cell_size, {width, height}}`
+- `:pixel_mouse` - `false` (default). `true` asks the terminal for mouse reports in
+  pixels; once it confirms with `{:pixel_mouse, true}`, mouse payloads carry
+  `px: {x, y}` beside the cell coordinates
+- `:controller` - `false` (default). `true` delivers game controller events as
+  `{:controller, event}` (see [Game controllers](#game-controllers))
+- `:frame_pacing` - `:animations` (default) paces only animation frames and draws
+  every other change as it happens; `:always` draws at most once per `refresh_rate/0`
+  interval whatever caused the change
 - `:runtime` - the runtime backend: a module, or the shorthand `:callback`,
   `:reducer`, or `:shared`. Default `Drafter.Runtime.Callback`, the
   `mount`/`render`/`handle_event` style documented here
@@ -141,21 +157,12 @@ state %{count: 0}
 - `:clipboard` - `true` (default) lets `Drafter.Clipboard.copy/1` write to the user's
   clipboard via OSC 52. `false` makes copying a no-op and drops bracketed pastes. A
   keyword list sets the directions separately: `clipboard: [copy: true, paste: false]`
-- `:scroll_optimization` - `true` (default) renders from the cached hierarchy during
-  a scroll gesture and defers a full re-render until 150 ms after the last scroll
-  event. `false` re-renders on every scroll tick
 - `:syntax_highlighting` - `false` (default). `true` starts the tree-sitter server
   `code_view` needs
 - `:widget_libraries` - modules to register before the app mounts. Default `[]`
 - `:mode` - global chart rendering mode: `:auto`, `:pixel`, `:kitty`, `:iterm2`,
   `:sixel`, `:braille`, or `:text`. A per-widget `:renderer` overrides it, and the
   `DRAFTER_MODE` env var overrides both
-  - **iTerm2** is drawn with its own inline images. Animated images flicker in iTerm2
-    while its GPU renderer is on — each new frame's cells show as background until it
-    is decoded — and are smooth with **GPU rendering** off (Settings → General →
-    Magic); nothing the program sends changes that. `FRENCH_CURVE_ITERM2=kitty` draws
-    with kitty graphics instead; on iTerm2 older than 3.7.3 that grows its memory for
-    as long as the window lives
 - `:log` - `false` (default) silences the console handler so logs cannot corrupt the
   display; `true` writes `drafter.log` in the current directory; a path string
   writes there
@@ -315,6 +322,36 @@ Any other term returned from `handle_event/3` is offered to the handlers registe
 with `Drafter.ActionRegistry`; an unrecognised term leaves the state unchanged. Any
 other term returned from `handle_event/2` raises `FunctionClauseError` in the loop.
 
+### Game controllers
+
+`use Drafter.App, controller: true` reads the game controllers attached to the machine
+the app runs on. The reading is done by the `gamepad` package, which the app adds to
+its own deps:
+
+```elixir
+{:gamepad, "~> 0.1"}
+```
+
+Each event arrives in `handle_event/2` as `{:controller, event}`, where `event` is one
+of the maps `Gamepad.Wire` describes: `%{type: :connected, device: id, name: name}`,
+`%{type: :disconnected, device: id}`, `%{type: :button, device: id, button: button,
+pressed: boolean}` and `%{type: :axis, device: id, axis: axis, value: float}`. Buttons
+and axes use Xbox layout names whatever the hardware; sticks run from `-1.0` to `1.0`,
+triggers from `0.0` to `1.0`.
+
+```elixir
+def handle_event({:controller, %{type: :button, button: :a, pressed: true}}, state) do
+  {:ok, jump(state)}
+end
+
+def handle_event({:controller, %{type: :axis, axis: :left_x, value: value}}, state) do
+  {:ok, steer(state, value)}
+end
+```
+
+Local terminal sessions only: a client over ssh or telnet has its controller on its own
+machine. Without the package a note is printed and no events arrive.
+
 ### Custom Action Handlers
 
 By default, return values from `handle_event/3` are handled by Drafter's built-in
@@ -362,8 +399,9 @@ Handlers are checked in registration order. Returning `{:ok, new_state}` stops
 dispatch; returning `:unhandled` passes control to the next handler. The built-in
 handler runs last and covers all standard return values.
 
-See `examples/internal/16_custom_actions.exs` for a complete working example that
-demonstrates custom action types, state mutation, and native desktop notifications.
+See `examples/internal/16_custom_actions.exs` (see [Running Examples](#running-examples))
+for a complete working example that demonstrates custom action types, state mutation,
+and native desktop notifications.
 
 ### Screens and Navigation
 
@@ -539,7 +577,7 @@ Available easing functions: `:linear`, `:ease`, `:ease_in`, `:ease_out`, `:ease_
 ## Complete Example
 
 ```elixir
-Mix.install([{:drafter, "~> 0.1"}, {:elixir_make, "~> 0.9"}])
+Mix.install([{:drafter, "~> 0.4"}, {:elixir_make, "~> 0.9"}])
 defmodule TodoApp do
   use Drafter.App
 
@@ -768,7 +806,8 @@ digits(Drafter.Format.percent(0.42, as_ratio: true))  # "42%"
 - `percent(number, opts)` - a percentage. `as_ratio: true` treats the input as
   `0.0..1.0`; `:decimals` sets the precision
 
-`examples/spark/03_digits.exs` switches between all three against live values.
+`examples/spark/03_digits.exs` (see [Running Examples](#running-examples)) switches
+between all three against live values.
 
 ## Syntax Highlighting
 
@@ -810,19 +849,19 @@ After installing, set up grammars for the languages you want to highlight by fol
 
 ```elixir
 code_view(
-  path: state.selected_file,   # preferred — tree-sitter reads the file directly
+  path: state.selected_file,
   show_line_numbers: true,
   flex: 1
 )
 
 code_view(
-  source: some_string,         # also works — uses a temp file under the hood
+  source: some_string,
   language: :python,
   flex: 1
 )
 ```
 
-When `path:` is given, tree-sitter reads the file directly (one system call, no temp file). When only `source:` is given, a temp file is created, highlighted, then deleted.
+`path:` is preferred; `source:` with a `language:` also works.
 
 ## Running Examples
 
@@ -834,8 +873,9 @@ Standalone scripts live under `examples/`, grouped by the API style they use:
   a single `update/2` message handler
 - `examples/internal/` - the `use Drafter.App` style this README documents
 
-Each script installs the library from the checkout, so run one directly with
-`elixir`:
+The examples and `run_examples.exs` ship in the git repository,
+<https://github.com/jaman/drafter>, not in the Hex package. From a clone, run one
+directly with `elixir`:
 
 ```bash
 elixir examples/internal/01_hello_world.exs
@@ -870,7 +910,7 @@ elixir examples/spark/34_breakpoints.exs
 - [Writing Widgets & Libraries](guides/writing_widgets.md) - build a custom widget and package it for reuse
 - [Remote TUI](guides/remote_tui.md) - serve an app over SSH or Telnet
 - [Large Text](guides/large_text.md) - the `digits` font catalogue, how the fonts are built, and how to choose between them
-- [Design Notes](guides/design_notes.md) - why the internals are built the way they are; background for anyone changing them
+- [Design Notes](guides/design_notes.md) - for contributors: why the internals are built the way they are
 
 ## Keyboard Shortcuts
 
@@ -885,6 +925,13 @@ elixir examples/spark/34_breakpoints.exs
 `Ctrl+C` is **not** a global quit. It is delivered to the app as
 `{:key, :c, [:ctrl]}`, and is the copy binding inside text inputs and text areas.
 Match it in `handle_event/2` and return `{:stop, :normal}` if you want it to exit.
+
+## Known limitations
+
+- Animated images flicker in iTerm2 while its GPU renderer is on: each new frame's
+  cells show as background until the frame is decoded. Turn GPU rendering off
+  (Settings → General → Magic) for smooth animation, or set `FRENCH_CURVE_ITERM2=kitty`
+  to draw with kitty graphics instead.
 
 ## License
 

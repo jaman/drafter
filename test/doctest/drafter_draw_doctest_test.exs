@@ -6,6 +6,8 @@ defmodule Drafter.DrawDoctestTest do
   doctest Drafter.Draw.Segment
   doctest Drafter.Draw.Strip
 
+  doctest Drafter.Render.Picture
+
   doctest Drafter.Style.Computed
   doctest Drafter.Style.CSSParser
   doctest Drafter.Style.Selector

@@ -372,7 +372,6 @@ defmodule Drafter.Widget.MaskedInput do
   """
   @spec get_unmasked_value(t()) :: String.t()
   def get_unmasked_value(%__MODULE__{raw_value: raw_value}), do: raw_value || ""
-  def get_unmasked_value(%__MODULE__{value: value, mask: mask}), do: strip_mask(value, mask)
 
   @doc """
   The number of rows the element asks for: always `3`. There is no `:height`
@@ -631,18 +630,6 @@ defmodule Drafter.Widget.MaskedInput do
   end
 
   defp place_mask_char(literal, acc, remaining), do: {acc <> literal, remaining}
-
-  defp strip_mask(value, mask) when is_binary(mask) do
-    mask_chars = String.graphemes(mask)
-    value_chars = String.graphemes(value || "")
-
-    mask_chars
-    |> Enum.zip(value_chars)
-    |> Enum.filter(fn {m, _v} -> m in ["#", "9", "a", "A"] end)
-    |> Enum.map_join(fn {_m, v} -> v end)
-  end
-
-  defp strip_mask(value, _mask), do: value || ""
 
   defp insert_char(state, char, position) do
     unmasked = get_unmasked_value(state)

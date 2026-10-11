@@ -7,9 +7,8 @@ defmodule Drafter.Widget.Chart.Pixel do
   braille `Strip`s for any other truecolor terminal, or block-character `Strip`s in
   one of `FrenchCurve.Backend.Cells`' glyph sets (`:half`, `:quad`, `:sextant`,
   `:octant`), two colours per cell. Callers pick the mode with `mode/2` ("best
-  available" for `:pixel`) and pass a chart `spec` to `image/4` (a `{paint, clear}`
-  pair — `clear` is a kitty delete for the persistent-layer protocol, empty for
-  cell-grid protocols), `braille_strips/2` or `cells_strips/3`.
+  available" for `:pixel`) and pass a chart `spec` to `picture/3` (a raster for
+  `Drafter.Render.Picture` to encode), `braille_strips/2` or `cells_strips/3`.
 
   A `spec` is `%{type, values, color: {r,g,b,a}, smooth, fill_opacity, min, max}`.
   Add a `raster/3` clause to support a new chart type; `supported/0` gates which
@@ -170,31 +169,42 @@ defmodule Drafter.Widget.Chart.Pixel do
   end
 
   @default_image_scale 4
+  @max_image_width 512
+  @max_image_height 288
 
-  @spec image(map(), atom(), {pos_integer(), pos_integer()}, term()) ::
-          {iodata(), iodata()} | nil
-  def image(spec, protocol, {cols, rows}, id) do
+  @doc """
+  Draws `spec` as a `Drafter.Render.Picture` filling a `cols` by `rows` cell box at the
+  widget's top left, to be drawn with `protocol`.
+
+  The raster is a whole number of pixels per cell: `:scale` (default `4`) across and
+  twice that down, reduced where needed to keep it within 512 by 288 pixels. Returns
+  `nil` when `protocol` is `nil` or the chart cannot be drawn.
+  """
+  @spec picture(map(), atom() | nil, {pos_integer(), pos_integer()}) ::
+          Drafter.Render.Picture.t() | nil
+  def picture(_spec, nil, _cells), do: nil
+
+  def picture(spec, protocol, {cols, rows}) do
     scale = Map.get(spec, :scale, @default_image_scale)
+    across = max(1, min(scale, div(@max_image_width, cols)))
+    down = max(1, min(scale * 2, div(@max_image_height, rows)))
 
-    case raster(spec, min(cols * scale, 512), min(rows * scale * 2, 288)) do
-      nil -> nil
-      r -> encode(r, protocol, {cols, rows}, id)
+    case raster(spec, cols * across, rows * down) do
+      nil ->
+        nil
+
+      raster ->
+        %{
+          raster: Raster.finalize(raster),
+          protocol: protocol,
+          dx: 0,
+          dy: 0,
+          cols: cols,
+          rows: rows
+        }
     end
   rescue
     _ -> nil
-  end
-
-  defp encode(raster, protocol, {cols, rows}, id) do
-    placements = Capability.placements?(Context.terminal_env())
-
-    case FrenchCurve.frame(raster, id,
-           fit: {cols, rows},
-           protocol: protocol,
-           placements: placements
-         ) do
-      nil -> nil
-      {paint, clear, _place} -> {paint, clear}
-    end
   end
 
   @spec braille_strips(map(), {pos_integer(), pos_integer()}) :: [Strip.t()] | nil

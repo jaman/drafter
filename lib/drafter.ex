@@ -158,7 +158,7 @@ defmodule Drafter do
   nested session and returns to the caller when that session stops, rather than
   starting a second terminal. A nested session always returns `:ok`, whatever reason
   it stopped for, and honours only `:props` and `:refresh_rate` from `opts` —
-  `:log`, `:scroll_optimization` and `:halt_on_exit` belong to a standalone run.
+  `:log` and `:halt_on_exit` belong to a standalone run.
 
   For a standalone run, returns `:ok` when the app stopped with `{:stop, :normal}` or
   the global `Ctrl+q`, and `{:error, reason}` for any other stop reason or a failure
@@ -179,10 +179,6 @@ defmodule Drafter do
       a no-op returning `{:error, :disabled}` and drops bracketed pastes before any
       widget sees them. A keyword list sets the two directions separately, each
       defaulting to `true`: `clipboard: [copy: true, paste: false]`.
-    * `:scroll_optimization` - `boolean()`, default `true`, rendering from the
-      cached hierarchy during a scroll gesture and deferring a full re-render until
-      150 ms after the last scroll event. `false` runs a full re-render on every
-      scroll tick: maximum freshness at higher CPU cost.
     * `:syntax_highlighting` - `boolean()`, default `false`. `true` starts the
       tree-sitter server that `Drafter.Widget.CodeView` needs.
     * `:widget_libraries` - list of modules to register before the app mounts, each
@@ -203,9 +199,10 @@ defmodule Drafter do
       always returns to its parent. Set `false` when embedding a run in a
       longer-lived VM so the caller regains control.
 
-  `:mouse_hover`, `:key_release` and `:frame_pacing` are not options here: they
-  are set on the app module, as `use Drafter.App, mouse_hover: false` or
-  `use Drafter.App, key_release: true`.
+  `:mouse_hover`, `:key_release`, `:pixel_mouse` and `:frame_pacing` are not options
+  here: they are set on the app module, as `use Drafter.App, mouse_hover: false` or
+  `use Drafter.App, pixel_mouse: true`. `Drafter.Terminal.Driver.pixel_mouse/1` turns
+  pixel mouse reports on and off while the app runs.
 
       Drafter.run(MyApp, props: %{user_id: 7}, refresh_rate: "60fps", log: "/tmp/app.log")
   """
@@ -745,8 +742,6 @@ defmodule Drafter do
     :ok
   end
 
-  defp safe_widget_state(nil), do: nil
-
   defp safe_widget_state(pid) do
     if Process.alive?(pid), do: Drafter.WidgetServer.get_state(pid)
   catch
@@ -1186,7 +1181,6 @@ defmodule Drafter do
     * `:shared_state` - the pid of the shared-state server. Default
       `nil`. Required when `:mode` is `:shared` and ignored otherwise; a `:shared`
       session without it raises.
-    * `:scroll_optimization` - `boolean()`, default `true`. As in `run/2`.
     * `:refresh_rate` - frame pacing, as in `run/2`. Default: the app's
       `refresh_rate/0`, and `"30fps"` when that returns `nil`. Only `:isolated` reads
       it; a `:shared` session always runs at the app's own rate.
@@ -1219,9 +1213,7 @@ defmodule Drafter do
 
     {mode, opts} = Keyword.pop(opts, :mode, :isolated)
     {shared_state, opts} = Keyword.pop(opts, :shared_state)
-    {scroll_opt, opts} = Keyword.pop(opts, :scroll_optimization, true)
     {refresh_rate, opts} = Keyword.pop(opts, :refresh_rate)
-    Process.put(:scroll_optimization, scroll_opt)
 
     mount_props = Runtime.mount_props(opts)
     loop_opts = if refresh_rate, do: [refresh_rate: refresh_rate], else: []
@@ -1289,7 +1281,7 @@ defmodule Drafter do
     Drafter.Widget.Registry.scan_and_register()
 
     mouse_opts = [hover: Keyword.get(opts, :mouse_hover, true)]
-    driver_opts = mouse_opts ++ Keyword.take(opts, [:key_release, :cell_size])
+    driver_opts = mouse_opts ++ Keyword.take(opts, [:key_release, :cell_size, :pixel_mouse])
 
     with {:ok, em_pid} <- ensure_started(Event.Manager.start_link()),
          {:ok, _} <- ensure_started(Terminal.Driver.start_link()),
@@ -1362,15 +1354,17 @@ defmodule Drafter do
   The terminal settings an app module declares with `use Drafter.App`.
 
   A keyword with `:mouse_hover` (default `true`), `:key_release` (default `false`),
-  `:cell_size` (default `false`) and `:controller` (default `false`), read from the
-  module's `__mouse_hover__/0`, `__key_release__/0`, `__cell_size__/0` and
-  `__controller__/0` when it defines them. Transports pass this to their driver's
-  setup; `:controller` is acted on by the local terminal session alone.
+  `:cell_size` (default `false`), `:pixel_mouse` (default `false`) and `:controller`
+  (default `false`), read from the module's `__mouse_hover__/0`, `__key_release__/0`,
+  `__cell_size__/0`, `__pixel_mouse__/0` and `__controller__/0` when it defines them.
+  Transports pass this to their driver's setup; `:controller` is acted on by the local
+  terminal session alone, and `:pixel_mouse` by the local and ssh sessions.
   """
   @spec terminal_opts(module()) :: [
           mouse_hover: boolean(),
           key_release: boolean(),
           cell_size: boolean(),
+          pixel_mouse: boolean(),
           controller: boolean()
         ]
   def terminal_opts(app_module) do
@@ -1380,6 +1374,7 @@ defmodule Drafter do
       mouse_hover: app_setting(app_module, :__mouse_hover__, true),
       key_release: app_setting(app_module, :__key_release__, false),
       cell_size: app_setting(app_module, :__cell_size__, false),
+      pixel_mouse: app_setting(app_module, :__pixel_mouse__, false),
       controller: app_setting(app_module, :__controller__, false)
     ]
   end
@@ -1399,7 +1394,6 @@ defmodule Drafter do
   defp propagate_session_pdict(session_pdict), do: Context.adopt(session_pdict)
 
   defp run_app(app_module, opts) do
-    scroll_opt = Keyword.get(opts, :scroll_optimization, true)
     action_handlers = Drafter.ActionRegistry.collect()
 
     session_pdict = %{
@@ -1413,7 +1407,6 @@ defmodule Drafter do
 
     app_pid =
       spawn_link(fn ->
-        Process.put(:scroll_optimization, scroll_opt)
         propagate_session_pdict(session_pdict)
         Drafter.ActionRegistry.init(action_handlers)
         AppLoop.run(app_module, opts)

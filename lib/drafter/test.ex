@@ -169,29 +169,36 @@ defmodule Drafter.Test do
   Clicks at a screen cell and returns once the app has handled it.
 
   `x` and `y` are zero-based column and row. Injects a left-button
-  `%{type: :mouse_up, ...}` event, which is what activates a widget. Returns `:ok`.
+  `%{type: :mouse_down, ...}` and then `%{type: :mouse_up, ...}`, as a terminal
+  reports a click, so widgets that act on the press and widgets that act on the
+  release both respond. Returns `:ok`.
   """
   @spec send_click(map(), integer(), integer()) :: :ok
   def send_click(ctx, x, y) when is_integer(x) and is_integer(y) do
-    event = {:mouse, %{type: :mouse_up, x: x, y: y, button: :left}}
-    HeadlessDriver.inject_event(event)
-    sync(ctx)
+    for type <- [:mouse_down, :mouse_up] do
+      HeadlessDriver.inject_event({:mouse, %{type: type, x: x, y: y, button: :left}})
+      sync(ctx)
+    end
+
+    :ok
   end
 
   @doc """
   Clicks a widget by id and returns once the app has handled it.
 
   `widget_id` is an atom — the `:id` given to an element, or the id `query_one/2`
-  returned. A left-button `mouse_up` is injected at the centre of the widget's
-  current rect, so the click lands on whatever is drawn on top there. Returns `:ok`;
-  an id that is not in the hierarchy is ignored and nothing is clicked.
+  returned. Clicks, as `send_click/3` does, at the centre of the widget's current
+  rect, so the click lands on whatever is drawn on top there. Returns `:ok`; an id
+  that is not in the hierarchy is ignored and nothing is clicked.
 
       send_click(ctx, query_one(ctx, "Button.primary"))
   """
   @spec send_click(map(), atom()) :: :ok
   def send_click(ctx, widget_id) when is_atom(widget_id) do
-    ask(ctx, {:widget_click, widget_id})
-    sync(ctx)
+    case widget_center(get_widget_hierarchy(ctx), widget_id) do
+      {x, y} -> send_click(ctx, x, y)
+      nil -> :ok
+    end
   end
 
   @doc """
@@ -679,4 +686,13 @@ defmodule Drafter.Test do
     Drafter.AppRegistry.send_to_loop(message)
     :ok
   end
+
+  defp widget_center(%{widget_rects: rects}, widget_id) do
+    case Map.get(rects, widget_id) do
+      nil -> nil
+      rect -> {rect.x + div(rect.width, 2), rect.y + div(rect.height, 2)}
+    end
+  end
+
+  defp widget_center(_hierarchy, _widget_id), do: nil
 end

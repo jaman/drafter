@@ -62,6 +62,13 @@ defmodule Drafter.App do
       how many pixels a cell is; the answer arrives as `{:cell_size, {width, height}}`
       and `Drafter.Session.Context.cell_size/0` keeps it. Widgets placing images at
       pixel offsets need it.
+    * `:pixel_mouse` - `boolean()`, default `false`. `true` asks each session's
+      terminal for its cell size and then for mouse reports in pixels (SGR-Pixels,
+      DECSET 1016). Mouse payloads keep `x` and `y` in cells and, once the terminal
+      confirms with `{:pixel_mouse, true}`, add `px: {x, y}`, the zero-based pixel
+      under the pointer. A terminal that ignores the mode answers
+      `{:pixel_mouse, false}` and its payloads carry no `:px`.
+      `Drafter.Session.Context.pixel_mouse?/0` reports which. Local and ssh sessions.
     * `:controller` - `boolean()`, default `false`. `true` reads the game controllers
       attached to the machine the app runs on through the `gamepad` package, which
       the app adds to its own deps, and delivers their events as `{:controller, event}`
@@ -78,7 +85,8 @@ defmodule Drafter.App do
 
   No other key is read; an unknown one is silently ignored. Each of these is
   exposed on the module as `__css_path__/0`, `__inline_styles__/0`,
-  `__mouse_hover__/0`, `__key_release__/0`, `__cell_size__/0`, `__controller__/0`,
+  `__mouse_hover__/0`, `__key_release__/0`, `__cell_size__/0`, `__pixel_mouse__/0`,
+  `__controller__/0`,
   `__frame_pacing__/0`, and
   `__runtime__/0`, which the loop calls and which are not overridable.
 
@@ -89,8 +97,9 @@ defmodule Drafter.App do
   It also defines overridable defaults for `c:mount/1` (returns `%{}`),
   `c:render/1` (returns `[]`), `c:on_ready/1`, `c:unmount/1`, and `keybindings/0`,
   and appends catch-all clauses for `handle_event/2` (returns `{:noreply, state}`)
-  and `c:on_timer/2` (returns the state) after every clause the module defined.
-  A module therefore never has to write those two catch-alls. `handle_event/3` gets
+  and `c:on_timer/2` (returns the state) after every clause the module defined,
+  each only when the module has no catch-all clause of its own for that function.
+  A module therefore never has to write those two catch-alls, and may write its own. `handle_event/3` gets
   no catch-all: a module that defines any `handle_event/3` clause must define its
   own final clause or an unmatched named callback raises `FunctionClauseError`.
 
@@ -440,6 +449,7 @@ defmodule Drafter.App do
       @mouse_hover Keyword.get(unquote(opts), :mouse_hover, true)
       @key_release Keyword.get(unquote(opts), :key_release, false)
       @cell_size Keyword.get(unquote(opts), :cell_size, false)
+      @pixel_mouse Keyword.get(unquote(opts), :pixel_mouse, false)
       @controller Keyword.get(unquote(opts), :controller, false)
       @frame_pacing Keyword.get(unquote(opts), :frame_pacing, :animations)
       @runtime_backend Keyword.get(unquote(opts), :runtime, Drafter.Runtime.Callback)
@@ -457,6 +467,7 @@ defmodule Drafter.App do
       def __mouse_hover__, do: @mouse_hover
       def __key_release__, do: @key_release
       def __cell_size__, do: @cell_size
+      def __pixel_mouse__, do: @pixel_mouse
       def __controller__, do: @controller
       def __frame_pacing__, do: @frame_pacing
       def __runtime__, do: @runtime_backend
@@ -483,13 +494,43 @@ defmodule Drafter.App do
         end
       end
 
+    handle_event =
+      unless catch_all?(env.module, {:handle_event, 2}) do
+        quote do
+          def handle_event(_event, state), do: {:noreply, state}
+        end
+      end
+
+    on_timer =
+      unless catch_all?(env.module, {:on_timer, 2}) do
+        quote do
+          def on_timer(_timer_id, state), do: state
+        end
+      end
+
     quote do
       unquote(keybindings)
-
-      def handle_event(_event, state), do: {:noreply, state}
-      def on_timer(_timer_id, state), do: state
+      unquote(handle_event)
+      unquote(on_timer)
     end
   end
+
+  @doc false
+  @spec catch_all?(module(), {atom(), arity()}) :: boolean()
+  def catch_all?(module, function) do
+    case Module.get_definition(module, function) do
+      {:v1, _kind, _meta, clauses} ->
+        Enum.any?(clauses, fn {_meta, args, guards, _body} ->
+          guards == [] and Enum.all?(args, &binds_anything?/1)
+        end)
+
+      nil ->
+        false
+    end
+  end
+
+  defp binds_anything?({name, _meta, context}) when is_atom(name) and is_atom(context), do: true
+  defp binds_anything?(_pattern), do: false
 
   @doc ~S"""
   Defines a `handle_event/2` clause for a key, and registers it for display in the

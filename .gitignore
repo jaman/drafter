@@ -40,3 +40,4 @@ CONTRIBUTING.md
 dev/
 docs/
 priv/
+image_memory_repro.exs

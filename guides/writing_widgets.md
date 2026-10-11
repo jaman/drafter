@@ -397,6 +397,33 @@ def preferred_height(_args, opts) do
 end
 ```
 
+### `image_raster/2`
+
+Draw the widget with the terminal's graphics protocol (kitty, iTerm2, sixel) by
+returning a `FrenchCurve.Raster`, the protocol, and the box of cells it fills.
+`render/2` still returns strips for the cells beneath the image.
+
+```elixir
+def image_raster(state, rect) do
+  case Drafter.Widget.Chart.Pixel.protocol(state.renderer) do
+    nil -> nil
+    protocol ->
+      raster = draw(state, rect.width * 4, rect.height * 8)
+      %{raster: raster, protocol: protocol, dx: 0, dy: 0, cols: rect.width, rows: rect.height}
+  end
+end
+```
+
+It runs in a separate process and is called again only when the state or the
+rect changes. Drafter encodes the raster, moves the image when the widget
+moves, and shows only the visible rows when the widget is partly scrolled out
+of view. A raster that is a whole number of pixels per cell crops exactly at
+row boundaries. Implement `image_active?/1` too when the widget only draws an
+image in some of its modes.
+
+`image/3` is the lower-level alternative: it returns encoded bytes and a
+placement box itself, and is drawn only while all of it is visible.
+
 ---
 
 ## The component DSL bridge

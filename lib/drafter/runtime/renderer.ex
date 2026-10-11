@@ -208,8 +208,6 @@ defmodule Drafter.Runtime.Renderer do
     {:ok, nil}
   end
 
-  defp apply_render_result({:error, _reason}, _, _, _, _, _), do: {:error, nil}
-
   defp render_hierarchy_layers(hierarchy, screen_rect, theme) do
     background_strips = create_app_background(screen_rect, theme)
     t0 = System.monotonic_time(:microsecond)
@@ -743,7 +741,12 @@ defmodule Drafter.Runtime.Renderer do
     final_rect = apply_animated_presentation(overflowed_rect, widget_info)
     final_strips = overflowed_strips
 
-    overlay_image(widget_id, widget_info, final_rect, paintable_region(final_strips, final_rect))
+    placement =
+      hierarchy
+      |> image_placement(scroll_parent_id, render_rect)
+      |> shift_placement(final_rect.x - overflowed_rect.x, final_rect.y - overflowed_rect.y)
+
+    overlay_image(widget_id, widget_info, placement, image_shown?(final_strips))
 
     if final_strips != [] do
       [
@@ -761,18 +764,46 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
-  defp paintable_region([], _rect), do: false
-  defp paintable_region(_strips, _rect) when false, do: false
+  defp image_shown?([]), do: false
+  defp image_shown?(_strips), do: not resize_active?()
 
-  defp paintable_region(final_strips, final_rect) do
-    if scroll_active?() or resize_active?() do
-      false
+  defp image_placement(_hierarchy, nil, rect), do: %{anchor: rect, window: nil}
+
+  defp image_placement(hierarchy, scroll_parent_id, rect) do
+    scroll_info = WidgetHierarchy.get_scroll_container_info(hierarchy, scroll_parent_id)
+    scroll_state = WidgetHierarchy.get_widget_state(hierarchy, scroll_parent_id)
+
+    if scroll_info && scroll_state do
+      scroll_y = Map.get(scroll_state, :scroll_offset_y, 0)
+      on_screen = %{rect | y: rect.y - scroll_y}
+      %{anchor: on_screen, window: cell_intersection(on_screen, scroll_info.viewport_rect)}
     else
-      %{final_rect | height: length(final_strips)}
+      %{anchor: rect, window: nil}
     end
   end
 
-  defp scroll_active?, do: Process.get(:scroll_gesture_active, false)
+  defp shift_placement(placement, 0, 0), do: placement
+
+  defp shift_placement(%{anchor: anchor, window: window}, dx, dy) do
+    %{anchor: offset_rect(anchor, dx, dy), window: window && offset_rect(window, dx, dy)}
+  end
+
+  defp cell_intersection(a, b) do
+    left = max(a.x, b.x)
+    top = max(a.y, b.y)
+    right = min(a.x + a.width, b.x + b.width)
+    bottom = min(a.y + a.height, b.y + b.height)
+
+    if right > left and bottom > top,
+      do: %{x: left, y: top, width: right - left, height: bottom - top},
+      else: %{x: a.x, y: a.y, width: 0, height: 0}
+  end
+
+  defp relative_window(%{anchor: anchor, window: nil}),
+    do: %{x: 0, y: 0, width: anchor.width, height: anchor.height}
+
+  defp relative_window(%{anchor: anchor, window: window}),
+    do: %{window | x: window.x - anchor.x, y: window.y - anchor.y}
 
   defp resize_active? do
     case Process.get(:last_resize_ms) do
@@ -788,15 +819,16 @@ defmodule Drafter.Runtime.Renderer do
     end
   end
 
-  defp overlay_image(widget_id, %{module: module} = widget_info, rect, region) do
+  defp overlay_image(widget_id, %{module: module} = widget_info, placement, shown?) do
     cond do
       image_active?(widget_id, widget_info) ->
-        unseen? = region != false and not WidgetStripCache.visible?(widget_id)
-        WidgetStripCache.mark_visible(widget_id, region)
+        visible = shown? and relative_window(placement)
+        unseen? = shown? and not WidgetStripCache.visible?(widget_id)
+        WidgetStripCache.mark_visible(widget_id, visible)
         if unseen?, do: WidgetServer.retry_image(Map.get(widget_info, :pid))
-        do_overlay_image(widget_id, widget_info, rect, region)
+        do_overlay_image(widget_id, widget_info, placement, shown?)
 
-      function_exported?(module, :image, 3) ->
+      Drafter.Widget.draws_images?(module) ->
         Drafter.Compositor.clear_image(widget_id)
 
       true ->
@@ -814,12 +846,12 @@ defmodule Drafter.Runtime.Renderer do
   defp image_active?(_widget_id, %{module: module, state: state}),
     do: Drafter.Widget.image_active?(module, state)
 
-  defp do_overlay_image(widget_id, _widget_info, _rect, false) do
+  defp do_overlay_image(widget_id, _widget_info, _placement, false) do
     Drafter.Compositor.clear_image(widget_id)
   end
 
-  defp do_overlay_image(widget_id, widget_info, rect, _region) do
-    Drafter.Compositor.place_image(widget_id, rect.x, rect.y)
+  defp do_overlay_image(widget_id, widget_info, %{anchor: anchor, window: window}, true) do
+    Drafter.Compositor.place_image(widget_id, anchor.x, anchor.y, window)
     request_image_gen(widget_info)
   end
 
