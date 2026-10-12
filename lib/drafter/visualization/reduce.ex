@@ -11,6 +11,9 @@ defmodule Drafter.Visualization.Reduce do
 
   Items come back unchanged, so tuples such as `{value, weight}` survive when a
   `value_fun` extracts the number. Lists no longer than `columns` are returned as-is.
+
+  A `nil` item is a gap and is never passed to `value_fun`. A bucket holding only
+  gaps keeps a gap in place of its items; otherwise its gaps are ignored.
   """
 
   @type value_fun :: (term() -> number())
@@ -28,11 +31,15 @@ defmodule Drafter.Visualization.Reduce do
       iex> Drafter.Visualization.Reduce.peaks([{1, 0.5}, {4, 1.0}], 1, &elem(&1, 0))
       [{4, 1.0}]
 
+      iex> Drafter.Visualization.Reduce.peaks([nil, nil, 3, nil], 2)
+      [nil, 3]
+
   """
   @spec peaks([term()], pos_integer(), value_fun()) :: [term()]
   def peaks(items, columns, value_fun \\ & &1) do
-    reduce_buckets(items, columns, fn bucket ->
-      [Enum.max_by(bucket, &abs(value_fun.(&1)))]
+    reduce_buckets(items, columns, fn
+      [] -> [nil]
+      bucket -> [Enum.max_by(bucket, &abs(value_fun.(&1)))]
     end)
   end
 
@@ -75,12 +82,20 @@ defmodule Drafter.Visualization.Reduce do
   """
   @spec min_max([term()], pos_integer(), value_fun()) :: [term()]
   def min_max(items, columns, value_fun \\ & &1) do
-    reduce_buckets(items, columns, fn bucket ->
-      indexed = Enum.with_index(bucket)
-      {low, low_index} = Enum.min_by(indexed, fn {item, _} -> value_fun.(item) end)
-      {high, high_index} = Enum.max_by(indexed, fn {item, _} -> value_fun.(item) end)
-      ordered_pair(low, low_index, high, high_index)
+    reduce_buckets(items, columns, fn
+      [] ->
+        [nil, nil]
+
+      bucket ->
+        min_max_pair(bucket, value_fun)
     end)
+  end
+
+  defp min_max_pair(bucket, value_fun) do
+    indexed = Enum.with_index(bucket)
+    {low, low_index} = Enum.min_by(indexed, fn {item, _} -> value_fun.(item) end)
+    {high, high_index} = Enum.max_by(indexed, fn {item, _} -> value_fun.(item) end)
+    ordered_pair(low, low_index, high, high_index)
   end
 
   @doc """
@@ -132,14 +147,19 @@ defmodule Drafter.Visualization.Reduce do
       items
       |> Stream.with_index()
       |> Stream.chunk_by(fn {_item, index} -> div(index * columns, count) end)
-      |> Enum.flat_map(fn chunk -> chunk |> Enum.map(&elem(&1, 0)) |> keep.() end)
+      |> Enum.flat_map(fn chunk ->
+        chunk |> Enum.map(&elem(&1, 0)) |> Enum.reject(&is_nil/1) |> keep.()
+      end)
     end
   end
 
   defp column_magnitude(column, value_fun) do
     column
     |> Tuple.to_list()
-    |> Enum.reduce(0, fn item, sum -> sum + abs(value_fun.(item)) end)
+    |> Enum.reduce(0, fn
+      nil, sum -> sum
+      item, sum -> sum + abs(value_fun.(item))
+    end)
   end
 
   defp unzip_columns([], series_count), do: List.duplicate([], series_count)

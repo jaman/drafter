@@ -91,4 +91,18 @@ defmodule Drafter.WidgetIdentityTest do
       assert :chosen in ids(h)
     end
   end
+
+  describe "invisible siblings" do
+    test "a widget after an invisible sibling keeps its id and process", %{theme: theme} do
+      shown = render({:layout, :horizontal, [input([]), input([])], []}, theme)
+      [_first, second] = Enum.filter(ids(shown), &(shown.widgets[&1].pid != nil))
+      original_pid = shown.widgets[second].pid
+
+      hidden =
+        render({:layout, :horizontal, [input(visible: false), input([])], []}, theme, shown)
+
+      assert hidden.widgets[second].pid == original_pid
+      refute MapSet.member?(hidden.hidden_widgets, second)
+    end
+  end
 end

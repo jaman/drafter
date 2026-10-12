@@ -1,7 +1,7 @@
 defmodule Drafter.Widget.Chart.Line do
   @moduledoc false
 
-  alias Drafter.Visualization.LTTB
+  alias Drafter.Visualization.{LTTB, Reduce}
   alias Drafter.Widget.Chart.{MultiSeries, Pixels, Shared}
 
   @default_series_colors [
@@ -18,11 +18,14 @@ defmodule Drafter.Widget.Chart.Line do
     data_src = state._internal.data_tuple || data
 
     cond do
+      is_list(data) and data != [] and is_list(hd(data)) ->
+        render_multi_series(state, data, width, height, bg)
+
       Shared.tuple_size_or_length(data_src) < 2 ->
         Shared.empty_strips(height, bg)
 
-      is_list(data) and is_list(hd(data)) ->
-        render_multi_series(state, data, width, height, bg)
+      is_list(data) and Enum.member?(data, nil) ->
+        render_multi_series(single_colored(state, fg), [data], width, height, bg)
 
       true ->
         render_single_series(state, data_src, width, height, bg, fg, animation_offset)
@@ -47,7 +50,7 @@ defmodule Drafter.Widget.Chart.Line do
         if raw_data do
           slice
         else
-          LTTB.downsample_series(slice, viewport_width)
+          Reduce.min_max(slice, max(div(viewport_width, 2), 1))
         end
       end)
 
@@ -62,6 +65,9 @@ defmodule Drafter.Widget.Chart.Line do
       raw_data: raw_data
     )
   end
+
+  defp single_colored(%{colors: []} = state, fg), do: %{state | colors: [state.color || fg]}
+  defp single_colored(state, _fg), do: state
 
   defp render_single_series(state, data_src, width, height, bg, fg, animation_offset) do
     scroll_offset = state._internal.scroll_offset || 0

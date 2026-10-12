@@ -262,7 +262,7 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   defp draw_raster(%{type: type} = spec, w, h) when type in [:area, :braille_area] do
     case classify(spec.data) do
-      {:single, values} -> Chart.area(values, fc_opts(spec, w, h))
+      {:single, values} -> single_area(values, spec, w, h)
       {:multi, series} -> build_multi_area(series, spec, w, h)
       :empty -> nil
     end
@@ -270,7 +270,7 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   defp draw_raster(%{type: :line} = spec, w, h) do
     case classify(spec.data) do
-      {:single, values} -> Chart.line(values, fc_opts(spec, w, h))
+      {:single, values} -> single_line(values, spec, w, h)
       {:multi, series} -> build_multi_line(series, spec, w, h)
       :empty -> nil
     end
@@ -297,7 +297,7 @@ defmodule Drafter.Widget.Chart.Pixel do
   end
 
   defp draw_raster(%{type: :clustered_bar} = spec, w, h) do
-    case classify(spec.data) do
+    case classify_bars(spec.data) do
       {:multi, series} -> build_grouped_bar(series, spec, w, h, :clustered)
       {:single, values} -> build_bar(values, spec, w, h)
       :empty -> nil
@@ -305,7 +305,7 @@ defmodule Drafter.Widget.Chart.Pixel do
   end
 
   defp draw_raster(%{type: :stacked_bar} = spec, w, h) do
-    case classify(spec.data) do
+    case classify_bars(spec.data) do
       {:multi, series} -> build_grouped_bar(series, spec, w, h, :stacked)
       {:single, values} -> build_bar(values, spec, w, h)
       :empty -> nil
@@ -357,6 +357,18 @@ defmodule Drafter.Widget.Chart.Pixel do
   end
 
   defp draw_raster(_spec, _w, _h), do: nil
+
+  defp single_area(values, spec, w, h) do
+    if Enum.member?(values, nil),
+      do: build_multi_area([values], %{spec | colors: [spec.color]}, w, h),
+      else: Chart.area(values, fc_opts(spec, w, h))
+  end
+
+  defp single_line(values, spec, w, h) do
+    if Enum.member?(values, nil),
+      do: build_multi_line([values], %{spec | colors: [spec.color]}, w, h),
+      else: Chart.line(values, fc_opts(spec, w, h))
+  end
 
   defp with_numbers(data, fun) do
     case numbers(data) do
@@ -515,12 +527,22 @@ defmodule Drafter.Widget.Chart.Pixel do
     series
     |> Enum.with_index()
     |> Enum.reduce(Raster.new(w, h), fn {values, si}, raster ->
-      points =
-        values |> float_points(w, h, lo, hi) |> Enum.map(fn {x, y} -> {round(x), round(y)} end)
-
-      Draw.polyline(raster, points, color_at(colors, si))
+      values
+      |> float_points(w, h, lo, hi)
+      |> point_runs()
+      |> Enum.reduce(raster, &draw_run(&2, &1, color_at(colors, si)))
     end)
   end
+
+  defp draw_run(raster, run, color), do: Draw.polyline(raster, rounded(run), color)
+
+  defp fill_run(raster, run, baseline, fill, color) do
+    raster
+    |> fill_under(run, baseline, fill)
+    |> Draw.polyline(rounded(run), color)
+  end
+
+  defp rounded(points), do: Enum.map(points, fn {x, y} -> {round(x), round(y)} end)
 
   defp build_multi_area(series, spec, w, h) do
     {lo, hi} = range(List.flatten(series), spec)
@@ -531,18 +553,25 @@ defmodule Drafter.Widget.Chart.Pixel do
     |> Enum.with_index()
     |> Enum.reduce(Raster.new(w, h), fn {values, si}, raster ->
       color = color_at(colors, si)
-      points = float_points(values, w, h, lo, hi)
+      fill = fade(color, spec.fill_opacity || 0.4)
 
-      raster
-      |> fill_under(points, baseline, fade(color, spec.fill_opacity || 0.4))
-      |> Draw.polyline(Enum.map(points, fn {x, y} -> {round(x), round(y)} end), color)
+      values
+      |> float_points(w, h, lo, hi)
+      |> point_runs()
+      |> Enum.reduce(raster, &fill_run(&2, &1, baseline, fill, color))
     end)
+  end
+
+  defp point_runs(points) do
+    points
+    |> Enum.chunk_by(&is_nil/1)
+    |> Enum.reject(&(hd(&1) == nil))
   end
 
   defp build_stacked_area(series, spec, w, h) do
     colors = palette_colors(spec)
     groups = series |> Enum.map(&length/1) |> Enum.max()
-    padded = Enum.map(series, &(&1 ++ List.duplicate(0, groups - length(&1))))
+    padded = Enum.map(series, &(gaps_as_zero(&1) ++ List.duplicate(0, groups - length(&1))))
     totals = Enum.zip_with(padded, &Enum.sum/1)
     lo = Map.get(spec, :min) || 0
     hi = Map.get(spec, :max) || Enum.max([1 | totals])
@@ -752,10 +781,10 @@ defmodule Drafter.Widget.Chart.Pixel do
       not is_list(data) or data == [] ->
         :empty
 
-      value?(hd(data)) ->
-        {:single, Enum.map(data, &to_value/1)}
+      value_list?(data) ->
+        {:single, to_values(data)}
 
-      value_list?(hd(data)) ->
+      Enum.any?(data, &value_list?/1) ->
         {:multi, data |> Enum.filter(&value_list?/1) |> Enum.map(&to_values/1)}
 
       true ->
@@ -763,15 +792,28 @@ defmodule Drafter.Widget.Chart.Pixel do
     end
   end
 
+  defp classify_bars(data) do
+    case classify(data) do
+      {:single, values} -> {:single, gaps_as_zero(values)}
+      {:multi, series} -> {:multi, Enum.map(series, &gaps_as_zero/1)}
+      :empty -> :empty
+    end
+  end
+
+  defp gaps_as_zero(values), do: Enum.map(values, &(&1 || 0))
+
   defp value?(n) when is_number(n), do: true
   defp value?({v, _weight}) when is_number(v), do: true
   defp value?(_other), do: false
 
   defp to_value(n) when is_number(n), do: n
   defp to_value({v, _weight}) when is_number(v), do: v
+  defp to_value(nil), do: nil
   defp to_value(_other), do: 0
 
-  defp value_list?([head | _]), do: value?(head)
+  defp value_list?([_ | _] = list),
+    do: Enum.all?(list, &(is_nil(&1) or value?(&1))) and Enum.any?(list, &value?/1)
+
   defp value_list?(_other), do: false
 
   defp to_values(list), do: Enum.map(list, &to_value/1)
@@ -836,7 +878,10 @@ defmodule Drafter.Widget.Chart.Pixel do
 
     values
     |> Enum.with_index()
-    |> Enum.map(fn {value, index} -> {x_index(index, count, w), y_px(value, lo, hi, h)} end)
+    |> Enum.map(fn
+      {nil, _index} -> nil
+      {value, index} -> {x_index(index, count, w), y_px(value, lo, hi, h)}
+    end)
   end
 
   defp x_index(_index, 1, _w), do: 0.0
@@ -915,8 +960,9 @@ defmodule Drafter.Widget.Chart.Pixel do
   defp point_weight(_other), do: 1
 
   defp range(values, spec) do
-    lo = Map.get(spec, :min) || Enum.min(values)
-    hi = Map.get(spec, :max) || Enum.max(values)
+    present = Enum.reject(values, &is_nil/1)
+    lo = Map.get(spec, :min) || Enum.min(present, fn -> 0.0 end)
+    hi = Map.get(spec, :max) || Enum.max(present, fn -> 1.0 end)
     if hi == lo, do: {lo, lo + 1}, else: {lo, hi}
   end
 

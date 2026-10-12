@@ -67,6 +67,12 @@ defmodule Drafter.Widget.Chart do
 
       chart([series_a_points, series_b_points], chart_type: :scatter, height: 8)
 
+  On `:line`, `:braille` and `:braille_area` charts a `nil` in a series is a gap:
+  nothing is drawn at that position and the series resumes after it, so series
+  sampled on a shared time grid stay aligned.
+
+      chart([[nil, nil, 3, 4, 6], [1, 2, 2, 3, 2]], chart_type: :line, height: 8)
+
   For `:range_bar`, data is a list of `[low, high]` pairs — one pair per bar:
 
       chart([[10, 40], [25, 65], [5, 55]], chart_type: :range_bar, height: 8)
@@ -149,6 +155,12 @@ defmodule Drafter.Widget.Chart do
       it falls. Ignored when the data does not cross zero
     * `:smooth` — `t:boolean/0`, interpolate between points on line charts.
       Default `false`
+    * `:series_names` — list of names, one per series, shown in the value readout.
+      Default `[]`, which names them `series 1`, `series 2`, …
+    * `:readout_format` — one-arity function turning a value into the text the
+      readout shows. Default `nil`, two decimals
+    * `:readout_sort` — `:none` (default), `:asc` or `:desc`, the order of series
+      in the readout
     * `:stacked` — `t:boolean/0`, on `:braille_area` charts stack each series on
       the ones before it; `false` draws every series from the baseline, later
       series over earlier ones. Default `true`
@@ -391,6 +403,9 @@ defmodule Drafter.Widget.Chart do
         dragging_scrollbar: false,
         smooth: Map.get(props, :smooth, false),
         stacked: Map.get(props, :stacked, true),
+        series_names: Map.get(props, :series_names, []),
+        readout_format: Map.get(props, :readout_format),
+        readout_sort: Map.get(props, :readout_sort, :none),
         line_thickness: Map.get(props, :line_thickness, 1),
         connect_lines: Map.get(props, :connect_lines, false),
         raw_data: Map.get(props, :raw_data, false),
@@ -419,9 +434,12 @@ defmodule Drafter.Widget.Chart do
   Moves the value readout cursor to column `x` as the pointer passes over the chart.
 
   On `:line`, `:braille`, `:step`, `:area`, `:braille_area` and `:stacked_area`
-  charts the cursor column is highlighted and the first row shows the x label (the
-  `:x_labels` entry, or `#index`) and each series' value there. Returns
-  `{:noreply, state}` when the column is unchanged.
+  charts the cursor column is highlighted and a panel beside it, to the right
+  when it fits and otherwise to the left, lists the x label (the `:x_labels`
+  entry, or `#index`) and each series' colour, name (`:series_names`) and value
+  (`:readout_format`), ordered by `:readout_sort`. A pixel chart, whose image
+  covers its cells, shows the label and values along its first row instead.
+  Returns `{:noreply, state}` when the column is unchanged.
   """
   @spec handle_hover(integer(), integer(), t()) :: {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
@@ -595,6 +613,9 @@ defmodule Drafter.Widget.Chart do
       app_module: Keyword.get(opts, :__app_module__),
       smooth: Keyword.get(opts, :smooth, false),
       stacked: Keyword.get(opts, :stacked, true),
+      series_names: Keyword.get(opts, :series_names, []),
+      readout_format: Keyword.get(opts, :readout_format),
+      readout_sort: Keyword.get(opts, :readout_sort, :none),
       line_thickness: Keyword.get(opts, :line_thickness, 1),
       connect_lines: Keyword.get(opts, :connect_lines, false),
       raw_data: Keyword.get(opts, :raw_data, false),
@@ -728,7 +749,7 @@ defmodule Drafter.Widget.Chart do
     |> apply_title(state, rect, bg, fg)
     |> pad_top(frame.dy, state)
     |> pad_strips(rect.height)
-    |> Readout.decorate(state, frame, Readout.index(state, frame, mode), fg)
+    |> Readout.decorate(state, frame, Readout.index(state, frame, mode), fg, mode)
   end
 
   defp pad_top(strips, 1, %{title: title}) when is_binary(title) and title != "", do: strips
@@ -773,7 +794,7 @@ defmodule Drafter.Widget.Chart do
     |> then(&apply_axes(strips, &1, %{rect | height: chart_height + 2}, bg, fg))
     |> apply_title(state, rect, bg, fg)
     |> pad_strips(rect.height)
-    |> Readout.decorate(state, box, Readout.index(state, box, :text), fg)
+    |> Readout.decorate(state, box, Readout.index(state, box, :text), fg, :text)
   end
 
   @doc "Whether this chart is drawing a transmitted image rather than cells."
@@ -940,6 +961,12 @@ defmodule Drafter.Widget.Chart do
             renderer: Map.get(props, :renderer, state._internal[:renderer]),
             smooth: Map.get(props, :smooth, state._internal[:smooth]),
             stacked: Map.get(props, :stacked, Map.get(state._internal, :stacked, true)),
+            series_names:
+              Map.get(props, :series_names, Map.get(state._internal, :series_names, [])),
+            readout_format:
+              Map.get(props, :readout_format, Map.get(state._internal, :readout_format)),
+            readout_sort:
+              Map.get(props, :readout_sort, Map.get(state._internal, :readout_sort, :none)),
             line_thickness: Map.get(props, :line_thickness, state._internal[:line_thickness]),
             connect_lines: Map.get(props, :connect_lines, state._internal[:connect_lines]),
             raw_data: Map.get(props, :raw_data, state._internal[:raw_data]),
@@ -1108,7 +1135,7 @@ defmodule Drafter.Widget.Chart do
     do: Enum.flat_map(data, &point_height/1)
 
   defp extract_values([first | _] = data, :stacked_area) when is_list(first) do
-    series = for values <- data, is_list(values), do: Enum.map(values, &extract_weighted_value/1)
+    series = for values <- data, is_list(values), do: Enum.map(values, &stack_value/1)
     longest = series |> Enum.map(&length/1) |> Enum.max()
 
     totals =
@@ -1129,32 +1156,23 @@ defmodule Drafter.Widget.Chart do
   defp point_height(points) when is_list(points), do: Enum.flat_map(points, &point_height/1)
   defp point_height(_other), do: []
 
-  defp extract_values([first | _] = data) when is_number(first), do: data
+  defp extract_values([first | _] = data) when is_list(first),
+    do: Enum.flat_map(data, &series_values/1)
 
-  defp extract_values([{val, _weight} | _] = data) when is_number(val) do
-    Enum.map(data, fn {v, _w} -> v end)
-  end
-
-  defp extract_values([first | _] = data) when is_list(first) do
-    case first do
-      [{v, _w} | _] when is_number(v) ->
-        data |> Enum.flat_map(fn series -> Enum.map(series, &extract_weighted_value/1) end)
-
-      [nested | _] when is_number(nested) ->
-        Enum.flat_map(data, & &1)
-
-      [nested | _] when is_list(nested) ->
-        data |> Enum.flat_map(& &1) |> Enum.flat_map(& &1)
-
-      _ ->
-        []
-    end
-  end
-
+  defp extract_values(data) when is_list(data), do: Enum.flat_map(data, &item_values/1)
   defp extract_values(_), do: []
 
-  defp extract_weighted_value({v, _w}), do: v
-  defp extract_weighted_value(v) when is_number(v), do: v
+  defp series_values(series) when is_list(series), do: Enum.flat_map(series, &item_values/1)
+  defp series_values(_other), do: []
+
+  defp item_values(value) when is_number(value), do: [value]
+  defp item_values({value, _weight}) when is_number(value), do: [value]
+  defp item_values(values) when is_list(values), do: Enum.filter(values, &is_number/1)
+  defp item_values(_other), do: []
+
+  defp stack_value({value, _weight}), do: value
+  defp stack_value(value) when is_number(value), do: value
+  defp stack_value(nil), do: 0
 
   defp data_to_tuple(data) when is_list(data), do: List.to_tuple(data)
   defp data_to_tuple(data), do: data

@@ -39,8 +39,8 @@ defmodule Drafter.Widget.Box do
       `false`). The widget hierarchy keeps the box's `:focus_within` flag current
       as focus moves
 
-  `:content_style` and `:classes` are read by `mount/1` only; the
-  `{:box, children, opts}` element does not forward them.
+  `:classes` is read by `mount/1` only; the `{:box, children, opts}` element does
+  not forward it.
 
   Every option is live-updatable: `update/2` merges the props map into the state.
 
@@ -148,7 +148,7 @@ defmodule Drafter.Widget.Box do
     fg = computed[:color] || {200, 200, 200}
     border_fg = computed[:border_color] || {100, 100, 120}
 
-    base_style = %{fg: fg, bg: bg}
+    base_style = Map.merge(%{fg: fg, bg: bg}, state.content_style)
 
     border_style_map =
       %{fg: border_fg, bg: bg} |> Map.merge(state.border_style) |> focus_accent(state)
@@ -227,13 +227,21 @@ defmodule Drafter.Widget.Box do
 
   defp focus_accent(style, _state), do: style
 
+  defp fit_title(text, room) do
+    cond do
+      String.length(text) <= room -> text
+      room <= 0 -> ""
+      true -> String.slice(text, 0, room - 1) <> "…"
+    end
+  end
+
   defp render_top_border(chars, width, title, border_style, title_style) do
     inner_width = max(0, width - 2)
 
     if title && String.length(title) > 0 do
-      title_text = " #{title} "
-      title_len = String.length(title_text)
       left_len = min(2, inner_width)
+      title_text = fit_title(" #{title} ", inner_width - left_len)
+      title_len = String.length(title_text)
       right_len = max(0, inner_width - left_len - title_len)
 
       segments = [

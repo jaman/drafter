@@ -177,20 +177,26 @@ defmodule Drafter.WidgetHierarchy.Scroll do
   @doc """
   The scroll container that should take a wheel event at `{x, y}`, or `nil`.
 
-  Containers whose viewport covers the point are considered smallest-first. A
-  click-to-scroll container only claims the event while its widget state has
-  `:scroll_locked` set; an ordinary container is skipped when an enclosing
-  click-to-scroll container has claimed it and is not itself locked.
+  Containers drawn in the last frame whose viewport covers the point are
+  considered smallest-first. A click-to-scroll container only claims the event
+  while its widget state has `:scroll_locked` set; an ordinary container is skipped
+  when an enclosing click-to-scroll container has claimed it and is not itself
+  locked.
   """
   @spec find_scroll_container_at(hierarchy(), integer(), integer()) :: widget_id() | nil
   def find_scroll_container_at(hierarchy, x, y) do
     candidates =
-      Enum.filter(hierarchy.scroll_containers, fn {_id, info} ->
+      Enum.filter(shown_containers(hierarchy), fn {_id, info} ->
         v = info.viewport_rect
         x >= v.x and x < v.x + v.width and y >= v.y and y < v.y + v.height
       end)
 
     resolve_scroll_candidate(hierarchy, candidates)
+  end
+
+  defp shown_containers(hierarchy) do
+    hidden = Map.get(hierarchy, :hidden_widgets, MapSet.new())
+    Enum.reject(hierarchy.scroll_containers, fn {id, _info} -> MapSet.member?(hidden, id) end)
   end
 
   @doc """
@@ -259,13 +265,14 @@ defmodule Drafter.WidgetHierarchy.Scroll do
   @doc """
   Flip the scroll lock on the smallest click-to-scroll container covering `{x, y}`.
 
-  Ordinary scroll containers are ignored. Returns the hierarchy unchanged when no
-  click-to-scroll container covers the point.
+  Ordinary scroll containers, and containers not drawn in the last frame, are
+  ignored. Returns the hierarchy unchanged when no click-to-scroll container
+  covers the point.
   """
   @spec toggle_scroll_lock_at(hierarchy(), integer(), integer()) :: hierarchy()
   def toggle_scroll_lock_at(hierarchy, x, y) do
     click_to_scroll_containers =
-      Enum.filter(hierarchy.scroll_containers, fn {_id, info} ->
+      Enum.filter(shown_containers(hierarchy), fn {_id, info} ->
         info.click_to_scroll
       end)
 

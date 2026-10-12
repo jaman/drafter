@@ -77,26 +77,17 @@ defmodule Drafter.Widget.Chart.MultiSeries do
     else
       stride = pixel_width / len
 
-      line_points =
-        series
-        |> Enum.with_index()
-        |> Enum.map(fn {value, idx} ->
-          normalized = (value - min_val) / range
-          y = round((1 - normalized) * (pixel_height - 1))
-          x = round(idx * stride)
-          {x, y}
-        end)
-
-      connected = if len > 1, do: connect_raw_points(line_points), else: line_points
-      thickened = apply_thickness(connected, thickness)
-
-      Enum.map(thickened, fn {x, y} ->
-        {{div(x, 2), div(y, 4)}, {rem(x, 2), rem(y, 4)}, color}
+      series
+      |> runs(fn value, idx ->
+        {round(idx * stride), pixel_y(value, min_val, range, pixel_height)}
       end)
+      |> Enum.flat_map(&connect_raw_points/1)
+      |> apply_thickness(thickness)
+      |> Enum.map(&dot(&1, color))
     end
   end
 
-  defp connect_raw_points([_single]), do: []
+  defp connect_raw_points([single]), do: [single]
 
   defp connect_raw_points(points) do
     points
@@ -107,42 +98,37 @@ defmodule Drafter.Widget.Chart.MultiSeries do
   end
 
   def series_to_step_pixels(series, color, min_val, range, pixel_height, thickness) do
-    points =
-      series
-      |> Enum.with_index()
-      |> Enum.map(fn {value, x} ->
-        normalized = (value - min_val) / range
-        y = round((1 - normalized) * (pixel_height - 1))
-        {x, y}
-      end)
-
-    line_pixels = Step.step_lines(points)
-    thickened = apply_thickness(line_pixels, thickness)
-
-    Enum.map(thickened, fn {x, y} ->
-      {{div(x, 2), div(y, 4)}, {rem(x, 2), rem(y, 4)}, color}
-    end)
+    series
+    |> runs(fn value, x -> {x, pixel_y(value, min_val, range, pixel_height)} end)
+    |> Enum.flat_map(&Step.step_lines/1)
+    |> apply_thickness(thickness)
+    |> Enum.map(&dot(&1, color))
   end
 
   def series_to_line_pixels(series, color, min_val, range, pixel_height, smooth, thickness) do
-    points =
-      series
-      |> Enum.with_index()
-      |> Enum.map(fn {value, x} ->
-        normalized = (value - min_val) / range
-        y = round((1 - normalized) * (pixel_height - 1))
-        {x, y}
-      end)
-
-    line_pixels =
-      if smooth, do: Line.catmull_rom_lines(points), else: Line.bresenham_lines(points)
-
-    thickened = apply_thickness(line_pixels, thickness)
-
-    Enum.map(thickened, fn {x, y} ->
-      {{div(x, 2), div(y, 4)}, {rem(x, 2), rem(y, 4)}, color}
-    end)
+    series
+    |> runs(fn value, x -> {x, pixel_y(value, min_val, range, pixel_height)} end)
+    |> Enum.flat_map(&run_line(&1, smooth))
+    |> apply_thickness(thickness)
+    |> Enum.map(&dot(&1, color))
   end
+
+  defp run_line([single], _smooth), do: [single]
+  defp run_line(points, true), do: Line.catmull_rom_lines(points)
+  defp run_line(points, false), do: Line.bresenham_lines(points)
+
+  defp runs(series, to_point) do
+    series
+    |> Enum.with_index()
+    |> Enum.chunk_by(fn {value, _x} -> is_nil(value) end)
+    |> Enum.reject(fn [{value, _x} | _] -> is_nil(value) end)
+    |> Enum.map(fn run -> Enum.map(run, fn {value, x} -> to_point.(value, x) end) end)
+  end
+
+  defp pixel_y(value, min_val, range, pixel_height),
+    do: round((1 - (value - min_val) / range) * (pixel_height - 1))
+
+  defp dot({x, y}, color), do: {{div(x, 2), div(y, 4)}, {rem(x, 2), rem(y, 4)}, color}
 
   defp apply_thickness(pixels, thickness) when thickness <= 1, do: pixels
 
@@ -159,30 +145,20 @@ defmodule Drafter.Widget.Chart.MultiSeries do
   end
 
   def resolve_multi_series_range(opts, data_series) do
-    case {Keyword.get(opts, :min), Keyword.get(opts, :max)} do
-      {nil, nil} ->
-        all_values = List.flatten(data_series)
-        {Enum.min(all_values), Enum.max(all_values)}
+    {data_min, data_max} =
+      data_series |> List.flatten() |> Enum.reject(&is_nil/1) |> value_bounds()
 
-      {nil, max} ->
-        {data_series |> List.flatten() |> Enum.min(), max}
-
-      {min, nil} ->
-        {min, data_series |> List.flatten() |> Enum.max()}
-
-      {min, max} ->
-        {min, max}
-    end
+    {Keyword.get(opts, :min) || data_min, Keyword.get(opts, :max) || data_max}
   end
+
+  defp value_bounds([]), do: {0, 1}
+  defp value_bounds(values), do: Enum.min_max(values)
 
   def series_to_pixels(series, color, min_val, range, pixel_height) do
     series
-    |> Enum.with_index()
-    |> Enum.map(fn {value, x} ->
-      normalized = (value - min_val) / range
-      y = round((1 - normalized) * (pixel_height - 1))
-      {{div(x, 2), div(y, 4)}, {rem(x, 2), rem(y, 4)}, color}
-    end)
+    |> runs(fn value, x -> {x, pixel_y(value, min_val, range, pixel_height)} end)
+    |> Enum.concat()
+    |> Enum.map(&dot(&1, color))
   end
 
   def multi_series_segment([], _fallback_color, bg), do: Segment.new(" ", %{bg: bg})

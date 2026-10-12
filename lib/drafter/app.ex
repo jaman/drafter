@@ -235,7 +235,9 @@ defmodule Drafter.App do
       atom, so pass that string to `Drafter.focus/1` and `Drafter.Test.query_one/2`.
       Ignored when `:id` is also given.
     * `:visible` - `boolean()`, default `true`. `false` omits the element and its
-      children from the hierarchy entirely and its siblings close the gap.
+      children from the hierarchy entirely and its siblings close the gap. The
+      generated ids the element would take stay reserved, so the widgets after it
+      keep their ids, and their state, whether it is shown or not.
     * `:visibility` - `:hidden` allots the element its space and draws nothing in it.
       Default `nil`, which draws normally.
     * `:margin` - space outside the element: an integer for all four sides, a
@@ -1208,11 +1210,13 @@ defmodule Drafter.App do
     * `:border_style` - `map()` of style attributes for the border characters, such as
       `%{fg: {r, g, b}}`. Default `%{}`.
     * `:title_style` - `map()` of style attributes for the title text. Default `%{}`.
+    * `:content_style` - `map()` of style attributes for the interior fill, such as
+      `%{bg: {r, g, b}}`. Default `%{}`.
     * `:highlight_focus` - `boolean()`, draw the border and title in the theme's primary
       colour while a widget inside the box has keyboard focus. Default `false`.
 
-  `:content_style` and `:classes` are documented on `Drafter.Widget.Box` because its
-  `mount/1` reads them, but this element does not forward them.
+  `:classes` is documented on `Drafter.Widget.Box` because its `mount/1` reads it, but
+  this element does not forward it.
 
       iex> box([label("Ready")], title: "Status", border: :double)
       {:box, [{:label, "Ready", []}], [title: "Status", border: :double]}

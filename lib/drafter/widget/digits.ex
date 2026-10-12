@@ -36,7 +36,8 @@ defmodule Drafter.Widget.Digits do
       `:block` font) or `:small` (the `:compact` font)
     * `:fit` - list of font names, largest first. Default `nil`. When set it
       overrides `:font` and `:size`: each render uses the first font whose height
-      and text width fit the widget's rect, or the last one when none fits. FIGlet
+      and text width fit the widget's rect. When none fits, the text is written in
+      plain characters on one row, cut to the width with `…`. FIGlet
       fonts must be registered first (see `Drafter.Widget.Digits.Figlet`)
     * `:renderer` - `:text` (default) draws cells; any other value transmits an
       image on a terminal supporting kitty, iTerm2, or sixel, falling back to cells
@@ -78,12 +79,23 @@ defmodule Drafter.Widget.Digits do
 
   alias Drafter.Widget.Digits.{Font, Image}
 
-  defp selected_font(%{fit: [_ | _] = names}, digits, rect) do
+  defp fitted(%{fit: [_ | _] = names}, digits, rect) do
     text = Enum.join(digits)
-    names |> Enum.find(List.last(names), &fits?(&1, text, rect)) |> Font.get()
+
+    case Enum.find(names, &fits?(&1, text, rect)) do
+      nil -> plain_fit(digits, rect.width)
+      name -> {Font.get(name), digits}
+    end
   end
 
-  defp selected_font(state, _digits, _rect), do: Font.get(font_name(state))
+  defp fitted(state, digits, _rect), do: {Font.get(font_name(state)), digits}
+
+  defp plain_fit(digits, width) when length(digits) > width do
+    shown = Enum.take(digits, max(width - 1, 0)) ++ ["…"]
+    {Font.plain(shown), shown}
+  end
+
+  defp plain_fit(digits, _width), do: {Font.plain(digits), digits}
 
   defp fits?(name, text, rect) do
     Font.height(name) <= rect.height and Font.text_width(name, text) <= rect.width
@@ -343,7 +355,7 @@ defmodule Drafter.Widget.Digits do
   end
 
   defp render_with_bg(digits, data, state, rect) do
-    font = selected_font(state, digits, rect)
+    {font, digits} = fitted(state, digits, rect)
 
     computed = Computed.for_widget(:digits, state, style: state.style)
     digit_fg = Map.get(Computed.to_segment_style(computed), :fg)
@@ -459,7 +471,7 @@ defmodule Drafter.Widget.Digits do
     computed = Computed.for_widget(:digits, state, style: state.style)
     effective_style = Computed.to_segment_style(computed)
 
-    font = selected_font(state, digits, rect)
+    {font, digits} = fitted(state, digits, rect)
     digit_height = font.height
 
     digit_rows =

@@ -317,6 +317,18 @@ defmodule Drafter.Widget.Digits.Font do
     Map.has_key?(font.glyphs, character) or Map.has_key?(font.glyphs, String.upcase(character))
   end
 
+  @doc """
+  A one-row font drawing each of `characters` as itself, one column wide.
+
+      iex> font = Drafter.Widget.Digits.Font.plain(["O", "K"])
+      iex> {font.height, Drafter.Widget.Digits.Font.glyph(font, "K")}
+      {1, ["K"]}
+  """
+  @spec plain([String.t()]) :: font()
+  def plain(characters) do
+    %{height: 1, width: 1, glyphs: Map.new(characters, &{&1, [&1]})}
+  end
+
   @doc "Every character a font can draw, sorted."
   @spec repertoire(name() | font()) :: [String.t()]
   def repertoire(name), do: get(name).glyphs |> Map.keys() |> Enum.sort()

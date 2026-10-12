@@ -179,7 +179,7 @@ defmodule Drafter.ComponentRenderer do
 
     cond do
       not visible ->
-        {hierarchy, id_counter}
+        {hierarchy, id_counter + Layout.count_component_slots(component)}
 
       Layout.component_hidden?(component) ->
         {hierarchy, id_counter + Layout.count_component_slots(component)}
@@ -389,6 +389,7 @@ defmodule Drafter.ComponentRenderer do
     custom_style = Keyword.get(opts, :style, %{})
     border_style = Keyword.get(opts, :border_style, %{})
     title_style = Keyword.get(opts, :title_style, %{})
+    content_style = Keyword.get(opts, :content_style, %{})
     highlight_focus = Keyword.get(opts, :highlight_focus, false)
     border_offset = if border == :none, do: 0, else: 1
 
@@ -399,6 +400,7 @@ defmodule Drafter.ComponentRenderer do
       style: custom_style,
       border_style: border_style,
       title_style: title_style,
+      content_style: content_style,
       highlight_focus: highlight_focus,
       app_module: ctx.app_module
     }
@@ -410,6 +412,7 @@ defmodule Drafter.ComponentRenderer do
       style: custom_style,
       border_style: border_style,
       title_style: title_style,
+      content_style: content_style,
       highlight_focus: highlight_focus
     }
 
@@ -936,7 +939,8 @@ defmodule Drafter.ComponentRenderer do
     padding = Layout.get_padding(opts)
     content_rect = Layout.apply_padding(rect, padding)
 
-    visible_children = Enum.filter(children, &Layout.component_visible?/1)
+    visible_indexed = visible_with_index(children)
+    visible_children = Enum.map(visible_indexed, &elem(&1, 0))
 
     children_opts =
       Enum.map(visible_children, fn
@@ -951,29 +955,19 @@ defmodule Drafter.ComponentRenderer do
 
     child_sizes = Layout.calculate_horizontal_layout(visible_children, content_rect, layout_opts)
 
-    {hierarchy, id_counter} =
-      Enum.reduce(Enum.zip(visible_children, child_sizes), {hierarchy, id_counter}, fn {child,
-                                                                                        child_size},
-                                                                                       {acc_h,
-                                                                                        acc_idc} ->
-        child_rect = %{
-          x: child_size.x,
-          y: content_rect.y,
-          width: child_size.width,
-          height: content_rect.height
-        }
-
-        render_component(acc_h, child, child_rect, ctx, parent_id, acc_idc)
+    rects =
+      Map.new(Enum.zip(visible_indexed, child_sizes), fn {{_child, index}, size} ->
+        {index, %{x: size.x, y: content_rect.y, width: size.width, height: content_rect.height}}
       end)
 
-    {hierarchy, id_counter}
+    render_in_order(hierarchy, children, rects, ctx, parent_id, id_counter)
   end
 
   defp render_layout(hierarchy, :vertical, children, rect, ctx, parent_id, id_counter, opts) do
     padding = Layout.get_padding(opts)
     content_rect = Layout.apply_padding(rect, padding)
 
-    visible_children = Enum.filter(children, &Layout.component_visible?/1)
+    visible_indexed = visible_with_index(children)
 
     child_width =
       case Keyword.get(opts, :width) do
@@ -982,28 +976,39 @@ defmodule Drafter.ComponentRenderer do
         _ -> content_rect.width
       end
 
-    {docked, regular_children} = Layout.partition_docked(visible_children)
-    {layout_rect, docked_rects} = reserve_docked(content_rect, docked, hierarchy)
+    {docked_indexed, regular_indexed} =
+      Enum.split_with(visible_indexed, fn {child, _index} -> Layout.dock_edge(child) != nil end)
 
+    docked = Enum.map(docked_indexed, fn {child, _index} -> {child, Layout.dock_edge(child)} end)
+    {layout_rect, docked_rects} = reserve_docked(content_rect, docked, hierarchy)
+    regular_children = Enum.map(regular_indexed, &elem(&1, 0))
     child_sizes = Layout.calculate_vertical_layout(regular_children, layout_rect, opts, hierarchy)
 
-    {hierarchy, id_counter} =
-      Enum.reduce(Enum.zip(regular_children, child_sizes), {hierarchy, id_counter}, fn {child,
-                                                                                        child_size},
-                                                                                       {acc_h,
-                                                                                        acc_idc} ->
-        child_rect = %{
-          x: content_rect.x,
-          y: child_size.y,
-          width: child_width,
-          height: child_size.height
-        }
-
-        render_component(acc_h, child, child_rect, ctx, parent_id, acc_idc)
+    regular_rects =
+      Enum.zip_with(regular_indexed, child_sizes, fn {_child, index}, size ->
+        {index, %{x: content_rect.x, y: size.y, width: child_width, height: size.height}}
       end)
 
-    Enum.reduce(docked_rects, {hierarchy, id_counter}, fn {child, docked_rect}, {h, idc} ->
-      render_component(h, child, docked_rect, ctx, parent_id, idc)
+    docked_child_rects =
+      Enum.zip_with(docked_indexed, docked_rects, fn {_child, index}, {_docked, docked_rect} ->
+        {index, docked_rect}
+      end)
+
+    rects = Map.new(regular_rects ++ docked_child_rects)
+    render_in_order(hierarchy, children, rects, ctx, parent_id, id_counter)
+  end
+
+  defp visible_with_index(children) do
+    children
+    |> Enum.with_index()
+    |> Enum.filter(fn {child, _index} -> Layout.component_visible?(child) end)
+  end
+
+  defp render_in_order(hierarchy, children, rects, ctx, parent_id, id_counter) do
+    children
+    |> Enum.with_index()
+    |> Enum.reduce({hierarchy, id_counter}, fn {child, index}, {acc_h, acc_idc} ->
+      render_component(acc_h, child, Map.get(rects, index), ctx, parent_id, acc_idc)
     end)
   end
 
@@ -1041,12 +1046,15 @@ defmodule Drafter.ComponentRenderer do
   end
 
   defp render_grid(hierarchy, children, opts, rect, ctx, parent_id, id_counter) do
-    visible = Enum.filter(List.wrap(children), &Layout.component_visible?/1)
-    cells = Layout.calculate_grid_layout(visible, rect, opts)
+    visible_indexed = visible_with_index(List.wrap(children))
+    cells = Layout.calculate_grid_layout(Enum.map(visible_indexed, &elem(&1, 0)), rect, opts)
 
-    Enum.reduce(Enum.zip(visible, cells), {hierarchy, id_counter}, fn {child, cell}, {h, idc} ->
-      render_component(h, child, cell, ctx, parent_id, idc)
-    end)
+    rects =
+      Map.new(
+        Enum.zip_with(visible_indexed, cells, fn {_child, index}, cell -> {index, cell} end)
+      )
+
+    render_in_order(hierarchy, List.wrap(children), rects, ctx, parent_id, id_counter)
   end
 
   defp render_split_pane(hierarchy, children, opts, rect, ctx, parent_id, id_counter) do

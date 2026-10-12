@@ -15,9 +15,8 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     series =
       cond do
         raw == [] -> []
-        is_number(hd(raw)) -> [raw]
-        match?({_, _}, hd(raw)) -> [raw]
-        true -> raw
+        is_list(hd(raw)) -> raw
+        true -> [raw]
       end
 
     case series do
@@ -114,6 +113,7 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     Enum.map(series, fn
       {val, weight} when is_number(val) and is_number(weight) -> {val, weight}
       val when is_number(val) -> {val, 1.0}
+      nil -> nil
     end)
   end
 
@@ -121,6 +121,7 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     all_values =
       Enum.flat_map(stacked, fn col ->
         Enum.flat_map(col, fn
+          nil -> []
           {bottom, top, _weight} -> [bottom, top]
           {bottom, top} -> [bottom, top]
         end)
@@ -189,21 +190,27 @@ defmodule Drafter.Widget.Chart.BrailleArea do
 
   defp overlay_column(layers) do
     Enum.map(layers, fn
+      nil -> nil
       {val, weight} when val >= 0 -> {0, val, weight}
       {val, weight} -> {val, 0, weight}
     end)
   end
 
   defp pad_series(series, max_len) do
-    series ++ List.duplicate({0, 1.0}, max_len - length(series))
+    series ++ List.duplicate(nil, max_len - length(series))
   end
 
   defp stack_column(layers) do
     layers
-    |> Enum.reduce({0, 0, []}, fn {val, weight}, acc -> stack_value(val, weight, acc) end)
+    |> Enum.reduce({0, 0, []}, &stack_layer/2)
     |> elem(2)
     |> Enum.reverse()
   end
+
+  defp stack_layer(nil, {pos_running, neg_running, acc}),
+    do: {pos_running, neg_running, [nil | acc]}
+
+  defp stack_layer({val, weight}, acc), do: stack_value(val, weight, acc)
 
   defp stack_value(val, weight, {pos_running, neg_running, acc}) when val >= 0 do
     new_top = pos_running + val
@@ -231,16 +238,20 @@ defmodule Drafter.Widget.Chart.BrailleArea do
 
     col_layers
     |> Enum.with_index()
-    |> Enum.each(fn {layer, si} ->
-      {bottom, top, weight} = extract_layer(layer)
-
-      if bottom != top do
-        series_color = elem(ctx.colors, rem(si, tuple_size(ctx.colors)))
-        color = weight_modulate(series_color, weight)
-        {lo_py, hi_py, top_py} = compute_pixel_range(bottom, top, ctx)
-        paint_column_span(lo_py, hi_py, top_py, local_x, char_col, color, ctx)
-      end
+    |> Enum.each(fn
+      {nil, _si} -> :gap
+      {layer, si} -> paint_layer(extract_layer(layer), si, local_x, char_col, ctx)
     end)
+  end
+
+  defp paint_layer({bottom, top, _weight}, _si, _local_x, _char_col, _ctx) when bottom == top,
+    do: :empty
+
+  defp paint_layer({bottom, top, weight}, si, local_x, char_col, ctx) do
+    series_color = elem(ctx.colors, rem(si, tuple_size(ctx.colors)))
+    color = weight_modulate(series_color, weight)
+    {lo_py, hi_py, top_py} = compute_pixel_range(bottom, top, ctx)
+    paint_column_span(lo_py, hi_py, top_py, local_x, char_col, color, ctx)
   end
 
   defp paint_column_span(lo_py, hi_py, top_py, local_x, char_col, color, ctx) do
