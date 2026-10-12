@@ -4,7 +4,7 @@ defmodule Drafter.MixProject do
   def project do
     [
       app: :drafter,
-      version: "0.5.2",
+      version: "0.5.3",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:elixir_make | Mix.compilers()],
@@ -135,7 +135,7 @@ defmodule Drafter.MixProject do
     [
       {:elixir_make, "~> 0.9"},
       {:spark, "~> 2.6"},
-      family(:french_curve, "~> 0.2.0", "../french_curve"),
+      family(:french_curve, "~> 0.2.1", "../french_curve"),
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:plumb, "~> 0.1", only: :dev, runtime: false},
       {:phoenix_pubsub, "~> 2.1"},
