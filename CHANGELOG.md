@@ -6,6 +6,22 @@ Versions marked with ★ were published to Hex.pm.
 
 ## Unreleased
 
+### Added
+
+- `Drafter.Visualization.Reduce`: `peaks/3`, `aligned_peaks/3`, `min_max/3` and `m4/2` reduce a series to the columns a plot can show while keeping its extremes and the original items.
+- Pixel, braille and cell-set charts fit their data to the raster width before drawing: line and step charts keep each column's minimum and maximum, area charts each column's peak, stacked series at shared indices.
+- Charts draw the y axis, the x axis line and the title around the plot in every renderer; a pixel chart's image fills the plot area inside them (`dx`/`dy` on its `Drafter.Render.Picture`).
+- Chart value readout on `:line`, `:braille`, `:step`, `:area`, `:braille_area` and `:stacked_area` charts: hovering (or clicking, when the app has hover off) highlights the column and shows the `:x_labels` entry and each series' value in the first row; `Esc` hides it. Charts now declare `:hover`.
+- `Drafter.Widget.Digits` `:fit`: a list of font names, largest first; each render uses the first whose height and text width fit the widget's rect.
+- `Drafter.Widget.Chart` `:stacked` (default `true`): `false` draws `:braille_area` series each from the baseline instead of stacking them.
+
+### Changed
+
+- `:braille_area` charts reduce long series with `Reduce.aligned_peaks/3` instead of LTTB, so spikes survive and stacked layers stay aligned, and draw from one flat `:atomics` buffer. A 120×24 chart of five 300-point series renders in about 4 ms (was 59 ms).
+- The `:heatmap` text renderer indexes rows and columns as tuples.
+- Vertical `:bar` charts in text mode draw each bar as a column of full blocks with a partial block on top, scaled to the chart height; each row used to repeat the same one-cell level.
+- A chart re-derives its value range only when its data changes or a fixed `:min_value`/`:max_value` is given, from cached data bounds. `:stacked_area` ranges cover the stacked totals.
+
 ### Fixed
 
 - `Drafter.Pty.close/2` releases the descriptors only on its first call. A second call closed the same descriptor numbers again, and by then the system could have given them to another pty, which was closed under its owner; async tests opening ptys failed with "Device not configured". `resize/3` on a closed handle returns `{:error, :ioctl_failed}` without touching the numbers.

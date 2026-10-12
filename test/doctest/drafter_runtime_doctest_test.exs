@@ -10,5 +10,6 @@ defmodule Drafter.RuntimeDoctestTest do
   doctest Drafter.Validation
   doctest Drafter.Visualization
   doctest Drafter.Visualization.LTTB
+  doctest Drafter.Visualization.Reduce
   doctest Drafter.WidgetHierarchy.Query
 end

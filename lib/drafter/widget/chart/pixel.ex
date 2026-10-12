@@ -17,6 +17,7 @@ defmodule Drafter.Widget.Chart.Pixel do
 
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Session.Context
+  alias Drafter.Visualization.Reduce
   alias FrenchCurve.Backend.Cells
   alias FrenchCurve.{Capability, Chart, Draw, Raster}
 
@@ -234,7 +235,32 @@ defmodule Drafter.Widget.Chart.Pixel do
     _ -> nil
   end
 
-  defp raster(%{type: type} = spec, w, h) when type in [:area, :braille_area] do
+  @line_types [:line, :step]
+  @area_types [:area, :braille_area, :stacked_area]
+
+  defp raster(spec, w, h), do: spec |> fit_to_width(w) |> draw_raster(w, h)
+
+  defp fit_to_width(%{type: type, data: data} = spec, w) when type in @line_types do
+    %{spec | data: fit_series(data, &Reduce.min_max(&1, w, fn item -> to_value(item) end))}
+  end
+
+  defp fit_to_width(%{type: type, data: [first | _] = data} = spec, w)
+       when type in @area_types and is_list(first) do
+    lists = Enum.filter(data, &value_list?/1)
+    %{spec | data: Reduce.aligned_peaks(lists, w, &to_value/1)}
+  end
+
+  defp fit_to_width(%{type: type, data: data} = spec, w) when type in @area_types do
+    %{spec | data: fit_series(data, &Reduce.peaks(&1, w, fn item -> to_value(item) end))}
+  end
+
+  defp fit_to_width(spec, _w), do: spec
+
+  defp fit_series([first | _] = data, reducer) when is_list(first), do: Enum.map(data, reducer)
+  defp fit_series([_ | _] = data, reducer), do: reducer.(data)
+  defp fit_series(data, _reducer), do: data
+
+  defp draw_raster(%{type: type} = spec, w, h) when type in [:area, :braille_area] do
     case classify(spec.data) do
       {:single, values} -> Chart.area(values, fc_opts(spec, w, h))
       {:multi, series} -> build_multi_area(series, spec, w, h)
@@ -242,7 +268,7 @@ defmodule Drafter.Widget.Chart.Pixel do
     end
   end
 
-  defp raster(%{type: :line} = spec, w, h) do
+  defp draw_raster(%{type: :line} = spec, w, h) do
     case classify(spec.data) do
       {:single, values} -> Chart.line(values, fc_opts(spec, w, h))
       {:multi, series} -> build_multi_line(series, spec, w, h)
@@ -250,11 +276,11 @@ defmodule Drafter.Widget.Chart.Pixel do
     end
   end
 
-  defp raster(%{type: :step} = spec, w, h) do
+  defp draw_raster(%{type: :step} = spec, w, h) do
     with_numbers(spec.data, &build_step(&1, spec, w, h))
   end
 
-  defp raster(%{type: :stacked_area} = spec, w, h) do
+  defp draw_raster(%{type: :stacked_area} = spec, w, h) do
     case classify(spec.data) do
       {:multi, series} -> build_stacked_area(series, spec, w, h)
       {:single, values} -> Chart.area(values, fc_opts(spec, w, h))
@@ -262,15 +288,15 @@ defmodule Drafter.Widget.Chart.Pixel do
     end
   end
 
-  defp raster(%{type: :bar} = spec, w, h) do
+  defp draw_raster(%{type: :bar} = spec, w, h) do
     with_numbers(spec.data, &build_bar(&1, spec, w, h))
   end
 
-  defp raster(%{type: :histogram} = spec, w, h) do
+  defp draw_raster(%{type: :histogram} = spec, w, h) do
     with_numbers(spec.data, &build_histogram(&1, spec, w, h))
   end
 
-  defp raster(%{type: :clustered_bar} = spec, w, h) do
+  defp draw_raster(%{type: :clustered_bar} = spec, w, h) do
     case classify(spec.data) do
       {:multi, series} -> build_grouped_bar(series, spec, w, h, :clustered)
       {:single, values} -> build_bar(values, spec, w, h)
@@ -278,7 +304,7 @@ defmodule Drafter.Widget.Chart.Pixel do
     end
   end
 
-  defp raster(%{type: :stacked_bar} = spec, w, h) do
+  defp draw_raster(%{type: :stacked_bar} = spec, w, h) do
     case classify(spec.data) do
       {:multi, series} -> build_grouped_bar(series, spec, w, h, :stacked)
       {:single, values} -> build_bar(values, spec, w, h)
@@ -286,14 +312,14 @@ defmodule Drafter.Widget.Chart.Pixel do
     end
   end
 
-  defp raster(%{type: :range_bar} = spec, w, h) do
+  defp draw_raster(%{type: :range_bar} = spec, w, h) do
     case ranges(spec.data) do
       [] -> nil
       pairs -> build_range_bar(pairs, spec, w, h)
     end
   end
 
-  defp raster(%{type: :scatter} = spec, w, h) do
+  defp draw_raster(%{type: :scatter} = spec, w, h) do
     case scatter_series(spec.data) do
       {:single, points} -> build_scatter(points, spec, w, h)
       {:multi, series} -> build_multi_scatter(series, spec, w, h)
@@ -301,36 +327,36 @@ defmodule Drafter.Widget.Chart.Pixel do
     end
   end
 
-  defp raster(%{type: :bubble} = spec, w, h) do
+  defp draw_raster(%{type: :bubble} = spec, w, h) do
     case scatter_points(spec.data) do
       [] -> nil
       points -> build_bubble(points, spec, w, h)
     end
   end
 
-  defp raster(%{type: :candlestick} = spec, w, h) do
+  defp draw_raster(%{type: :candlestick} = spec, w, h) do
     case candles(spec.data) do
       [] -> nil
       candles -> build_candlestick(candles, w, h)
     end
   end
 
-  defp raster(%{type: :heatmap} = spec, w, h) do
+  defp draw_raster(%{type: :heatmap} = spec, w, h) do
     case grid(spec.data) do
       [] -> nil
       rows -> build_heatmap(rows, w, h)
     end
   end
 
-  defp raster(%{type: :pie, slices: slices}, w, h) when slices != [] do
+  defp draw_raster(%{type: :pie, slices: slices}, w, h) when slices != [] do
     build_pie(slices, w, h)
   end
 
-  defp raster(%{type: :gauge, value: value, fill: fill, track: track}, w, h) do
+  defp draw_raster(%{type: :gauge, value: value, fill: fill, track: track}, w, h) do
     build_gauge(value, fill, track, w, h)
   end
 
-  defp raster(_spec, _w, _h), do: nil
+  defp draw_raster(_spec, _w, _h), do: nil
 
   defp with_numbers(data, fun) do
     case numbers(data) do
@@ -516,51 +542,47 @@ defmodule Drafter.Widget.Chart.Pixel do
   defp build_stacked_area(series, spec, w, h) do
     colors = palette_colors(spec)
     groups = series |> Enum.map(&length/1) |> Enum.max()
-
-    totals =
-      for g <- 0..(groups - 1)//1, do: Enum.reduce(series, 0, &(&2 + (Enum.at(&1, g) || 0)))
-
-    hi = Enum.max([1 | totals])
+    padded = Enum.map(series, &(&1 ++ List.duplicate(0, groups - length(&1))))
+    totals = Enum.zip_with(padded, &Enum.sum/1)
+    lo = Map.get(spec, :min) || 0
+    hi = Map.get(spec, :max) || Enum.max([1 | totals])
+    scale = {groups, w, h, lo, hi}
 
     {raster, _cum} =
-      series
+      padded
       |> Enum.with_index()
       |> Enum.reduce({Raster.new(w, h), List.duplicate(0.0, groups)}, fn {values, si},
                                                                          {acc, cum} ->
-        new_cum =
-          Enum.map(0..(groups - 1)//1, fn g -> Enum.at(cum, g) + (Enum.at(values, g) || 0) end)
-
-        top = stack_points(new_cum, groups, w, h, hi)
-        bottom = stack_points(cum, groups, w, h, hi)
+        new_cum = Enum.zip_with(cum, values, &(&1 + &2))
+        top = stack_points(new_cum, scale)
+        bottom = stack_points(cum, scale)
         {fill_band(acc, top, bottom, color_at(colors, si)), new_cum}
       end)
 
     raster
   end
 
-  defp stack_points(values, groups, w, h, hi) do
+  defp stack_points(values, {groups, w, h, lo, hi}) do
     values
     |> Enum.with_index()
-    |> Enum.map(fn {value, g} -> {x_index(g, groups, w), y_px(value, 0, hi, h)} end)
+    |> Enum.map(fn {value, g} -> {x_index(g, groups, w), y_px(value, lo, hi, h)} end)
   end
 
   defp fill_band(raster, top, bottom, color) do
-    Enum.zip(top, bottom)
-    |> Enum.chunk_every(2, 1, :discard)
-    |> Enum.reduce(raster, fn [{{tx1, ty1}, {_b1x, by1}}, {{tx2, ty2}, {_b2x, by2}}], acc ->
-      fill_band_segment(acc, {round(tx1), ty1, by1}, {round(tx2), ty2, by2}, color)
-    end)
+    columns =
+      Enum.zip(top, bottom)
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.flat_map(fn [{{tx1, ty1}, {_b1x, by1}}, {{tx2, ty2}, {_b2x, by2}}] ->
+        band_columns({round(tx1), ty1, by1}, {round(tx2), ty2, by2})
+      end)
+
+    Draw.fill_columns(raster, columns, color)
   end
 
-  defp fill_band_segment(raster, {xa, ta, ba}, {xb, tb, bb}, color) do
-    Enum.reduce(xa..xb, raster, fn col, acc ->
-      Draw.line(
-        acc,
-        {col, round(interp_y(xa, ta, xb, tb, col))},
-        {col, round(interp_y(xa, ba, xb, bb, col))},
-        color
-      )
-    end)
+  defp band_columns({xa, ta, ba}, {xb, tb, bb}) do
+    for col <- xa..xb do
+      {col, round(interp_y(xa, ta, xb, tb, col)), round(interp_y(xa, ba, xb, bb, col))}
+    end
   end
 
   defp interp_y(xa, ya, xb, _yb, _col) when xb == xa, do: ya
@@ -832,26 +854,32 @@ defmodule Drafter.Widget.Chart.Pixel do
   end
 
   defp fill_under(raster, points, baseline, color) do
-    points
-    |> Enum.chunk_every(2, 1, :discard)
-    |> Enum.reduce(raster, fn [a, b], acc -> fill_segment(acc, a, b, baseline, color) end)
+    columns =
+      points
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.flat_map(fn [a, b] -> segment_columns(a, b, baseline) end)
+
+    Draw.fill_columns(raster, columns, color)
   end
 
-  defp fill_segment(raster, {x1, y1}, {x2, y2}, baseline, color) do
+  defp segment_columns({x1, y1}, {x2, y2}, baseline) do
     xa = round(x1)
     xb = round(x2)
 
-    Enum.reduce(xa..xb, raster, fn col, acc ->
+    for col <- xa..xb do
       t = if xb == xa, do: y1, else: y1 + (y2 - y1) * (col - xa) / (xb - xa)
-      Draw.line(acc, {col, round(t)}, {col, baseline}, color)
-    end)
+      {col, round(t), baseline}
+    end
   end
 
   defp fill_disc(raster, {cx, cy}, radius, color) do
-    Enum.reduce(-radius..radius, raster, fn dy, acc ->
-      span = round(:math.sqrt(max(0, radius * radius - dy * dy)))
-      Draw.line(acc, {cx - span, cy + dy}, {cx + span, cy + dy}, color)
-    end)
+    spans =
+      for dy <- -radius..radius do
+        span = round(:math.sqrt(max(0, radius * radius - dy * dy)))
+        {cy + dy, cx - span, cx + span}
+      end
+
+    Raster.fill_spans(raster, spans, color)
   end
 
   defp fade({r, g, b, a}, opacity),

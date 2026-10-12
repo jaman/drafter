@@ -20,16 +20,14 @@ defmodule Drafter.Widget.Chart.Heatmap do
     num_rows = length(matrix)
     num_cols = matrix |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
 
-    row_mapping = map_indices(num_rows, height)
     col_mapping = map_indices(num_cols, width)
-
     indexed_matrix = index_matrix(matrix)
 
-    Enum.map(0..(height - 1)//1, fn term_row ->
+    num_rows
+    |> map_indices(height)
+    |> Enum.map(fn data_rows ->
       segments =
-        Enum.map(0..(width - 1)//1, fn term_col ->
-          data_rows = Enum.at(row_mapping, term_row, [])
-          data_cols = Enum.at(col_mapping, term_col, [])
+        Enum.map(col_mapping, fn data_cols ->
           avg = aggregate_cells(indexed_matrix, data_rows, data_cols)
           color = value_to_color(avg, min_val, max_val, default_bg)
           Segment.new(" ", %{bg: color})
@@ -67,14 +65,8 @@ defmodule Drafter.Widget.Chart.Heatmap do
 
   defp index_matrix(matrix) do
     matrix
-    |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {row, ri}, acc ->
-      row
-      |> Enum.with_index()
-      |> Enum.reduce(acc, fn {val, ci}, inner_acc ->
-        Map.put(inner_acc, {ri, ci}, val)
-      end)
-    end)
+    |> Enum.map(&List.to_tuple/1)
+    |> List.to_tuple()
   end
 
   defp aggregate_cells(_indexed, [], _cols), do: nil
@@ -84,8 +76,7 @@ defmodule Drafter.Widget.Chart.Heatmap do
     values =
       for r <- rows, c <- cols, reduce: [] do
         acc ->
-          case Map.get(indexed, {r, c}) do
-            nil -> acc
+          case cell(indexed, r, c) do
             val when is_number(val) -> [val | acc]
             _ -> acc
           end
@@ -95,6 +86,11 @@ defmodule Drafter.Widget.Chart.Heatmap do
       [] -> nil
       vals -> Enum.sum(vals) / length(vals)
     end
+  end
+
+  defp cell(indexed, r, c) do
+    row = elem(indexed, r)
+    if c < tuple_size(row), do: elem(row, c)
   end
 
   defp value_to_color(nil, _min, _max, default_bg), do: default_bg

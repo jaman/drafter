@@ -34,31 +34,39 @@ defmodule Drafter.Widget.Chart.Bar do
       Drafter.ScrollMath.end_anchored_slice(data_src, scroll_offset, width)
 
     viewport_labels = Enum.slice(state.bar_labels, start_index, width)
-    bars = build_v_bars(state, viewport_data, viewport_labels, levels)
-    bar_strips = build_v_bar_strips(bars, bar_height, width, bg, fg)
+    bars = build_v_bars(state, viewport_data, viewport_labels, bar_height)
+    bar_strips = build_v_bar_strips(bars, bar_height, width, levels, bg, fg)
     maybe_append_label_row(bar_strips, bars, label_row?, width, bg, fg)
   end
 
-  defp build_v_bars(state, viewport_data, viewport_labels, levels) do
+  defp build_v_bars(state, viewport_data, viewport_labels, bar_height) do
     viewport_data
     |> Enum.with_index()
     |> Enum.map(fn {value, i} ->
       normalized = Visualization.normalize(value, state.min_value, state.max_value)
-      idx = Visualization.level_index(normalized, levels)
-      char = Enum.at(levels, idx)
+      eighths = max(1, round(normalized * bar_height * 8))
       value_str = if state.show_values, do: Visualization.format_number(value), else: nil
       label = if state.show_labels, do: Enum.at(viewport_labels, i, ""), else: nil
-      {char, value_str, label}
+      {eighths, value_str, label}
     end)
   end
 
-  defp build_v_bar_strips(bars, bar_height, width, bg, fg) do
-    for _row <- 1..bar_height do
-      segs = Enum.map(bars, fn {char, _val, _lbl} -> Segment.new(char, %{fg: fg, bg: bg}) end)
+  defp build_v_bar_strips(bars, bar_height, width, levels, bg, fg) do
+    for row <- 0..(bar_height - 1)//1 do
+      cells_below = bar_height - 1 - row
+
+      segs =
+        Enum.map(bars, fn {eighths, _val, _lbl} ->
+          Segment.new(bar_cell(eighths - cells_below * 8, levels), %{fg: fg, bg: bg})
+        end)
+
       padding_count = max(0, width - length(segs))
       Strip.new(segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
     end
   end
+
+  defp bar_cell(eighths, _levels) when eighths <= 0, do: " "
+  defp bar_cell(eighths, levels), do: Enum.at(levels, min(eighths, length(levels)) - 1)
 
   defp maybe_append_label_row(bar_strips, bars, true, width, bg, fg) do
     label_segs =

@@ -4,8 +4,10 @@ defmodule Drafter.Widget.Chart.BrailleArea do
   import Bitwise
 
   alias Drafter.Draw.{Segment, Strip}
-  alias Drafter.Visualization.LTTB
+  alias Drafter.Visualization.Reduce
   alias Drafter.Widget.Chart.{Pixels, Shared}
+
+  @braille_dot_offsets Pixels.braille_dot_offsets()
 
   def render(state, width, height, bg) do
     raw = state.data
@@ -30,21 +32,28 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     pixel_h = height * 4
     pixel_w = width * 2
 
-    downsampled_series = Enum.map(series, &downsample_weighted_series(&1, pixel_w))
-    stacked = slice_and_stack(downsampled_series, pixel_w, state._internal.scroll_offset || 0)
+    stacked =
+      series
+      |> align_series()
+      |> Reduce.aligned_peaks(pixel_w, &elem(&1, 0))
+      |> slice_and_stack(
+        pixel_w,
+        state._internal.scroll_offset || 0,
+        Map.get(state._internal, :stacked, true)
+      )
 
     range_result = compute_stack_range(stacked, state.zero_center)
 
     base = %{
       stacked: stacked,
-      colors: colors,
+      colors: List.to_tuple(colors),
       num_series: num_series,
       pixel_h: pixel_h,
       pixel_w: pixel_w,
       char_w: width,
       fill_opacity: state.fill_opacity || 0.6,
       grid: :atomics.new(width * height, signed: false),
-      color_grid: Enum.map(0..(width * height - 1)//1, fn _ -> :atomics.new(3, signed: true) end)
+      color_grid: :atomics.new(width * height * 3, signed: true)
     }
 
     build_braille_area(range_result, base, state, width, height, bg)
@@ -84,15 +93,21 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     end
   end
 
-  defp slice_and_stack(series, pixel_w, scroll_offset) do
+  defp align_series(series) do
     normalized = Enum.map(series, &normalize_weighted_series/1)
+    max_len = normalized |> Enum.map(&length/1) |> Enum.max()
+    Enum.map(normalized, &pad_series(&1, max_len))
+  end
+
+  defp slice_and_stack(normalized, pixel_w, scroll_offset, stacked?) do
     max_len = normalized |> Enum.map(&length/1) |> Enum.max()
     end_idx = max(0, max_len - scroll_offset)
     start_idx = max(0, end_idx - pixel_w)
     visible_count = end_idx - start_idx
 
-    sliced = Enum.map(normalized, fn s -> Enum.slice(s, start_idx, visible_count) end)
-    build_stacked_columns(sliced, length(series))
+    normalized
+    |> Enum.map(&Enum.slice(&1, start_idx, visible_count))
+    |> build_stacked_columns(stacked?)
   end
 
   defp normalize_weighted_series(series) do
@@ -150,31 +165,40 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     if bits == 0 do
       braille_empty_cell(row, baseline_row, bg)
     else
-      braille_colored_cell(bits, Enum.at(color_grid, idx), bg)
+      braille_colored_cell(bits, color_grid, idx * 3, bg)
     end
   end
 
   defp braille_empty_cell(row, row, bg), do: Segment.new("⠒", %{fg: {60, 60, 60}, bg: bg})
   defp braille_empty_cell(_row, _baseline, bg), do: Segment.new(Pixels.braille_char(0), %{bg: bg})
 
-  defp braille_colored_cell(bits, color_ref, bg) do
+  defp braille_colored_cell(bits, color_grid, offset, bg) do
     fg_color =
-      {:atomics.get(color_ref, 1), :atomics.get(color_ref, 2), :atomics.get(color_ref, 3)}
+      {:atomics.get(color_grid, offset + 1), :atomics.get(color_grid, offset + 2),
+       :atomics.get(color_grid, offset + 3)}
 
     Segment.new(Pixels.braille_char(bits), %{fg: fg_color, bg: bg})
   end
 
-  defp build_stacked_columns(sliced, num_series) do
-    max_len = sliced |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+  defp build_stacked_columns(sliced, true), do: Enum.zip_with(sliced, &stack_column/1)
+  defp build_stacked_columns(sliced, false), do: Enum.zip_with(sliced, &overlay_column/1)
 
-    for col_idx <- 0..(max_len - 1)//1 do
-      Enum.reduce(0..(num_series - 1)//1, {0, 0, []}, fn si, acc ->
-        {val, weight} = sliced |> Enum.at(si) |> Enum.at(col_idx, {0, 1.0})
-        stack_value(val, weight, acc)
-      end)
-      |> elem(2)
-      |> Enum.reverse()
-    end
+  defp overlay_column(layers) do
+    Enum.map(layers, fn
+      {val, weight} when val >= 0 -> {0, val, weight}
+      {val, weight} -> {val, 0, weight}
+    end)
+  end
+
+  defp pad_series(series, max_len) do
+    series ++ List.duplicate({0, 1.0}, max_len - length(series))
+  end
+
+  defp stack_column(layers) do
+    layers
+    |> Enum.reduce({0, 0, []}, fn {val, weight}, acc -> stack_value(val, weight, acc) end)
+    |> elem(2)
+    |> Enum.reverse()
   end
 
   defp stack_value(val, weight, {pos_running, neg_running, acc}) when val >= 0 do
@@ -201,11 +225,13 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     char_col = div(col_idx, 2)
     local_x = rem(col_idx, 2)
 
-    Enum.each(0..(ctx.num_series - 1)//1, fn si ->
-      {bottom, top, weight} = extract_layer(Enum.at(col_layers, si))
+    col_layers
+    |> Enum.with_index()
+    |> Enum.each(fn {layer, si} ->
+      {bottom, top, weight} = extract_layer(layer)
 
       if bottom != top do
-        series_color = Enum.at(ctx.colors, rem(si, length(ctx.colors)))
+        series_color = elem(ctx.colors, rem(si, tuple_size(ctx.colors)))
         color = weight_modulate(series_color, weight)
         {lo_py, hi_py, top_py} = compute_pixel_range(bottom, top, ctx)
         paint_column_span(lo_py, hi_py, top_py, local_x, char_col, color, ctx)
@@ -268,42 +294,22 @@ defmodule Drafter.Widget.Chart.BrailleArea do
   end
 
   defp paint_braille_dot(py, local_x, char_col, color, ctx) do
-    braille_dot_offsets = Pixels.braille_dot_offsets()
     local_y = rem(py, 4)
     char_row = div(py, 4)
-    bit = Map.get(braille_dot_offsets, {local_x, local_y}, 0)
+    bit = Map.get(@braille_dot_offsets, {local_x, local_y}, 0)
     idx = char_row * ctx.char_w + char_col + 1
     max_idx = ctx.char_w * div(ctx.pixel_h, 4)
 
     if idx >= 1 and idx <= max_idx do
       old_bits = :atomics.get(ctx.grid, idx)
       :atomics.put(ctx.grid, idx, old_bits ||| bit)
-      set_cell_color(Enum.at(ctx.color_grid, idx - 1), color)
+      set_cell_color(ctx.color_grid, (idx - 1) * 3, color)
     end
   end
 
-  defp set_cell_color(color_ref, {r, g, b}) do
-    :atomics.put(color_ref, 1, r)
-    :atomics.put(color_ref, 2, g)
-    :atomics.put(color_ref, 3, b)
-  end
-
-  def downsample_weighted_series(series, target) when length(series) <= target, do: series
-
-  def downsample_weighted_series(series, target) do
-    values =
-      Enum.map(series, fn
-        {val, _weight} when is_number(val) -> val
-        val when is_number(val) -> val
-      end)
-
-    points = values |> Enum.with_index() |> Enum.map(fn {y, x} -> {x, y} end)
-    downsampled = LTTB.downsample(points, target)
-    indices = MapSet.new(Enum.map(downsampled, fn {x, _y} -> round(x) end))
-
-    series
-    |> Enum.with_index()
-    |> Enum.filter(fn {_elem, idx} -> MapSet.member?(indices, idx) end)
-    |> Enum.map(fn {elem, _idx} -> elem end)
+  defp set_cell_color(color_grid, offset, {r, g, b}) do
+    :atomics.put(color_grid, offset + 1, r)
+    :atomics.put(color_grid, offset + 2, g)
+    :atomics.put(color_grid, offset + 3, b)
   end
 end

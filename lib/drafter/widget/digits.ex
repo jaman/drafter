@@ -34,6 +34,10 @@ defmodule Drafter.Widget.Digits do
       Default `nil`. Overrides `:size` when set
     * `:size` - coarse size when no `:font` is given: `:large` (default, the
       `:block` font) or `:small` (the `:compact` font)
+    * `:fit` - list of font names, largest first. Default `nil`. When set it
+      overrides `:font` and `:size`: each render uses the first font whose height
+      and text width fit the widget's rect, or the last one when none fits. FIGlet
+      fonts must be registered first (see `Drafter.Widget.Digits.Figlet`)
     * `:renderer` - `:text` (default) draws cells; any other value transmits an
       image on a terminal supporting kitty, iTerm2, or sixel, falling back to cells
       where none is available
@@ -74,8 +78,15 @@ defmodule Drafter.Widget.Digits do
 
   alias Drafter.Widget.Digits.{Font, Image}
 
-  defp selected_font(state) do
-    Font.get(font_name(state))
+  defp selected_font(%{fit: [_ | _] = names}, digits, rect) do
+    text = Enum.join(digits)
+    names |> Enum.find(List.last(names), &fits?(&1, text, rect)) |> Font.get()
+  end
+
+  defp selected_font(state, _digits, _rect), do: Font.get(font_name(state))
+
+  defp fits?(name, text, rect) do
+    Font.height(name) <= rect.height and Font.text_width(name, text) <= rect.width
   end
 
   defp font_name(state) do
@@ -93,6 +104,7 @@ defmodule Drafter.Widget.Digits do
           align: :left | :center | :right,
           size: :large | :small,
           font: atom() | map() | nil,
+          fit: [atom()] | nil,
           renderer: atom(),
           bg_data: [number()] | nil,
           color: {0..255, 0..255, 0..255},
@@ -108,7 +120,7 @@ defmodule Drafter.Widget.Digits do
       {"42", :small, nil, :left}
 
       iex> Drafter.Widget.Digits.mount(%{})
-      %{text: "", style: %{}, align: :left, size: :large, font: nil, renderer: :text, bg_data: nil, color: {0, 150, 255}, bg_min: 0, bg_max: nil}
+      %{text: "", style: %{}, align: :left, size: :large, font: nil, fit: nil, renderer: :text, bg_data: nil, color: {0, 150, 255}, bg_min: 0, bg_max: nil}
   """
   @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
@@ -119,6 +131,7 @@ defmodule Drafter.Widget.Digits do
       align: Map.get(props, :align, :left),
       size: Map.get(props, :size, :large),
       font: Map.get(props, :font),
+      fit: Map.get(props, :fit),
       renderer: Map.get(props, :renderer, :text),
       bg_data: Map.get(props, :bg_data),
       color: Map.get(props, :color, {0, 150, 255}),
@@ -203,7 +216,10 @@ defmodule Drafter.Widget.Digits do
   @spec preferred_height(term(), keyword()) :: pos_integer()
   def preferred_height(_args, opts) do
     opts
-    |> Keyword.get(:font)
+    |> Keyword.get(:fit)
+    |> List.wrap()
+    |> List.first()
+    |> Kernel.||(Keyword.get(opts, :font))
     |> Kernel.||(size_font(Keyword.get(opts, :size, :large)))
     |> Font.height()
   end
@@ -235,6 +251,7 @@ defmodule Drafter.Widget.Digits do
       align: Keyword.get(opts, :align, :left),
       size: Keyword.get(opts, :size, :large),
       font: Keyword.get(opts, :font),
+      fit: Keyword.get(opts, :fit),
       renderer: Keyword.get(opts, :renderer, :text),
       bg_data: Keyword.get(opts, :bg_data),
       color: Keyword.get(opts, :color, {0, 150, 255}),
@@ -253,6 +270,7 @@ defmodule Drafter.Widget.Digits do
       text: mount_props.text,
       size: mount_props.size,
       font: mount_props.font,
+      fit: Map.get(mount_props, :fit),
       style: mount_props.style,
       align: mount_props.align,
       renderer: mount_props.renderer,
@@ -325,7 +343,7 @@ defmodule Drafter.Widget.Digits do
   end
 
   defp render_with_bg(digits, data, state, rect) do
-    font = selected_font(state)
+    font = selected_font(state, digits, rect)
 
     computed = Computed.for_widget(:digits, state, style: state.style)
     digit_fg = Map.get(Computed.to_segment_style(computed), :fg)
@@ -441,7 +459,7 @@ defmodule Drafter.Widget.Digits do
     computed = Computed.for_widget(:digits, state, style: state.style)
     effective_style = Computed.to_segment_style(computed)
 
-    font = selected_font(state)
+    font = selected_font(state, digits, rect)
     digit_height = font.height
 
     digit_rows =
