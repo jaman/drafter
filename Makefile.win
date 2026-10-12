@@ -1,0 +1,5 @@
+all:
+	@echo drafter: raw mode and pseudoterminals are POSIX only, so Windows builds no native code and uses the Elixir fallbacks
+
+clean:
+	@echo drafter: no native code to clean on Windows

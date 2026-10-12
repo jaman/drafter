@@ -150,7 +150,8 @@ defmodule Drafter.Transport.SSH do
   catch
     :exit, :noproc -> :ok
     :exit, {:noproc, _call} -> :ok
-    :exit, {:shutdown, {:sys, :terminate, _args}} -> :ok
+    :exit, {:shutdown, _call} -> :ok
+    :exit, {:normal, _call} -> :ok
   end
 
   defp daemons(binds, port, daemon_opts) do

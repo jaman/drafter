@@ -4,7 +4,7 @@ defmodule Drafter.MixProject do
   def project do
     [
       app: :drafter,
-      version: "0.5.0",
+      version: "0.5.1",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:elixir_make | Mix.compilers()],
@@ -152,7 +152,8 @@ defmodule Drafter.MixProject do
   defp package do
     [
       maintainers: ["Drafter"],
-      files: ~w(lib c_src guides Makefile mix.exs .formatter.exs README.md CHANGELOG.md),
+      files:
+        ~w(lib c_src guides Makefile Makefile.win mix.exs .formatter.exs README.md CHANGELOG.md),
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/jaman/drafter"}
     ]

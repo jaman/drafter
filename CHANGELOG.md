@@ -4,6 +4,14 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## Unreleased
+
+### Fixed
+
+- `Drafter.Pty.close/2` releases the descriptors only on its first call. A second call closed the same descriptor numbers again, and by then the system could have given them to another pty, which was closed under its owner; async tests opening ptys failed with "Device not configured". `resize/3` on a closed handle returns `{:error, :ioctl_failed}` without touching the numbers.
+- `Drafter.Transport.SSH.stop/2` and `stop_listening/1` return `:ok` when the daemon ends by itself while they stop it, where they used to exit with `shutdown`.
+- Builds on Windows: `Makefile.win` builds nothing, since raw mode and pseudoterminals are POSIX only, and the Elixir fallbacks in `Drafter.Terminal.TermiosNif` are used.
+
 ## [0.5.0]
 
 ### Breaking changes

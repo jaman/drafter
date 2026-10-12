@@ -37,14 +37,15 @@ defmodule Drafter.Pty do
 
   @sigkill 9
 
-  defstruct [:control, :io, :master, :slave, :slave_path]
+  defstruct [:control, :io, :master, :slave, :slave_path, :open]
 
   @type t :: %__MODULE__{
           control: port(),
           io: port(),
           master: integer(),
           slave: integer(),
-          slave_path: binary()
+          slave_path: binary(),
+          open: :atomics.atomics_ref()
         }
 
   @default_term "xterm-256color"
@@ -96,7 +97,8 @@ defmodule Drafter.Pty do
          io: io,
          master: master,
          slave: slave,
-         slave_path: slave_path
+         slave_path: slave_path,
+         open: open_flag()
        }}
     end
   end
@@ -116,8 +118,10 @@ defmodule Drafter.Pty do
   no longer a pty, which is the case once `close/1` has run.
   """
   @spec resize(t(), pos_integer(), pos_integer()) :: :ok | {:error, :ioctl_failed}
-  def resize(%__MODULE__{master: master}, cols, rows) do
-    TermiosNif.set_winsize(master, cols, rows, 0, 0)
+  def resize(%__MODULE__{master: master, open: open}, cols, rows) do
+    if :atomics.get(open, 1) == 1,
+      do: TermiosNif.set_winsize(master, cols, rows, 0, 0),
+      else: {:error, :ioctl_failed}
   end
 
   @doc """
@@ -139,7 +143,9 @@ defmodule Drafter.Pty do
 
   Closes both ports and releases both descriptors. Releasing the last descriptor
   makes the kernel send `SIGHUP` to the session, ending the program if it is still
-  running. Safe to call more than once; the handle is unusable afterwards.
+  running. Only the first call releases the descriptors, so a later call never closes
+  descriptor numbers the system has since given to something else; the handle is
+  unusable afterwards.
 
   ## Options
 
@@ -160,12 +166,22 @@ defmodule Drafter.Pty do
   def close(%__MODULE__{} = pty, opts \\ []) do
     os_pid = pty |> os_pid() |> pid_or_nil()
 
+    if :atomics.compare_exchange(pty.open, 1, 1, 0) == :ok, do: release(pty)
+
+    escalate(os_pid, Keyword.get(opts, :kill_after))
+  end
+
+  defp release(pty) do
     close_port(pty.io)
     close_port(pty.control)
     TermiosNif.close_fd(pty.slave)
     TermiosNif.close_fd(pty.master)
+  end
 
-    escalate(os_pid, Keyword.get(opts, :kill_after))
+  defp open_flag do
+    flag = :atomics.new(1, [])
+    :atomics.put(flag, 1, 1)
+    flag
   end
 
   defp unavailable do
