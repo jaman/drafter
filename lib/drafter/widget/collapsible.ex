@@ -43,6 +43,10 @@ defmodule Drafter.Widget.Collapsible do
       ignored
     * `:focused` - `t:boolean/0` initial focus flag. Default `false`
     * `:hovered` - `t:boolean/0` initial hover flag. Default `false`
+    * `:summary` - `t:String.t/0` shown dimmed at the right end of the toggle row.
+      Default `nil`
+    * `:rule` - `t:boolean/0`, fill the toggle row between the title and the summary
+      with a dimmed horizontal line. Default `false`
 
   `update/2` merges the whole props map into the state, so every option is live;
   `:content_height` is recomputed from the default only when the content switches
@@ -95,7 +99,9 @@ defmodule Drafter.Widget.Collapsible do
     :expanded,
     :focused,
     :hovered,
-    :on_toggle
+    :on_toggle,
+    :summary,
+    rule: false
   ]
 
   @type t :: %__MODULE__{
@@ -105,7 +111,9 @@ defmodule Drafter.Widget.Collapsible do
           expanded: boolean(),
           focused: boolean(),
           hovered: boolean(),
-          on_toggle: (boolean() -> term()) | nil
+          on_toggle: (boolean() -> term()) | nil,
+          summary: String.t() | nil,
+          rule: boolean()
         }
 
   @doc """
@@ -137,7 +145,9 @@ defmodule Drafter.Widget.Collapsible do
       expanded: Map.get(props, :expanded, false),
       focused: Map.get(props, :focused, false),
       hovered: Map.get(props, :hovered, false),
-      on_toggle: Map.get(props, :on_toggle)
+      on_toggle: Map.get(props, :on_toggle),
+      summary: Map.get(props, :summary),
+      rule: Map.get(props, :rule, false)
     }
   end
 
@@ -163,14 +173,8 @@ defmodule Drafter.Widget.Collapsible do
     title_style = Computed.to_segment_style(title_computed)
     arrow_style = Computed.to_segment_style(arrow_computed)
 
-    title_text = " " <> state.title
-    padded_title = String.pad_trailing(title_text, rect.width - 2)
-
-    title_strip =
-      Strip.new([
-        Segment.new(arrow, arrow_style),
-        Segment.new(padded_title, title_style)
-      ])
+    muted_style = Map.put(title_style, :fg, theme.text_muted)
+    title_strip = header_strip(state, rect, arrow, arrow_style, title_style, muted_style)
 
     if state.expanded do
       content_strips = render_content(state.content, state.content_height, rect, bg_style)
@@ -191,6 +195,32 @@ defmodule Drafter.Widget.Collapsible do
         [title_strip]
       end
     end
+  end
+
+  defp header_strip(
+         %{rule: false, summary: nil} = state,
+         rect,
+         arrow,
+         arrow_style,
+         title_style,
+         _muted
+       ) do
+    padded_title = String.pad_trailing(" " <> state.title, rect.width - 2)
+    Strip.new([Segment.new(arrow, arrow_style), Segment.new(padded_title, title_style)])
+  end
+
+  defp header_strip(state, rect, arrow, arrow_style, title_style, muted_style) do
+    title = " " <> state.title <> " "
+    summary = if state.summary in [nil, ""], do: "", else: " " <> state.summary
+    fill_width = max(0, rect.width - 2 - String.length(title) - String.length(summary))
+    fill = String.duplicate(if(state.rule, do: "─", else: " "), fill_width)
+
+    Strip.new([
+      Segment.new(arrow, arrow_style),
+      Segment.new(title, title_style),
+      Segment.new(fill, muted_style),
+      Segment.new(summary, muted_style)
+    ])
   end
 
   @doc """

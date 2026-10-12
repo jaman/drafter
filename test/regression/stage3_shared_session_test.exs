@@ -10,7 +10,7 @@ defmodule Drafter.Regression.Stage3SharedSessionTest do
 
     def mount(_props), do: %{messages: 0}
     def render(state), do: vertical([label("messages: #{state.messages}")])
-    def handle_event({:char, ?m}, state), do: {:ok, %{state | messages: state.messages + 1}}
+    def handle_event({:key, :m}, state), do: {:ok, %{state | messages: state.messages + 1}}
     def handle_event(_event, state), do: {:noreply, state}
   end
 
@@ -34,7 +34,7 @@ defmodule Drafter.Regression.Stage3SharedSessionTest do
 
     wait_until(fn -> text(a) =~ "messages: 0" and text(b) =~ "messages: 0" end)
 
-    CellSession.feed_input(a, {:char, ?m})
+    CellSession.feed_input(a, {:key, :m})
 
     wait_until(fn -> text(a) =~ "messages: 1" end)
     wait_until(fn -> text(b) =~ "messages: 1" end)

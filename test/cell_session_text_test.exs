@@ -25,7 +25,7 @@ defmodule Drafter.CellSessionTextTest do
       ])
     end
 
-    def handle_event({:char, ?!}, state), do: {:ok, %{state | name: "again"}}
+    def handle_event({:key, :!}, state), do: {:ok, %{state | name: "again"}}
     def handle_event(_event, state), do: {:noreply, state}
   end
 
@@ -61,7 +61,7 @@ defmodule Drafter.CellSessionTextTest do
 
   describe "take_text/1" do
     test "reflects input fed into the session", %{session: session} do
-      CellSession.feed_input(session, {:char, ?!})
+      CellSession.feed_input(session, {:key, :!})
 
       wait_until(fn -> CellSession.take_text(session) =~ "hello again" end)
 

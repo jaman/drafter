@@ -202,7 +202,7 @@ defmodule Drafter.Compositor do
       * `:stamp` — generation counter for this `id`, default `0`
       * `:place` — sequence that redraws the image the terminal is already holding,
         default `nil`
-      * `:crop` — `Drafter.Render.Picture.crop/0` naming the stored kitty image, default
+      * `:crop` — `t:Drafter.Render.Picture.crop/0` naming the stored kitty image, default
         `nil`. With it, `paint` must store the image under that id without drawing it;
         the compositor draws it with placements it builds, of the whole image or of
         the part inside the window, and `:place` is not used

@@ -262,6 +262,7 @@ defmodule Drafter.App do
   """
 
   alias Drafter.{Event, Widget}
+  alias Drafter.Terminal.ANSI
 
   @type props :: map()
   @type state :: term()
@@ -443,6 +444,7 @@ defmodule Drafter.App do
       @behaviour Drafter.App
       import Drafter.App
       @before_compile Drafter.App
+      @on_definition {Drafter.App, :__check_key_clause__}
 
       @css_path Keyword.get(unquote(opts), :css_path)
       @inline_styles Keyword.get(unquote(opts), :styles, %{})
@@ -604,6 +606,33 @@ defmodule Drafter.App do
       end
     end
   end
+
+  @doc false
+  def __check_key_clause__(env, :def, :handle_event, [{:char, code} | _] = args, _guards, _body)
+      when code in 32..126 do
+    key = ANSI.printable_key(code)
+
+    IO.warn(
+      "handle_event/#{length(args)} matches {:char, #{code}}, but a typed #{inspect(<<code>>)} arrives as " <>
+        "{:key, #{inspect(key)}}, so this clause never runs for a key press. " <>
+        "Match {:key, #{inspect(key)}} or declare `keybinding #{inspect(key)}, \"hint\" do ... end`.",
+      Macro.Env.stacktrace(env)
+    )
+  end
+
+  def __check_key_clause__(env, :def, :handle_event, [{:key, code} | _] = args, _guards, _body)
+      when code in 32..126 do
+    key = ANSI.printable_key(code)
+
+    IO.warn(
+      "handle_event/#{length(args)} matches {:key, #{code}}, but keys arrive as atoms: a typed " <>
+        "#{inspect(<<code>>)} is {:key, #{inspect(key)}}, so this clause never runs. " <>
+        "Match {:key, #{inspect(key)}} or declare `keybinding #{inspect(key)}, \"hint\" do ... end`.",
+      Macro.Env.stacktrace(env)
+    )
+  end
+
+  def __check_key_clause__(_env, _kind, _name, _args, _guards, _body), do: :ok
 
   defp build_key_pattern({key, mods}) when is_list(mods) do
     quote do: {:key, unquote(key), unquote(mods)}
@@ -1167,8 +1196,7 @@ defmodule Drafter.App do
   `children` is a list of child elements, laid out inside the rect left after the
   border and padding are subtracted.
 
-  Options beyond the shared element keys — these four are the only ones this element
-  forwards to `Drafter.Widget.Box`:
+  Options beyond the shared element keys, forwarded to `Drafter.Widget.Box`:
 
     * `:title` - `String.t()` embedded in the top border. Default `nil`.
     * `:border` - `:none`, `:single`, `:double`, `:rounded`, `:heavy`, `:dashed`, or
@@ -1177,10 +1205,14 @@ defmodule Drafter.App do
     * `:padding` - `non_neg_integer()` cells inside the border. Default: the
       character set's padding, falling back to `1` — not `0`.
     * `:style` - `map()` of style attributes for the box as a whole. Default `%{}`.
+    * `:border_style` - `map()` of style attributes for the border characters, such as
+      `%{fg: {r, g, b}}`. Default `%{}`.
+    * `:title_style` - `map()` of style attributes for the title text. Default `%{}`.
+    * `:highlight_focus` - `boolean()`, draw the border and title in the theme's primary
+      colour while a widget inside the box has keyboard focus. Default `false`.
 
-  `:border_style`, `:title_style`, `:content_style` and `:classes` are documented on
-  `Drafter.Widget.Box` because its `mount/1` reads them, but this element does not
-  forward them and passing them here does nothing.
+  `:content_style` and `:classes` are documented on `Drafter.Widget.Box` because its
+  `mount/1` reads them, but this element does not forward them.
 
       iex> box([label("Ready")], title: "Status", border: :double)
       {:box, [{:label, "Ready", []}], [title: "Status", border: :double]}
@@ -1665,14 +1697,18 @@ defmodule Drafter.App do
   shown while expanded. `Drafter.get_widget_value/1` returns the expanded
   `boolean()`, and a focused collapsible consumes `Enter` and `Space`.
 
-  Options beyond the shared element keys — these three are the only ones this
-  element forwards to `Drafter.Widget.Collapsible`:
+  Options beyond the shared element keys, forwarded to
+  `Drafter.Widget.Collapsible`:
 
     * `:expanded` - `boolean()` initial state. Default `false`.
     * `:on_toggle` - atom event name or one-arity function receiving the new
       `boolean()`. Default `nil`.
     * `:content_height` - `pos_integer()` rows reserved for the expanded content.
       Default `nil`, i.e. the content's own preferred height.
+    * `:summary` - `String.t()` shown dimmed at the right end of the toggle row.
+      Default `nil`.
+    * `:rule` - `boolean()`, draw a dimmed line across the toggle row between the
+      title and the summary. Default `false`.
 
   Its widget id is not positional: absent an `:id` or `:key`, the generated id is
   derived from a hash of `title`, so two collapsibles with the same title in one
@@ -1796,6 +1832,8 @@ defmodule Drafter.App do
       Default `false`.
     * `:show_vertical_scrollbar` - `:auto` (default), `:always`, or `:never`.
     * `:show_horizontal_scrollbar` - `:never` (default), `:auto`, or `:always`.
+    * `:scrollbar` - `:block` (default, the skin's solid thumb) or `:thin` (a line
+      thumb on a dim line track).
     * `:height` - `pos_integer()` used as the element's preferred height in a
       parent's layout. Default: the summed heights of `children`.
 

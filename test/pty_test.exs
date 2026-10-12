@@ -2,6 +2,7 @@ defmodule Drafter.PtyTest do
   use ExUnit.Case, async: true
 
   alias Drafter.Pty
+  alias Drafter.Terminal.TermiosNif
 
   defp collect(pty, acc \\ [], timeout \\ 15_000) do
     io = pty.io
@@ -90,19 +91,13 @@ defmodule Drafter.PtyTest do
     Pty.close(pty)
   end
 
-  test "resize/3 changes the size the program reports" do
-    {:ok, pty} =
-      Pty.spawn("/bin/sh",
-        args: ["-c", "echo READY; read line; stty size"],
-        cols: 80,
-        rows: 24
-      )
+  test "resize/3 sets the size the pseudoterminal reports" do
+    {:ok, pty} = Pty.spawn("/bin/cat", cols: 80, rows: 24)
 
-    await(pty, "READY")
     :ok = Pty.resize(pty, 120, 50)
-    Pty.write(pty, "\n")
 
-    assert await(pty, "50 120")
+    assert {:ok, {120, 50, _, _}} = TermiosNif.get_winsize(pty.slave)
+    assert {:ok, {120, 50, _, _}} = TermiosNif.get_winsize(pty.master)
 
     Pty.close(pty)
   end

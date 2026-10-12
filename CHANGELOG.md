@@ -8,6 +8,13 @@ Versions marked with ★ were published to Hex.pm.
 
 ### Added
 
+- `:braille_area` charts accept `zero_center: :linear`: data crossing zero gets one linear axis from the lowest to the highest value, with zero where it falls.
+- `box/2` forwards `:border_style` and `:title_style`, and `Drafter.Widget.Box` applies `:border_style` to the border characters.
+- `box/2` takes `highlight_focus: true`: the border and title are drawn in the theme's primary colour while a widget inside the box has keyboard focus. The widget hierarchy keeps each box's `:focus_within` flag current as focus moves, is cleared, or its widget is removed.
+- `collapsible/3` takes `:summary`, dimmed text at the right end of the toggle row, and `:rule`, a dimmed line between the title and the summary. Title, summary and rule changes reach an already-mounted collapsible.
+- `scrollable/2` takes `scrollbar: :thin`: a line thumb in the primary colour on a dim line track.
+- `use Drafter.App` warns at compile time about a `handle_event` clause that can never run for a key press: one matching `{:char, c}` for printable ASCII (typing sends `{:key, :a}`) or `{:key, c}` with an integer (keys are atoms). The warning names the clause to write instead, or the `keybinding` declaration.
+
 - `Drafter.Visualization.Reduce`: `peaks/3`, `aligned_peaks/3`, `min_max/3` and `m4/2` reduce a series to the columns a plot can show while keeping its extremes and the original items.
 - Pixel, braille and cell-set charts fit their data to the raster width before drawing: line and step charts keep each column's minimum and maximum, area charts each column's peak, stacked series at shared indices.
 - Charts draw the y axis, the x axis line and the title around the plot in every renderer; a pixel chart's image fills the plot area inside them (`dx`/`dy` on its `Drafter.Render.Picture`).
@@ -24,8 +31,14 @@ Versions marked with ★ were published to Hex.pm.
 
 ### Fixed
 
+- A chart can no longer be scrolled past its data by dragging or with the arrow keys; `Drafter.ScrollMath.end_anchored_slice/3` on a tuple returns an empty slice for an empty window instead of raising. Dragging a bar chart far to the right used to crash the app.
+- Bar, clustered, stacked and histogram charts of non-negative data start their value range at 0, so bars grow from zero; text-mode vertical bars widen to fill the plot when there are fewer bars than columns.
+- Text-mode charts with axes and no title no longer leave an empty row above the x axis.
+- Axis labels at zero read `0.000` rather than `-0.000`.
+- Clicking a one-character footer hint sends the event typing it would send — `{:key, :a}` for printable ASCII — instead of `{:char, ?a}`, which no app clause written for the keyboard matched.
+
 - `Drafter.Pty.close/2` releases the descriptors only on its first call. A second call closed the same descriptor numbers again, and by then the system could have given them to another pty, which was closed under its owner; async tests opening ptys failed with "Device not configured". `resize/3` on a closed handle returns `{:error, :ioctl_failed}` without touching the numbers.
-- `Drafter.Transport.SSH.stop/2` and `stop_listening/1` return `:ok` when the daemon ends by itself while they stop it, where they used to exit with `shutdown`.
+- `Drafter.Server.stop_ssh/2` and `Drafter.Server.stop_ssh_listening/1` return `:ok` when the daemon ends by itself while they stop it, where they used to exit with `shutdown`.
 - Builds on Windows: `Makefile.win` builds nothing, since raw mode and pseudoterminals are POSIX only, and the Elixir fallbacks in `Drafter.Terminal.TermiosNif` are used.
 
 ## [0.5.0]
@@ -114,7 +127,7 @@ Versions marked with ★ were published to Hex.pm.
   with `Esc` or `No`, not only with `Enter`; `15_screens` and `widgets` show "none yet"
   instead of `nil` before anything is chosen.
 
-- A theme or skin change redraws every widget at once (`Drafter.WidgetServer.restyle/1`). A
+- A theme or skin change redraws every widget at once. A
   widget whose props had not changed kept the old theme until something else redrew it,
   such as the header until its clock's next second.
   An app returned to after another one changed the theme is redrawn in the new theme.

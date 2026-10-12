@@ -387,6 +387,9 @@ defmodule Drafter.ComponentRenderer do
     border = Keyword.get(opts, :border, CharacterSet.style(:border) || :rounded)
     padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
     custom_style = Keyword.get(opts, :style, %{})
+    border_style = Keyword.get(opts, :border_style, %{})
+    title_style = Keyword.get(opts, :title_style, %{})
+    highlight_focus = Keyword.get(opts, :highlight_focus, false)
     border_offset = if border == :none, do: 0, else: 1
 
     mount_props = %{
@@ -394,10 +397,21 @@ defmodule Drafter.ComponentRenderer do
       border: border,
       padding: padding,
       style: custom_style,
+      border_style: border_style,
+      title_style: title_style,
+      highlight_focus: highlight_focus,
       app_module: ctx.app_module
     }
 
-    update_props = %{title: title, border: border, padding: padding, style: custom_style}
+    update_props = %{
+      title: title,
+      border: border,
+      padding: padding,
+      style: custom_style,
+      border_style: border_style,
+      title_style: title_style,
+      highlight_focus: highlight_focus
+    }
 
     content_rect = %{
       x: rect.x + border_offset + padding,
@@ -479,8 +493,15 @@ defmodule Drafter.ComponentRenderer do
     on_toggle_fn =
       if on_toggle, do: fn value -> send_app_callback(on_toggle, value) end, else: nil
 
+    header = %{
+      title: title,
+      summary: Keyword.get(opts, :summary),
+      rule: Keyword.get(opts, :rule, false)
+    }
+
     mount_props =
-      %{title: title, content: content, expanded: expanded, on_toggle: on_toggle_fn}
+      %{content: content, expanded: expanded, on_toggle: on_toggle_fn}
+      |> Map.merge(header)
       |> then(fn p ->
         if content_height, do: Map.put(p, :content_height, content_height), else: p
       end)
@@ -490,6 +511,7 @@ defmodule Drafter.ComponentRenderer do
         hierarchy,
         widget_id,
         mount_props,
+        header,
         content_height,
         on_toggle_fn,
         rect,
@@ -616,13 +638,17 @@ defmodule Drafter.ComponentRenderer do
          hierarchy,
          widget_id,
          mount_props,
+         header,
          content_height,
          on_toggle_fn,
          rect,
          parent_id
        ) do
     if Map.has_key?(hierarchy.widgets, widget_id) do
-      updated_props = collapsible_update_props(mount_props.content, content_height, on_toggle_fn)
+      updated_props =
+        mount_props.content
+        |> collapsible_update_props(content_height, on_toggle_fn)
+        |> Map.merge(header)
 
       hierarchy
       |> WidgetHierarchy.update_widget_rect(widget_id, rect)
@@ -774,7 +800,8 @@ defmodule Drafter.ComponentRenderer do
       show_vertical_scrollbar: Keyword.get(opts, :show_vertical_scrollbar, :auto),
       show_horizontal_scrollbar: Keyword.get(opts, :show_horizontal_scrollbar, :never),
       click_to_scroll: click_to_scroll,
-      focusable: focusable
+      focusable: focusable,
+      scrollbar: Keyword.get(opts, :scrollbar, :block)
     }
 
     scrollbar_rect = %{

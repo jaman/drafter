@@ -206,6 +206,8 @@ defmodule Drafter.WidgetHierarchy do
         hierarchy
 
       widget_info ->
+        hierarchy = clear_focus_within(hierarchy, widget_id)
+
         if widget_info.pid do
           WidgetServer.stop(widget_info.pid)
         end
@@ -238,6 +240,11 @@ defmodule Drafter.WidgetHierarchy do
         }
     end
   end
+
+  defp clear_focus_within(%{focused_widget: widget_id} = hierarchy, widget_id),
+    do: Drafter.WidgetHierarchy.Focus.sync_focus_within(hierarchy, widget_id, nil)
+
+  defp clear_focus_within(hierarchy, _widget_id), do: hierarchy
 
   defp detach_from_parent(widgets, _widget_id, nil), do: widgets
 

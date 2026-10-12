@@ -46,6 +46,9 @@ defmodule Drafter.Widget.ScrollableContainer do
     * `:show_horizontal_scrollbar` - `:auto | :always | :never`. Default `:never`.
       Held on the state and never read; no horizontal scrollbar is drawn.
       Mount-only.
+    * `:scrollbar` - `:block` (default) draws the skin's solid thumb on a shaded
+      track; `:thin` draws a `┃` thumb in the primary colour on a dim `│` track with
+      no fill. Mount-only.
     * `:click_to_scroll` - `t:boolean/0`. Default `false`. Held on the state and
       only consulted together with the internal `:scroll_locked` flag, which
       nothing sets, so it has no effect on rendering. Clicking the track above or
@@ -104,7 +107,8 @@ defmodule Drafter.Widget.ScrollableContainer do
     :hovering_scrollbar,
     :drag_thumb_offset,
     :click_to_scroll,
-    :scroll_locked
+    :scroll_locked,
+    scrollbar: :block
   ]
 
   @type t :: %__MODULE__{
@@ -124,7 +128,8 @@ defmodule Drafter.Widget.ScrollableContainer do
           hovering_scrollbar: boolean(),
           drag_thumb_offset: non_neg_integer(),
           click_to_scroll: boolean(),
-          scroll_locked: boolean()
+          scroll_locked: boolean(),
+          scrollbar: :block | :thin
         }
 
   @type viewport :: %{
@@ -170,7 +175,8 @@ defmodule Drafter.Widget.ScrollableContainer do
       hovering_scrollbar: false,
       drag_thumb_offset: 0,
       click_to_scroll: Map.get(props, :click_to_scroll, false),
-      scroll_locked: false
+      scroll_locked: false,
+      scrollbar: Map.get(props, :scrollbar, :block)
     }
   end
 
@@ -246,6 +252,13 @@ defmodule Drafter.Widget.ScrollableContainer do
     end)
   end
 
+  defp scrollbar_styles(%{scrollbar: :thin}, theme) do
+    %{
+      track: %{fg: theme.text_disabled, bg: theme.background},
+      thumb: %{fg: theme.primary, bg: theme.background}
+    }
+  end
+
   defp scrollbar_styles(state, theme) do
     track_style =
       if state.click_to_scroll and state.scroll_locked,
@@ -260,6 +273,8 @@ defmodule Drafter.Widget.ScrollableContainer do
     }
   end
 
+  defp scrollbar_cell(false, %{scrollbar: :thin}, styles), do: {"│", styles.track}
+  defp scrollbar_cell(true, %{scrollbar: :thin}, styles), do: {"┃", styles.thumb}
   defp scrollbar_cell(false, _state, styles), do: {CharacterSet.scroll(:track), styles.track}
 
   defp scrollbar_cell(true, %{dragging_scrollbar: true}, styles),

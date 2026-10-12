@@ -2,7 +2,7 @@ defmodule Drafter.Transport.SSH.Sessions do
   @moduledoc """
   The ssh sessions each ssh server runs, so a server stopping can end them cleanly.
 
-  A server started by `Drafter.Transport.SSH.start_link/2` is a listener: a reference
+  A server started by `Drafter.Server.start_ssh/2` is a listener: a reference
   its daemons are recorded under (`listen/2`). Each session's shell process joins its
   listener with its terminal driver (`join/2`). `close/2` ends every session of a
   daemon's listener: each client's terminal is restored, shown the notice and its

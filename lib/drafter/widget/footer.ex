@@ -45,7 +45,8 @@ defmodule Drafter.Widget.Footer do
   The footer is not focusable and handles no keys. A hover moves the highlight to
   the binding under the pointer, and a mouse release on a binding sends the
   corresponding key event through `Drafter.Event.Manager`. A label of one byte
-  becomes a `{:char, codepoint}` event, a label in the built-in table becomes its
+  becomes the event typing it produces — `{:key, :a}` for printable ASCII, as
+  `Drafter.Terminal.ANSI` reports it — a label in the built-in table becomes its
   `{:key, atom}` event, a label with `+` becomes `{:key, key, modifiers}`, and any
   other label is downcased and converted to an atom.
 
@@ -61,6 +62,7 @@ defmodule Drafter.Widget.Footer do
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Event
   alias Drafter.Style.Computed
+  alias Drafter.Terminal.ANSI
 
   defstruct [
     :bindings,
@@ -352,6 +354,9 @@ defmodule Drafter.Widget.Footer do
     "F12" => {:key, :f12}
   }
 
+  defp typed_event(code) when code in 32..126, do: {:key, ANSI.printable_key(code)}
+  defp typed_event(code), do: {:char, code}
+
   defp key_label_to_event(label) do
     case Map.fetch(@key_label_map, label) do
       {:ok, event} ->
@@ -367,7 +372,7 @@ defmodule Drafter.Widget.Footer do
 
     case parts do
       [single] when byte_size(single) == 1 ->
-        {:char, :binary.first(single)}
+        typed_event(:binary.first(single))
 
       [single] ->
         {:key, String.to_atom(String.downcase(single))}

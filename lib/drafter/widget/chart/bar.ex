@@ -35,8 +35,9 @@ defmodule Drafter.Widget.Chart.Bar do
 
     viewport_labels = Enum.slice(state.bar_labels, start_index, width)
     bars = build_v_bars(state, viewport_data, viewport_labels, bar_height)
-    bar_strips = build_v_bar_strips(bars, bar_height, width, levels, bg, fg)
-    maybe_append_label_row(bar_strips, bars, label_row?, width, bg, fg)
+    slot = max(1, div(width, max(1, length(bars))))
+    bar_strips = build_v_bar_strips(bars, bar_height, width, slot, levels, bg, fg)
+    maybe_append_label_row(bar_strips, bars, label_row?, width, slot, bg, fg)
   end
 
   defp build_v_bars(state, viewport_data, viewport_labels, bar_height) do
@@ -51,16 +52,20 @@ defmodule Drafter.Widget.Chart.Bar do
     end)
   end
 
-  defp build_v_bar_strips(bars, bar_height, width, levels, bg, fg) do
+  defp build_v_bar_strips(bars, bar_height, width, slot, levels, bg, fg) do
+    filled = if slot >= 3, do: slot - 1, else: slot
+
     for row <- 0..(bar_height - 1)//1 do
       cells_below = bar_height - 1 - row
 
       segs =
-        Enum.map(bars, fn {eighths, _val, _lbl} ->
-          Segment.new(bar_cell(eighths - cells_below * 8, levels), %{fg: fg, bg: bg})
+        Enum.flat_map(bars, fn {eighths, _val, _lbl} ->
+          cell = String.duplicate(bar_cell(eighths - cells_below * 8, levels), filled)
+          gap = String.duplicate(" ", slot - filled)
+          [Segment.new(cell, %{fg: fg, bg: bg}), Segment.new(gap, %{bg: bg})]
         end)
 
-      padding_count = max(0, width - length(segs))
+      padding_count = max(0, width - slot * length(bars))
       Strip.new(segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
     end
   end
@@ -68,13 +73,13 @@ defmodule Drafter.Widget.Chart.Bar do
   defp bar_cell(eighths, _levels) when eighths <= 0, do: " "
   defp bar_cell(eighths, levels), do: Enum.at(levels, min(eighths, length(levels)) - 1)
 
-  defp maybe_append_label_row(bar_strips, bars, true, width, bg, fg) do
+  defp maybe_append_label_row(bar_strips, bars, true, width, slot, bg, fg) do
     label_segs =
       Enum.map(bars, fn {_, _, lbl} ->
-        Segment.new(String.slice(lbl || "", 0, 1), %{fg: fg, bg: bg})
+        Segment.new(String.pad_trailing(String.slice(lbl || "", 0, slot), slot), %{fg: fg, bg: bg})
       end)
 
-    padding_count = max(0, width - length(label_segs))
+    padding_count = max(0, width - slot * length(label_segs))
 
     label_strip =
       Strip.new(label_segs ++ List.duplicate(Segment.new(" ", %{bg: bg}), padding_count))
@@ -82,7 +87,7 @@ defmodule Drafter.Widget.Chart.Bar do
     bar_strips ++ [label_strip]
   end
 
-  defp maybe_append_label_row(bar_strips, _bars, false, _width, _bg, _fg), do: bar_strips
+  defp maybe_append_label_row(bar_strips, _bars, false, _width, _slot, _bg, _fg), do: bar_strips
 
   def render_bar_chart_h(state, width, height, bg, fg) do
     data_src = state._internal.data_tuple || state.data

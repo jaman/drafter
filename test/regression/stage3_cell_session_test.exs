@@ -10,7 +10,7 @@ defmodule Drafter.Regression.Stage3CellSessionTest do
 
     def mount(_props), do: %{count: 0}
     def render(state), do: vertical([label("count: #{state.count}")])
-    def handle_event({:char, ?+}, state), do: {:ok, %{state | count: state.count + 1}}
+    def handle_event({:key, :+}, state), do: {:ok, %{state | count: state.count + 1}}
     def handle_event(_event, state), do: {:noreply, state}
   end
 
@@ -33,7 +33,7 @@ defmodule Drafter.Regression.Stage3CellSessionTest do
 
     {_first_diff, session} = CellSession.take_cells_diff(session)
 
-    CellSession.feed_input(session, {:char, ?+})
+    CellSession.feed_input(session, {:key, :+})
     wait_until(fn -> text(CellSession.take_cells(session)) =~ "count: 1" end)
 
     {changed, _session} = CellSession.take_cells_diff(session)

@@ -140,6 +140,10 @@ defmodule Drafter.Widget.Chart.BrailleArea do
     {data_min, max(1, abs(data_min)), :negative}
   end
 
+  defp classify_stack_range(data_min, data_max, :linear) do
+    {data_min, data_max - data_min, :linear}
+  end
+
   defp classify_stack_range(data_min, data_max, :independent) do
     {min(data_min, -0.001), max(data_max, 0.001), :split}
   end

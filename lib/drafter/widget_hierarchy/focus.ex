@@ -42,6 +42,7 @@ defmodule Drafter.WidgetHierarchy.Focus do
       final_hierarchy = scroll_widget_into_view(final_hierarchy, widget_id, direction)
 
       %{final_hierarchy | focused_widget: widget_id, focus_cleared: false, pending_focus: nil}
+      |> sync_focus_within(hierarchy.focused_widget, widget_id)
     else
       hierarchy
     end
@@ -55,13 +56,56 @@ defmodule Drafter.WidgetHierarchy.Focus do
   @spec blur_widget(WidgetHierarchy.t(), WidgetHierarchy.widget_id()) :: WidgetHierarchy.t()
   def blur_widget(%{focused_widget: widget_id} = hierarchy, widget_id) do
     {blurred, _} = EventRouter.handle_widget_event(hierarchy, widget_id, {:blur})
+
     %{blurred | focused_widget: nil, focus_cleared: true}
+    |> sync_focus_within(widget_id, nil)
   end
 
   def blur_widget(%{pending_focus: widget_id} = hierarchy, widget_id),
     do: %{hierarchy | focus_cleared: true, pending_focus: nil}
 
   def blur_widget(hierarchy, _widget_id), do: %{hierarchy | focus_cleared: true}
+
+  @doc """
+  Moves `focus_within` from the boxes enclosing `previous` to the boxes enclosing
+  `current`, either of which may be `nil`. Boxes on both paths keep the flag.
+  """
+  @spec sync_focus_within(hierarchy(), widget_id() | nil, widget_id() | nil) :: hierarchy()
+  def sync_focus_within(hierarchy, same, same), do: hierarchy
+
+  def sync_focus_within(hierarchy, previous, current) do
+    before = enclosing_boxes(hierarchy, previous)
+    now = enclosing_boxes(hierarchy, current)
+
+    hierarchy
+    |> set_focus_within(before -- now, false)
+    |> set_focus_within(now -- before, true)
+  end
+
+  defp enclosing_boxes(_hierarchy, nil), do: []
+
+  defp enclosing_boxes(hierarchy, widget_id) do
+    case Map.get(hierarchy.widgets, widget_id) do
+      %{parent: nil} -> []
+      %{parent: parent} -> box_ids(hierarchy, parent) ++ enclosing_boxes(hierarchy, parent)
+      nil -> []
+    end
+  end
+
+  defp box_ids(hierarchy, widget_id) do
+    case Map.get(hierarchy.widgets, widget_id) do
+      %{module: Drafter.Widget.Box} -> [widget_id]
+      _other -> []
+    end
+  end
+
+  defp set_focus_within(hierarchy, box_ids, value) do
+    Enum.reduce(
+      box_ids,
+      hierarchy,
+      &WidgetHierarchy.update_widget(&2, &1, %{focus_within: value})
+    )
+  end
 
   @doc """
   Scroll a widget's container so the widget is visible.

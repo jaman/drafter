@@ -34,9 +34,13 @@ defmodule Drafter.Widget.Box do
     * `:title_style` — map of style overrides for the title text
     * `:content_style` — map of style overrides for the interior fill
     * `:classes` — list of theme class atoms
+    * `:highlight_focus` — `t:boolean/0`, draw the border and title in the theme's
+      primary colour while a widget inside the box has keyboard focus (default
+      `false`). The widget hierarchy keeps the box's `:focus_within` flag current
+      as focus moves
 
-  `:border_style`, `:title_style`, `:content_style` and `:classes` are read by
-  `mount/1` only; the `{:box, children, opts}` element does not forward them.
+  `:content_style` and `:classes` are read by `mount/1` only; the
+  `{:box, children, opts}` element does not forward them.
 
   Every option is live-updatable: `update/2` merges the props map into the state.
 
@@ -50,6 +54,7 @@ defmodule Drafter.Widget.Box do
   alias Drafter.CharacterSet
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
+  alias Drafter.ThemeManager
 
   @type border :: :none | :single | :double | :rounded | :heavy | :dashed | :ascii
 
@@ -62,7 +67,9 @@ defmodule Drafter.Widget.Box do
           title_style: map(),
           content_style: map(),
           classes: [atom()],
-          app_module: module() | nil
+          app_module: module() | nil,
+          highlight_focus: boolean(),
+          focus_within: boolean()
         }
 
   @border_chars %{
@@ -84,7 +91,9 @@ defmodule Drafter.Widget.Box do
     :title_style,
     :content_style,
     :classes,
-    :app_module
+    :app_module,
+    highlight_focus: false,
+    focus_within: false
   ]
 
   @doc """
@@ -112,7 +121,9 @@ defmodule Drafter.Widget.Box do
       title_style: Map.get(props, :title_style, %{}),
       content_style: Map.get(props, :content_style, %{}),
       classes: Map.get(props, :classes, []),
-      app_module: Map.get(props, :app_module)
+      app_module: Map.get(props, :app_module),
+      highlight_focus: Map.get(props, :highlight_focus, false),
+      focus_within: Map.get(props, :focus_within, false)
     }
   end
 
@@ -138,8 +149,14 @@ defmodule Drafter.Widget.Box do
     border_fg = computed[:border_color] || {100, 100, 120}
 
     base_style = %{fg: fg, bg: bg}
-    border_style_map = %{fg: border_fg, bg: bg}
-    title_style_map = Map.merge(%{fg: {150, 200, 255}, bg: bg, bold: true}, state.title_style)
+
+    border_style_map =
+      %{fg: border_fg, bg: bg} |> Map.merge(state.border_style) |> focus_accent(state)
+
+    title_style_map =
+      %{fg: {150, 200, 255}, bg: bg, bold: true}
+      |> Map.merge(state.title_style)
+      |> focus_accent(state)
 
     chars = Map.get(@border_chars, state.border, @border_chars[:rounded])
     has_border = state.border != :none
@@ -204,6 +221,11 @@ defmodule Drafter.Widget.Box do
   def handle_event(_event, state) do
     {:noreply, state}
   end
+
+  defp focus_accent(style, %{highlight_focus: true, focus_within: true}),
+    do: Map.put(style, :fg, ThemeManager.get_current_theme().primary)
+
+  defp focus_accent(style, _state), do: style
 
   defp render_top_border(chars, width, title, border_style, title_style) do
     inner_width = max(0, width - 2)

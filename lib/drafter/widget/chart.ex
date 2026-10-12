@@ -143,9 +143,10 @@ defmodule Drafter.Widget.Chart do
     * `:show_baseline` — `t:boolean/0`, draw the zero baseline row on stacked
       braille areas. Default `false`
     * `:zero_center` — how a stacked range spanning zero is scaled: `:symmetric`
-      (default, equal extent either side of zero) or `:independent` to let the
-      positive and negative extents differ. Ignored when the data does not cross
-      zero
+      (default, equal extent either side of zero), `:independent` to let the
+      positive and negative extents differ, each half scaled on its own, or
+      `:linear`, one scale from the lowest to the highest value with zero where
+      it falls. Ignored when the data does not cross zero
     * `:smooth` — `t:boolean/0`, interpolate between points on line charts.
       Default `false`
     * `:stacked` — `t:boolean/0`, on `:braille_area` charts stack each series on
@@ -294,7 +295,7 @@ defmodule Drafter.Widget.Chart do
           show_values: boolean(),
           bar_gap: non_neg_integer(),
           show_baseline: boolean(),
-          zero_center: :symmetric | :independent,
+          zero_center: :symmetric | :independent | :linear,
           focused: boolean(),
           _internal: map()
         }
@@ -431,15 +432,21 @@ defmodule Drafter.Widget.Chart do
   Pans the chart.
 
   `:left`/`:ArrowLeft` and `:right`/`:ArrowRight` move the X scroll offset by 5 data
-  points, clamped at `0` on the left. `:up`/`:ArrowUp` and `:down`/`:ArrowDown` move
-  the Y offset by one unit, unclamped. The codepoint `?c` resets the Y offset to
-  `0`. All of those return `{:ok, state}`. `:escape` hides the value readout and
-  bubbles; every other key returns `{:bubble, state}`.
+  points, clamped at `0` on the left and at one less than the longest series on
+  the right. `:up`/`:ArrowUp` and `:down`/`:ArrowDown` move the Y offset by one
+  unit, unclamped. The codepoint `?c` resets the Y offset to `0`. All of those
+  return `{:ok, state}`. `:escape` hides the value readout and bubbles; every
+  other key returns `{:bubble, state}`.
 
-      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3]})
+      iex> c = Drafter.Widget.Chart.mount(%{data: Enum.to_list(1..20)})
       iex> {:ok, scrolled} = Drafter.Widget.Chart.handle_key(:right, c)
       iex> scrolled._internal.scroll_offset
       5
+
+      iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3]})
+      iex> {:ok, clamped} = Drafter.Widget.Chart.handle_key(:right, c)
+      iex> clamped._internal.scroll_offset
+      2
 
       iex> c = Drafter.Widget.Chart.mount(%{data: [1, 2, 3]})
       iex> {:ok, clamped} = Drafter.Widget.Chart.handle_key(:left, c)
@@ -484,8 +491,8 @@ defmodule Drafter.Widget.Chart do
 
   The first drag event after a press only records the anchor point and leaves the
   offsets alone. Subsequent events move the X scroll offset by the leftward pointer
-  delta, clamped at `0`, and the Y offset by the downward delta. Always returns
-  `{:ok, state}`.
+  delta, clamped as `handle_key/2` clamps it, and the Y offset by the downward
+  delta. Always returns `{:ok, state}`.
   """
   @spec handle_drag(integer(), integer(), t()) :: {:ok, t()}
   @impl Drafter.Widget
@@ -496,7 +503,7 @@ defmodule Drafter.Widget.Chart do
   def handle_drag(x, y, state) do
     dx = (state._internal.drag_last_x || x) - x
     dy = y - (state._internal.drag_last_y || y)
-    new_x_offset = max(0, (state._internal.scroll_offset || 0) + dx)
+    new_x_offset = clamp_scroll(state, (state._internal.scroll_offset || 0) + dx)
     new_y_offset = (state._internal.y_offset || 0) + dy
 
     {:ok,
@@ -737,7 +744,9 @@ defmodule Drafter.Widget.Chart do
     {bg, fg} = chart_colors(state)
 
     axis_label_width = if state.show_axes, do: compute_y_axis_width(state), else: 0
-    chart_height = if state.show_axes, do: max(1, rect.height - 2), else: rect.height
+    title_rows = if is_binary(state.title) and state.title != "", do: 1, else: 0
+    axis_rows = if state.show_axes, do: 1, else: 0
+    chart_height = max(1, rect.height - title_rows - axis_rows)
 
     chart_width =
       if state.show_axes, do: max(1, rect.width - axis_label_width - 1), else: rect.width
@@ -755,13 +764,13 @@ defmodule Drafter.Widget.Chart do
           do: axis_label_width + 1,
           else: 0
         ),
-      dy: if(is_binary(state.title) and state.title != "", do: 1, else: 0),
+      dy: title_rows,
       cols: chart_width,
       rows: chart_height
     }
 
     effective_state
-    |> then(&apply_axes(strips, &1, rect, bg, fg))
+    |> then(&apply_axes(strips, &1, %{rect | height: chart_height + 2}, bg, fg))
     |> apply_title(state, rect, bg, fg)
     |> pad_strips(rect.height)
     |> Readout.decorate(state, box, Readout.index(state, box, :text), fg)
@@ -1005,7 +1014,19 @@ defmodule Drafter.Widget.Chart do
        update_internal(state, scroll_offset: max(0, (state._internal.scroll_offset || 0) - 5))}
 
   defp scroll_right(state),
-    do: {:ok, update_internal(state, scroll_offset: (state._internal.scroll_offset || 0) + 5)}
+    do:
+      {:ok,
+       update_internal(state,
+         scroll_offset: clamp_scroll(state, (state._internal.scroll_offset || 0) + 5)
+       )}
+
+  defp clamp_scroll(state, offset), do: offset |> min(max_scroll(state)) |> max(0)
+
+  defp max_scroll(%{data: [first | _] = data}) when is_list(first),
+    do: data |> Enum.map(&length/1) |> Enum.max() |> Kernel.-(1) |> max(0)
+
+  defp max_scroll(%{data: data}) when is_list(data), do: max(0, length(data) - 1)
+  defp max_scroll(_state), do: 0
 
   defp init_live_candle(data) when is_list(data) and data != [] do
     last_candle = List.last(data)
@@ -1074,9 +1095,14 @@ defmodule Drafter.Widget.Chart do
       {min_val - 0.001, max_val + 0.001}
     else
       padding = (max_val - min_val) * 0.05
-      {min_val - padding, max_val + padding}
+      {bar_floor(Map.get(props, :chart_type), min_val, padding), max_val + padding}
     end
   end
+
+  @bar_types [:bar, :clustered_bar, :stacked_bar, :histogram]
+
+  defp bar_floor(type, min_val, _padding) when type in @bar_types and min_val >= 0, do: 0
+  defp bar_floor(_type, min_val, padding), do: min_val - padding
 
   defp extract_values(data, chart_type) when chart_type in [:scatter, :bubble],
     do: Enum.flat_map(data, &point_height/1)
@@ -1144,12 +1170,16 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
+  defp snap_zero(value, span) when abs(value) < abs(span) * 1.0e-9, do: 0.0
+  defp snap_zero(value, _span), do: value
+
   defp axed_strips(strips, state, rect, bg, fg, label_width, axis_col_width) do
     tick_span = max(rect.height - 3, 1)
 
     y_axis_segments =
       for i <- 0..tick_span do
-        y_val = state.max_value - (state.max_value - state.min_value) * i / tick_span
+        span = state.max_value - state.min_value
+        y_val = snap_zero(state.max_value - span * i / tick_span, span)
         label = format_axis_value(y_val, state._internal[:precision] || 3)
 
         Segment.new(IO.iodata_to_binary([String.pad_leading(label, label_width), "│"]), %{

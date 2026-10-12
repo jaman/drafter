@@ -51,7 +51,7 @@ defmodule Drafter.ScrollMath do
   def end_anchored_slice(data, scroll_offset, viewport_size) when is_tuple(data) do
     total = tuple_size(data)
     {start, len} = end_anchored_range(total, scroll_offset, viewport_size)
-    slice = for i <- start..(start + len - 1), i < total, do: elem(data, i)
+    slice = for i <- start..(start + len - 1)//1, i < total, do: elem(data, i)
     {start, slice}
   end
 
