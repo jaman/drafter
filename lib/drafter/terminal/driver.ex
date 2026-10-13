@@ -556,7 +556,7 @@ defmodule Drafter.Terminal.Driver do
   defp keyboard_query(true), do: [KittyKeyboard.query()]
   defp keyboard_query(false), do: []
 
-  defp cell_size_query(true), do: [Reports.cell_size_query()]
+  defp cell_size_query(true), do: [Reports.size_queries()]
   defp cell_size_query(false), do: []
 
   defp keyboard_protocol_off(true), do: [KittyKeyboard.pop()]

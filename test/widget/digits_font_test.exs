@@ -38,10 +38,16 @@ defmodule Drafter.Widget.DigitsFontTest do
       end
     end
 
-    test "lower case falls back to the upper-case glyph" do
-      for name <- Font.names() do
+    test "a font without lower case draws it in upper case" do
+      for name <- Font.names(), "a" not in Font.repertoire(name) do
         assert Font.glyph(name, "a") == Font.glyph(name, "A")
         assert Font.supports?(name, "z")
+      end
+    end
+
+    test "the rasterised fonts draw lower case in its own shapes" do
+      for name <- [:tall, :pixel, :braille] do
+        refute Font.glyph(name, "a") == Font.glyph(name, "A")
       end
     end
   end

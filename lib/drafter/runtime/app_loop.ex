@@ -202,6 +202,22 @@ defmodule Drafter.Runtime.AppLoop do
     handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
   end
 
+  defp dispatch_loop_msg(
+         {:tui_event, {:window_pixels, size} = event},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
+    Context.put_window_pixels(size)
+    handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
+  end
+
+  defp dispatch_loop_msg(
+         {:tui_event, {:text_cells, size} = event},
+         {app_module, app_state, rect, timers, wh, ss}
+       ) do
+    Context.put_text_cells(size)
+    handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
+  end
+
   defp dispatch_loop_msg({:tui_event, event}, {app_module, app_state, rect, timers, wh, ss}) do
     if Drafter.Trace.enabled?(),
       do: Drafter.Trace.log_sync(["I ", Drafter.Trace.ts(), " ", inspect(event), "\n"])

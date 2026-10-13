@@ -3,7 +3,9 @@ defmodule Drafter.Widget.Chart.Readout do
 
   alias Drafter.Draw.{Segment, Strip}
 
-  @readout_types [:line, :braille, :step, :area, :braille_area, :stacked_area]
+  @line_types [:line, :braille, :step, :area, :braille_area, :stacked_area]
+  @bar_types [:bar, :clustered_bar, :stacked_bar, :range_bar]
+  @readout_types @line_types ++ @bar_types
   @marker_bg {70, 70, 95}
   @default_colors [{100, 200, 255}]
 
@@ -16,36 +18,81 @@ defmodule Drafter.Widget.Chart.Readout do
 
   def readout_type?(chart_type), do: chart_type in @readout_types
 
-  def index(state, box, mode) do
-    with x when is_integer(x) <- Map.get(state._internal, :cursor_x),
-         true <- readout_type?(state.chart_type),
-         true <- x >= box.dx and x < box.dx + box.cols,
-         [_ | _] = series <- series(state.data) do
-      longest = series |> Enum.map(&length/1) |> Enum.max()
-      data_index(state, mode, x - box.dx, box.cols, longest)
+  def index(state, box) do
+    with true <- readout_type?(state.chart_type),
+         {:ok, offset, span} <- pointer(state, box),
+         [_ | _] = series <- series(state),
+         shown when shown > 0 <- shown_length(series, state) do
+      position(state.chart_type, offset, span, shown)
     else
       _ -> nil
     end
   end
 
-  def decorate(strips, _state, _box, nil, _fg, _mode), do: strips
+  defp pointer(state, box) do
+    x = Map.get(state._internal, :cursor_x)
+    y = Map.get(state._internal, :cursor_y)
 
-  def decorate(strips, state, box, index, fg, :pixel) do
-    x = Map.fetch!(state._internal, :cursor_x)
-
-    strips
-    |> Enum.with_index()
-    |> Enum.map(fn {strip, row} -> decorate_row(strip, row, x, box) end)
-    |> put_readout(readout_strip(state, index, fg), title_width(state))
+    cond do
+      not (is_integer(x) and x >= box.dx and x < box.dx + box.cols) -> :outside
+      not horizontal_bars?(state) -> {:ok, x - box.dx, box.cols}
+      is_integer(y) and y >= box.dy and y < box.dy + box.rows -> {:ok, y - box.dy, box.rows}
+      true -> :outside
+    end
   end
 
-  def decorate(strips, state, box, index, fg, _mode) do
+  defp horizontal_bars?(state),
+    do: state.chart_type in @bar_types and state.orientation == :horizontal
+
+  defp position(type, offset, span, shown) when type in @bar_types do
+    visible = min(shown, span)
+    shown - visible + min(visible - 1, div(offset * visible, span))
+  end
+
+  defp position(_type, offset, span, shown),
+    do: round(offset / max(span - 1, 1) * (shown - 1))
+
+  def decorate(strips, _state, _box, nil, _fg), do: strips
+
+  def decorate(strips, state, box, index, fg) do
     x = Map.fetch!(state._internal, :cursor_x)
 
     strips
     |> Enum.with_index()
     |> Enum.map(fn {strip, row} -> decorate_row(strip, row, x, box) end)
     |> put_tooltip(tooltip(state, index, fg, box), x, box)
+  end
+
+  def image_overlay(_state, _box, nil, _fg), do: {nil, []}
+
+  def image_overlay(state, box, index, fg) do
+    col = Map.fetch!(state._internal, :cursor_x) - box.dx
+    lines = tooltip(state, index, fg, box)
+    left = tooltip_left(lines, col + box.dx, box) - box.dx
+
+    cells =
+      for {strip, row} <- Enum.with_index(lines),
+          {char, offset, style} <- strip_cells(strip),
+          do: {left + offset, row, char, rgba(style[:fg]), rgba(style[:bg])}
+
+    {{col, @marker_bg}, cells}
+  end
+
+  defp strip_cells(strip) do
+    strip.segments
+    |> Enum.flat_map(fn segment ->
+      segment.text |> String.graphemes() |> Enum.map(&{&1, segment.style})
+    end)
+    |> Enum.with_index()
+    |> Enum.map(fn {{char, style}, offset} -> {char, offset, style} end)
+  end
+
+  defp rgba({r, g, b}), do: {r, g, b, 255}
+  defp rgba(_other), do: nil
+
+  defp shown_length(series, state) do
+    longest = series |> Enum.map(&length/1) |> Enum.max()
+    longest - min(Map.get(state._internal, :scroll_offset) || 0, longest - 1)
   end
 
   @tooltip_bg {28, 30, 38}
@@ -84,7 +131,7 @@ defmodule Drafter.Widget.Chart.Readout do
     colors =
       if state.colors == [], do: [state.color || fg || hd(@default_colors)], else: state.colors
 
-    state.data
+    state
     |> series()
     |> Enum.with_index()
     |> Enum.flat_map(fn {values, si} ->
@@ -94,12 +141,18 @@ defmodule Drafter.Widget.Chart.Readout do
 
         value ->
           [
-            {series_name(names, si), formatter.(value), Enum.at(colors, rem(si, length(colors))),
-             value}
+            {series_name(names, si), text(value, formatter),
+             Enum.at(colors, rem(si, length(colors))), sort_key(value)}
           ]
       end
     end)
   end
+
+  defp text({:range, low, high}, formatter), do: formatter.(low) <> " – " <> formatter.(high)
+  defp text(value, formatter), do: formatter.(value)
+
+  defp sort_key({:range, _low, high}), do: high
+  defp sort_key(value), do: value
 
   defp series_name(names, si) do
     case Enum.at(names, si) do
@@ -163,10 +216,13 @@ defmodule Drafter.Widget.Chart.Readout do
     [top | middle] ++ [bottom]
   end
 
-  defp put_tooltip(strips, tooltip, x, box) do
+  defp tooltip_left(tooltip, x, box) do
     width = tooltip |> hd() |> Map.fetch!(:width)
-    right_edge = box.dx + box.cols
-    left = if x + 2 + width <= right_edge, do: x + 2, else: max(box.dx, x - 1 - width)
+    if x + 2 + width <= box.dx + box.cols, do: x + 2, else: max(box.dx, x - 1 - width)
+  end
+
+  defp put_tooltip(strips, tooltip, x, box) do
+    left = tooltip_left(tooltip, x, box)
     top = box.dy
 
     strips
@@ -199,41 +255,12 @@ defmodule Drafter.Widget.Chart.Readout do
     |> Strip.combine(right)
   end
 
-  defp put_readout([], _readout, _title_width), do: []
-
-  defp put_readout([first | rest], readout, title_width) do
-    {title, after_title} = Strip.divide(first, title_width)
-    {_covered, uncovered} = Strip.divide(after_title, readout.width)
-    [title |> Strip.combine(readout) |> Strip.combine(uncovered) | rest]
-  end
-
-  defp title_width(%{title: title}) when is_binary(title) and title != "",
-    do: String.length(title) + 1
-
-  defp title_width(_state), do: 0
-
-  defp readout_strip(state, index, fg) do
-    colors =
-      if state.colors == [], do: [state.color || fg || hd(@default_colors)], else: state.colors
-
-    values =
-      state.data
-      |> series()
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {values, si} ->
-        value_segments(Enum.at(values, index), Enum.at(colors, rem(si, length(colors))))
-      end)
-
-    Strip.new([Segment.new(" #{x_label(state, index)} ", %{bold: true, bg: @marker_bg}) | values])
-  end
-
-  defp value_segments(nil, _color), do: []
-
-  defp value_segments(value, color) do
-    [
-      Segment.new(" ■", %{fg: color, bg: @marker_bg}),
-      Segment.new(" #{format(value)} ", %{bg: @marker_bg})
-    ]
+  defp x_label(%{chart_type: type, bar_labels: [_ | _] = labels} = state, index)
+       when type in @bar_types do
+    case Enum.at(labels, index) do
+      nil -> x_label(%{state | bar_labels: []}, index)
+      label -> to_string(label)
+    end
   end
 
   defp x_label(%{x_labels: labels}, index) when is_list(labels) and labels != [] do
@@ -252,40 +279,18 @@ defmodule Drafter.Widget.Chart.Readout do
 
   defp format(value), do: :erlang.float_to_binary(value * 1.0, decimals: 2)
 
-  defp data_index(_state, mode, col, cols, longest) when mode != :text do
-    round(col / max(cols - 1, 1) * (longest - 1))
-  end
+  defp series(%{chart_type: :range_bar, data: [_ | _] = data}), do: [Enum.map(data, &range/1)]
+  defp series(%{data: data}), do: series_of(data)
 
-  defp data_index(%{chart_type: :braille_area}, :text, col, cols, longest) do
-    dot = col * 2
-    dots = cols * 2
-
-    cond do
-      longest > dots -> round(dot / max(dots - 1, 1) * (longest - 1))
-      dot < longest -> dot
-      true -> nil
-    end
-  end
-
-  defp data_index(%{data: [first | _], _internal: %{raw_data: true}}, :text, col, cols, longest)
-       when is_list(first) do
-    index = round(col * 2 * longest / (cols * 2))
-    if index < longest, do: index
-  end
-
-  defp data_index(state, :text, col, cols, longest) do
-    scroll = state._internal.scroll_offset || 0
-    end_index = longest - scroll
-    start = max(0, end_index - cols * 2)
-    dot = col * 2
-    if dot < end_index - start, do: start + dot
-  end
-
-  defp series([first | _] = data) when is_list(first),
+  defp series_of([first | _] = data) when is_list(first),
     do: for(list <- data, is_list(list), do: values(list))
 
-  defp series([_ | _] = data), do: [values(data)]
-  defp series(_data), do: []
+  defp series_of([_ | _] = data), do: [values(data)]
+  defp series_of(_data), do: []
+
+  defp range([low, high]) when is_number(low) and is_number(high), do: {:range, low, high}
+  defp range({low, high}) when is_number(low) and is_number(high), do: {:range, low, high}
+  defp range(_other), do: nil
 
   defp values(list), do: Enum.map(list, &value/1)
 

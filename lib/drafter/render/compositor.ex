@@ -5,11 +5,11 @@ defmodule Drafter.Compositor do
   The screen buffer is a list of `Drafter.Draw.Strip`, one per row, each padded to the
   screen width. `render_strips/3` blits strips into it at a cell position; the frame is
   written on the next `:render_frame` message, and only rows whose cache key changed are
-  sent, wrapped in synchronized-update markers unless `DRAFTER_NO_SYNC` is set. Every
-  byte for the terminal goes through the session's `Drafter.Render.Writer`. While text
-  handed to it is still unwritten no new frame is written, so a link that cannot keep up
-  sees fewer, complete frames, the rows changed meanwhile merged into one diff; a frame's
-  image bytes follow its text and are written only while no newer image has arrived.
+  sent. A frame's text and image bytes are one write, wrapped in synchronized-update
+  markers unless `DRAFTER_NO_SYNC` is set, so the terminal shows a frame whole. Every
+  byte for the terminal goes through the session's `Drafter.Render.Writer`. While a
+  frame handed to it is still unwritten no new frame is written, so a link that cannot
+  keep up sees fewer, complete frames, the changes made meanwhile merged into one.
 
       Drafter.Compositor.render_strips([Drafter.Draw.Strip.from_text("hello")], 2, 0)
 
@@ -159,6 +159,20 @@ defmodule Drafter.Compositor do
   end
 
   @doc """
+  Apply one frame: its image changes, then its strips blitted at the top left.
+
+  `image_ops` are applied in order, each as the call of the same name would apply it:
+  `{:put, id, paint, clear, region}` (`put_image/4`), `{:place, id, x, y, window}`
+  (`place_image/4`) and `{:clear, id}` (`clear_image/1`). The text and images of the
+  frame are then written together, so the terminal never shows the frame's text with
+  another frame's images. Asynchronous.
+  """
+  @spec present_frame([Strip.t()], [tuple()]) :: :ok
+  def present_frame(strips, image_ops) do
+    GenServer.cast(resolve(), {:present_frame, strips, image_ops})
+  end
+
+  @doc """
   Blank the whole screen buffer and withdraw every image region.
 
   Each image's `clear` sequence is queued so the terminal releases it. The regions
@@ -265,7 +279,7 @@ defmodule Drafter.Compositor do
 
   The id's stamp is forgotten either way, so the next `put_image/4` for it is
   accepted whatever its stamp. A region that is already hidden or has no bytes yet
-  is only marked hidden, and an unknown id is ignored; neither schedules a frame.
+  is only marked hidden, and an unknown id is ignored.
   Asynchronous.
   """
   @spec clear_image(term()) :: :ok
@@ -386,6 +400,13 @@ defmodule Drafter.Compositor do
     schedule_render(new_state)
   end
 
+  def handle_cast({:present_frame, strips, image_ops}, state) do
+    state
+    |> apply_image_ops(image_ops)
+    |> render_strips_to_buffer(strips, 0, 0)
+    |> schedule_render()
+  end
+
   def handle_cast(:clear_screen, state) do
     {width, height} = state.screen_size
     empty_buffer = create_empty_buffer(width, height)
@@ -400,10 +421,34 @@ defmodule Drafter.Compositor do
     schedule_render(new_state)
   end
 
-  def handle_cast({:put_image, id, paint, clear, placement}, state) do
+  def handle_cast({:put_image, id, paint, clear, placement}, state),
+    do: state |> stored_image(id, paint, clear, placement) |> schedule_render()
+
+  def handle_cast({:place_image, id, x, y, window}, state),
+    do: state |> placed_image(id, x, y, window) |> schedule_render()
+
+  def handle_cast({:write_raw, data}, state) do
+    Writer.write(state.writer, data)
+    {:noreply, state}
+  end
+
+  def handle_cast({:clear_image, id}, state),
+    do: state |> cleared_image(id) |> schedule_render()
+
+  defp apply_image_ops(state, ops), do: Enum.reduce(ops, state, &apply_image_op/2)
+
+  defp apply_image_op({:put, id, paint, clear, region}, state),
+    do: stored_image(state, id, paint, clear, normalize_region(region))
+
+  defp apply_image_op({:place, id, x, y, window}, state),
+    do: placed_image(state, id, x, y, window)
+
+  defp apply_image_op({:clear, id}, state), do: cleared_image(state, id)
+
+  defp stored_image(state, id, paint, clear, placement) do
     if stale_stamp?(state.image_stamps, id, placement.stamp) do
       trace_paint(id, "stale")
-      {:noreply, state}
+      state
     else
       trace_paint(id, "stored")
 
@@ -426,56 +471,47 @@ defmodule Drafter.Compositor do
 
       state = invalidate_uncovered(state, id, shown_rect(region, state.screen_size))
 
-      schedule_render(%{
+      %{
         state
         | image_regions: Map.put(state.image_regions, id, region),
           image_stamps: Map.put(state.image_stamps, id, placement.stamp)
-      })
+      }
     end
   end
 
-  def handle_cast({:place_image, id, x, y, window}, state) do
+  defp placed_image(state, id, x, y, window) do
     case Map.get(state.image_regions, id) do
       %{x: ^x, y: ^y, window: ^window, visible: true} ->
-        {:noreply, state}
+        state
 
       nil ->
         region = unplaced_region(x, y, window, true)
-        schedule_render(%{state | image_regions: Map.put(state.image_regions, id, region)})
+        %{state | image_regions: Map.put(state.image_regions, id, region)}
 
       region ->
         moved = %{region | x: x, y: y, window: window, visible: true}
         state = invalidate_uncovered(state, id, shown_rect(moved, state.screen_size))
-        schedule_render(%{state | image_regions: Map.put(state.image_regions, id, moved)})
+        %{state | image_regions: Map.put(state.image_regions, id, moved)}
     end
   end
 
-  def handle_cast({:write_raw, data}, state) do
-    Writer.write(state.writer, data)
-    {:noreply, state}
-  end
-
-  def handle_cast({:clear_image, id}, state) do
+  defp cleared_image(state, id) do
     case Map.get(state.image_regions, id) do
       %{visible: true, bytes: bytes} = region when not is_nil(bytes) ->
-        hidden = %{region | visible: false}
-
         state
         |> take_off(id, region)
-        |> Map.update!(:image_regions, &Map.put(&1, id, hidden))
+        |> Map.update!(:image_regions, &Map.put(&1, id, %{region | visible: false}))
         |> Map.update!(:image_stamps, &Map.delete(&1, id))
-        |> schedule_render()
 
       %{} = region ->
-        {:noreply,
-         %{
-           state
-           | image_regions: Map.put(state.image_regions, id, %{region | visible: false}),
-             image_stamps: Map.delete(state.image_stamps, id)
-         }}
+        %{
+          state
+          | image_regions: Map.put(state.image_regions, id, %{region | visible: false}),
+            image_stamps: Map.delete(state.image_stamps, id)
+        }
 
       nil ->
-        {:noreply, state}
+        state
     end
   end
 
@@ -664,16 +700,10 @@ defmodule Drafter.Compositor do
       )
 
     image_block = Enum.reverse(state.pending_image_clears) ++ image_rows
-    output = compose_output(text_rows)
 
-    if output != [] do
+    if text_rows != [] or image_block != [] do
       trace_frame(text_rows, image_rows)
-      Writer.write(state.writer, output)
-    end
-
-    if image_block != [] do
-      images = [image_block, Terminal.ANSI.cursor_to(1, 1), Terminal.ANSI.hide_cursor()]
-      Writer.write_image(state.writer, if(swapping?(state), do: synced(images), else: images))
+      Writer.write(state.writer, compose_output(text_rows ++ image_block))
     end
 
     {state.screen_buffer, new_painted}
@@ -765,9 +795,6 @@ defmodule Drafter.Compositor do
 
     Enum.reverse(segment(strip, line_index, from, Strip.width(strip)) ++ segments)
   end
-
-  defp swapping?(state),
-    do: Enum.any?(state.image_regions, fn {_id, region} -> match?(%{spare: _}, region.crop) end)
 
   defp segment(_strip, _line_index, from, to) when to <= from, do: []
 

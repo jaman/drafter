@@ -31,8 +31,10 @@ defmodule Drafter.Terminal.ANSI do
       which a terminal sends only after a driver has turned it on; the support event
       is `true` only when the terminal will report releases. See
       `Drafter.Terminal.KittyKeyboard`.
-    * `{:cell_size, {width, height}}` — the terminal's answer, in pixels, to
-      `Drafter.Terminal.Reports.cell_size_query/0`.
+    * `{:cell_size, {width, height}}`, `{:window_pixels, {width, height}}` and
+      `{:text_cells, {cols, rows}}` — the terminal's answers to
+      `Drafter.Terminal.Reports.cell_size_query/0`: one cell in pixels, the text area
+      in pixels, and the text area in cells.
     * `{:pixel_mouse, boolean}` — the terminal's answer to
       `Drafter.Terminal.Reports.pixel_mouse_query/0`: whether mouse reports now come
       in pixels.
@@ -132,6 +134,8 @@ defmodule Drafter.Terminal.ANSI do
           | {:key_up, KittyKeyboard.key(), modifiers()}
           | {:key_release_support, boolean()}
           | {:cell_size, {pos_integer(), pos_integer()}}
+          | {:window_pixels, {pos_integer(), pos_integer()}}
+          | {:text_cells, {pos_integer(), pos_integer()}}
           | {:pixel_mouse, boolean()}
 
   alias Drafter.Terminal.{KittyKeyboard, Reports}
@@ -469,8 +473,11 @@ defmodule Drafter.Terminal.ANSI do
 
   defp find_longest_match(buffer, mode) do
     case parse_mouse_event(buffer, pixel_cell(mode)) do
-      {mouse_event, rest} -> {mouse_event, rest}
-      :no_match -> parse_string_sequence(buffer) || report_or_table(buffer, mode)
+      {mouse_event, rest} ->
+        {mouse_event, rest}
+
+      :no_match ->
+        string_report(buffer) || parse_string_sequence(buffer) || report_or_table(buffer, mode)
     end
   end
 
@@ -514,6 +521,15 @@ defmodule Drafter.Terminal.ANSI do
   end
 
   defp parse_string_sequence(_buffer), do: nil
+
+  defp string_report(<<"\e]", _rest::binary>> = buffer) do
+    case Reports.parse(buffer) do
+      {reports, rest} -> {:reports, reports, rest}
+      :no_match -> nil
+    end
+  end
+
+  defp string_report(_buffer), do: nil
 
   defp string_terminator(binary) do
     case :binary.match(binary, ["\e\\", "\a"]) do

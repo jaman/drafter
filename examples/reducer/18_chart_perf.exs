@@ -130,7 +130,6 @@ defmodule ChartPerf do
             renderer: :pixel,
             chart_type: :line,
             height: 10,
-            raw_data: true,
             line_thickness: 1,
             colors: [{100, 200, 255}, {255, 150, 80}, {150, 255, 150}, {255, 100, 200}]
           ),

@@ -51,9 +51,12 @@ defmodule Drafter.WidgetServer do
       `nil`.
     * `:refresh` - data-channel refresh policy, used only when `:buffer` is set.
       Default: `:on_demand`.
-    * `:image_throttle` - minimum gap between image renders, as milliseconds or
-      `{n, :tick}`. Default: `{2, :tick}`.
-    * `:image_priority` - the scheduler priority image tasks run at, `:low`, `:normal`
+    * `:image_throttle` - for a widget that sends its own images (`image/3`), the
+      minimum gap between them, as milliseconds or `{n, :tick}`. Default:
+      `{2, :tick}`. A widget with `image_raster/2` draws its image for each frame
+      that needs it (see `frame_image/3`) and is not throttled.
+    * `:image_priority` - the scheduler priority an `image/3` widget's image tasks run
+      at, `:low`, `:normal`
       or `:high`. Default: `DRAFTER_GEN_PRIORITY` when set to `normal` or `high`,
       else `:low`.
 
@@ -168,6 +171,28 @@ defmodule Drafter.WidgetServer do
   @spec retry_image(pid() | nil) :: :ok
   def retry_image(pid) when is_pid(pid), do: GenServer.cast(pid, :maybe_generate_image)
   def retry_image(_pid), do: :ok
+
+  @doc """
+  The image a widget with `image_raster/2` shows in the frame being drawn, encoded for
+  `window`, the visible cells counted from the widget's top left, at `cell_size`, the
+  terminal's `{width, height}` in pixels per cell, or `nil` when it has not reported
+  one.
+
+  Returns `{:put, paint, clear, region}` with bytes for `Drafter.Compositor` when the
+  widget's state, its rect, the cell size or the window changed since the last answer, or the last
+  bytes were for another window and the protocol crops by re-encoding; `:current` when
+  the last bytes still hold; `:none` when the widget draws no image now. The picture is
+  drawn only when the state or rect changed, and re-encoded alone when only the window
+  did. Waits up to `timeout` milliseconds, and answers `:current` for a server that
+  does not reply in time or has exited.
+  """
+  @spec frame_image(pid(), map(), {pos_integer(), pos_integer()} | nil, timeout()) ::
+          {:put, iodata(), iodata(), map()} | :current | :none
+  def frame_image(pid, window, cell_size, timeout) do
+    GenServer.call(pid, {:frame_image, window, cell_size}, timeout)
+  catch
+    :exit, _reason -> :current
+  end
 
   @doc """
   Draw the widget again as it is, its picture included, for a change outside its props
@@ -373,6 +398,12 @@ defmodule Drafter.WidgetServer do
   end
 
   @impl true
+  def handle_call({:frame_image, window, cell_size}, _from, state) do
+    if cell_size, do: Context.put_cell_size(cell_size)
+    {reply, new_state} = frame_picture(state, window)
+    {:reply, reply, new_state}
+  end
+
   def handle_call({:update_rect, rect}, _from, %{rect: rect} = state), do: {:reply, :ok, state}
 
   def handle_call({:update_rect, rect}, _from, state) do
@@ -510,12 +541,6 @@ defmodule Drafter.WidgetServer do
   def handle_info(:deferred_push, state) do
     {:noreply, push_now(%{state | pending_push_ref: nil})}
   end
-
-  def handle_info({:picture_ready, hash, picture}, %{image_hash: hash} = state) do
-    {:noreply, %{state | picture: picture}}
-  end
-
-  def handle_info({:picture_ready, _hash, _picture}, state), do: {:noreply, state}
 
   def handle_info(:image_task_done, state) do
     done = %{state | image_task: nil, last_image_ms: System.monotonic_time(:millisecond)}
@@ -666,12 +691,58 @@ defmodule Drafter.WidgetServer do
       active? = Drafter.Widget.image_active?(module, widget_state)
       WidgetStripCache.mark_image_active(id, active?)
 
-      if placed or active?, do: GenServer.cast(self(), :maybe_generate_image)
+      if streamed?(module) and (placed or active?),
+        do: GenServer.cast(self(), :maybe_generate_image)
+    end
+  end
+
+  defp streamed?(module), do: not function_exported?(module, :image_raster, 2)
+
+  defp frame_picture(%{module: module} = state, window) do
+    if Drafter.Widget.image_active?(module, state.state),
+      do: current_or_drawn(state, window),
+      else:
+        {:none,
+         %{state | image_hash: nil, picture: nil, picture_window: nil, image_placed: false}}
+  end
+
+  defp current_or_drawn(state, window) do
+    hash = :erlang.phash2({state.state, state.rect, Context.cell_size()})
+
+    cond do
+      hash != state.image_hash -> encoded(state, drawn_picture(state), hash, window)
+      reencode?(state, window) -> encoded(state, state.picture, hash, window)
+      true -> {:current, state}
+    end
+  end
+
+  defp drawn_picture(state),
+    do: safe_call(state.id, fn -> state.module.image_raster(state.state, state.rect) end)
+
+  defp encoded(state, picture, hash, window) do
+    stamp = state.image_stamp + 1
+
+    next = %{
+      state
+      | picture: picture,
+        image_hash: hash,
+        picture_window: window,
+        image_stamp: stamp,
+        image_placed: true
+    }
+
+    case encode_picture(state.id, picture, window) do
+      {paint, clear, %{dx: _, dy: _, cols: _, rows: _} = region} ->
+        {{:put, paint, clear, Map.put(region, :stamp, stamp)}, next}
+
+      _nothing ->
+        {:none, next}
     end
   end
 
   defp schedule_image(%{module: module} = state) do
     cond do
+      not streamed?(module) -> state
       not Drafter.Widget.image_active?(module, state.state) -> withdraw_image(state)
       not WidgetStripCache.visible?(state.id) -> state
       state.image_task != nil -> state
@@ -717,11 +788,9 @@ defmodule Drafter.WidgetServer do
     hash = :erlang.phash2({state.state, state.rect})
     window = WidgetStripCache.visible_rect(state.id)
 
-    cond do
-      hash != state.image_hash -> start_image_task(state, {:draw, hash, window}, hash, window)
-      reencode?(state, window) -> start_image_task(state, {:encode, state.picture}, hash, window)
-      true -> state
-    end
+    if hash != state.image_hash,
+      do: start_image_task(state, hash, window),
+      else: state
   end
 
   defp reencode?(%{picture: nil}, _window), do: false
@@ -730,12 +799,12 @@ defmodule Drafter.WidgetServer do
     window != state.picture_window and Picture.window_dependent?(state.picture)
   end
 
-  defp start_image_task(state, job, hash, window) do
+  defp start_image_task(state, hash, window) do
     stamp = state.image_stamp + 1
 
     %{
       state
-      | image_task: spawn_image_task(state, job, stamp),
+      | image_task: spawn_image_task(state, stamp),
         image_hash: hash,
         picture_window: window,
         image_placed: true,
@@ -743,7 +812,7 @@ defmodule Drafter.WidgetServer do
     }
   end
 
-  defp spawn_image_task(state, job, stamp) do
+  defp spawn_image_task(state, stamp) do
     parent = self()
     ctx = session_context()
     priority = state.image_priority
@@ -751,24 +820,13 @@ defmodule Drafter.WidgetServer do
     spawn(fn ->
       Process.flag(:priority, priority)
       Context.adopt(ctx)
-      store_image(state.id, run_image_job(state, job, parent), stamp)
+      store_image(state.id, run_image_job(state), stamp)
       send(parent, :image_task_done)
     end)
   end
 
-  defp run_image_job(%{module: module} = state, {:draw, hash, window}, parent) do
-    if function_exported?(module, :image_raster, 2) do
-      picture = safe_call(state.id, fn -> module.image_raster(state.state, state.rect) end)
-      send(parent, {:picture_ready, hash, picture})
-      encode_picture(state.id, picture, window)
-    else
-      safe_call(state.id, fn -> module.image(state.state, state.rect, state.id) end)
-    end
-  end
-
-  defp run_image_job(state, {:encode, picture}, _parent) do
-    encode_picture(state.id, picture, WidgetStripCache.visible_rect(state.id))
-  end
+  defp run_image_job(%{module: module} = state),
+    do: safe_call(state.id, fn -> module.image(state.state, state.rect, state.id) end)
 
   defp encode_picture(_id, nil, _window), do: nil
 

@@ -5,10 +5,13 @@ defmodule Drafter.Widget.Chart do
   Supported chart types: `:line`, `:braille`, `:step`, `:area`, `:braille_area`,
   `:bar`, `:clustered_bar`, `:stacked_bar`, `:range_bar`, `:scatter`, `:bubble`,
   `:histogram`, `:heatmap`, and `:candlestick`. Any unrecognised value renders as
-  `:line`. Braille-dot rendering provides the highest resolution (two data points
-  per column, four per row). Quadrant-block rendering provides 2×2 pixel
-  resolution per cell (coarser but larger dots). Bar charts use half-block
-  characters for 2× vertical resolution.
+  `:line`.
+
+  Every chart is drawn once as shapes and then painted at the resolution of the
+  renderer in use (see `:renderer`): a terminal image at the terminal's own pixels
+  per cell, braille at two by four dots per cell, or block characters of a
+  `FrenchCurve.Backend.Cells` glyph set. Axis, bar and value labels are drawn as
+  text around and over the plot.
 
   Each chart type reads `:data` in its own shape:
 
@@ -67,9 +70,10 @@ defmodule Drafter.Widget.Chart do
 
       chart([series_a_points, series_b_points], chart_type: :scatter, height: 8)
 
-  On `:line`, `:braille` and `:braille_area` charts a `nil` in a series is a gap:
-  nothing is drawn at that position and the series resumes after it, so series
-  sampled on a shared time grid stay aligned.
+  On `:line`, `:braille`, `:step`, `:area` and `:braille_area` charts a `nil` in a
+  series is a gap: nothing is drawn at that position and the series resumes after
+  it, so series sampled on a shared time grid stay aligned. Bar charts draw a gap
+  as zero.
 
       chart([[nil, nil, 3, 4, 6], [1, 2, 2, 3, 2]], chart_type: :line, height: 8)
 
@@ -79,9 +83,9 @@ defmodule Drafter.Widget.Chart do
 
   ## Bar Chart Types
 
-    * `:bar` — classic single-row sparkline; one block-char per data point
-    * `:clustered_bar` — multi-row grouped bars; each group shows one bar per
-      series side by side with half-block vertical resolution
+    * `:bar` — one bar per data point; a list of series draws as `:clustered_bar`
+    * `:clustered_bar` — grouped bars; each group shows one bar per series side
+      by side
     * `:stacked_bar` — multi-row stacked bars; series accumulate from the
       baseline (supports negatives — positive series stack upward, negative
       series stack downward)
@@ -90,7 +94,7 @@ defmodule Drafter.Widget.Chart do
   ## Keyboard Controls (when focused)
 
     * `←` / `→` — scroll the X-axis by 5 data points, clamped at 0 on the left
-    * `↑` / `↓` — pan the Y-axis up/down by 1 unit
+    * `↑` / `↓` — pan the Y-axis up/down by a tenth of its span per press
     * `?c` — reset the Y-axis pan offset to `0`
     * Click and drag — pan both axes simultaneously
 
@@ -104,8 +108,8 @@ defmodule Drafter.Widget.Chart do
       `:braille_area`, `:bar`, `:clustered_bar`, `:stacked_bar`, `:range_bar`,
       `:scatter`, `:bubble`, `:histogram`, `:heatmap`, `:candlestick`. Any other
       value renders as `:line`
-    * `:pixel_style` — pixel rendering style for line, step and scatter:
-      `:braille` (default) or `:quadrant`
+    * `:pixel_style` — how a chart whose renderer resolves to `:text` draws:
+      `:braille` (default) or `:quadrant`, the `:quad` block characters
     * `:min_value` — explicit Y minimum. Default `nil`, auto-detected from the data
       with 5% padding on each side
     * `:max_value` — explicit Y maximum. Default `nil`, auto-detected from the data
@@ -128,10 +132,11 @@ defmodule Drafter.Widget.Chart do
       other chart type falls back to the vertical renderer
     * `:bar_labels` — list of strings labelling each bar or group, shown when
       `show_labels: true`. Default `[]`
-    * `:show_values` — `t:boolean/0`, show the numeric value beside each bar.
-      Default `false`
-    * `:fill_opacity` — brightness of the area fill body relative to the series
-      colour, `0.0` (invisible) to `1.0` (same as edge). Default `0.6`
+    * `:show_values` — `t:boolean/0`, show the numeric value after each bar of a
+      horizontal bar chart. Default `false`
+    * `:fill_opacity` — how strongly an area's fill shows its series colour over
+      the chart background, `0.0` (background) to `1.0` (the series colour).
+      Default `0.6`
     * `:animated` — `t:boolean/0`. A `:line`, `:area` or `:step` chart of one series
       rotates its points by one every `:animation_speed` milliseconds, in every
       renderer. Default `false`
@@ -164,34 +169,35 @@ defmodule Drafter.Widget.Chart do
     * `:stacked` — `t:boolean/0`, on `:braille_area` charts stack each series on
       the ones before it; `false` draws every series from the baseline, later
       series over earlier ones. Default `true`
-    * `:line_thickness` — line width in pixels for line and area charts. Default `1`
-    * `:connect_lines` — `t:boolean/0`, join consecutive points with line segments.
-      Default `false`
-    * `:raw_data` — `t:boolean/0`, plot every point instead of downsampling to the
-      viewport width with LTTB. Default `false`
+    * `:line_thickness` — line width for line and area charts, in braille dots;
+      an image scales it to the terminal's cell height. Default `1`
+    * `:connect_lines` — `t:boolean/0`, join consecutive points of a `:line` or
+      `:braille` chart with line segments; `false` draws the points alone.
+      Default `true`
     * `:precision` — decimal places in the Y-axis tick labels. Default `3`. Read by
       `mount/1` and `update/2` only; the `chart/2` element does not forward it
     * `:style` — `t:map/0` of style properties. Default `%{}`
     * `:class` — theme class atom or list of them, reaching `mount/1` as
       `:classes`. Default `[]`
-    * `:renderer` — rendering backend for this chart: `:text` (ASCII/block), `:braille`
-      (anti-aliased braille), `:half` / `:quad` / `:sextant` / `:octant` (block
+    * `:renderer` — rendering backend for this chart: `:text` (braille, or `:quad`
+      blocks with `pixel_style: :quadrant`), `:braille`, `:half` / `:quad` / `:sextant` / `:octant` (block
       characters of that `FrenchCurve.Backend.Cells` set, two colours per cell), `:pixel` / `:auto` (best terminal graphics available —
       kitty/iTerm2/sixel image, falling back to braille), or `:iterm2` / `:kitty` /
       `:sixel` to force a protocol. Overrides the runtime `mode:` config, but the
       `DRAFTER_MODE` env var still forces over it. When unset, the global mode applies:
       `DRAFTER_MODE`, then the `mode:` run option (`Drafter.run(App, mode: :pixel)` /
       `Drafter.render_mode/1`), then `:text`.
-    * `:image_throttle` — for `:pixel` charts, the minimum gap between image regenerations,
-      in Drafter's timing units: `{n, :fps}`, `{n, :ms}`, `{n, :tick}` (every `n` render
-      frames — the default, frame-aligned so it can't beat against the render clock), or a
-      bare integer (milliseconds). Default `{2, :tick}`. Lower means smoother animation but
-      more terminal load.
-    * `:image_scale` — for `:pixel` charts, pixels generated per terminal cell column
-      (rows use `2×`); default `4`. Higher is sharper but produces larger images.
+    * `:image_scale` — for `:pixel` charts on a terminal that has not reported its
+      cell size, pixels drawn per cell column (rows use `2×`); default `4`. When the
+      terminal reports its cell size (see `:cell_size` in `Drafter.App`), images are
+      drawn at that size and this is unused
 
-  `update/2` re-reads every option above except `:width`, `:app_module` and
-  `:image_throttle`, which are fixed once the widget is mounted.
+  `update/2` re-reads every option above except `:width` and `:app_module`, which are
+  fixed once the widget is mounted.
+
+  A `:pixel` chart's image is drawn for the frame that shows it and written to the
+  terminal with that frame's text, so the chart and the cells around it always change
+  together.
 
   ## Widget value
 
@@ -216,19 +222,7 @@ defmodule Drafter.Widget.Chart do
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
 
-  alias Drafter.Widget.Chart.{
-    Area,
-    Bar,
-    BrailleArea,
-    Bubble,
-    Candlestick,
-    Heatmap,
-    Histogram,
-    Pixel,
-    Readout
-  }
-
-  alias Drafter.Widget.Chart.{Line, MultiSeries, Scatter, Step}
+  alias Drafter.Widget.Chart.{Pixel, Readout}
 
   @type chart_type ::
           :line
@@ -313,16 +307,6 @@ defmodule Drafter.Widget.Chart do
         }
 
   @doc """
-  Draws several series into one set of strips. See the multi-series chart renderer.
-  """
-  defdelegate render_multi_series(data_series, width, height, opts), to: MultiSeries, as: :render
-
-  @doc """
-  Draws a multi-row bar chart from a flat value list. See the bar chart renderer.
-  """
-  defdelegate render_tall_bar_chart(data, height, opts), to: Bar
-
-  @doc """
   Builds the chart state from `props`.
 
   Resolves the Y range from `:min_value`/`:max_value` and the data, seeds the
@@ -351,9 +335,7 @@ defmodule Drafter.Widget.Chart do
     data_bounds = data_bounds(data, props)
     {min_val, max_val} = padded_range(data_bounds, props)
 
-    live_candle = init_live_candle(data)
     data_hash = :erlang.phash2(data)
-    data_tuple = data_to_tuple(data)
 
     %__MODULE__{
       data: data,
@@ -392,14 +374,13 @@ defmodule Drafter.Widget.Chart do
             Map.get(props, :_render_timestamp),
             Map.get(props, :animation_speed, 100)
           ),
-        live_candle: live_candle,
         scroll_offset: 0,
         drag_last_x: nil,
         drag_last_y: nil,
         y_offset: 0,
-        data_tuple: data_tuple,
         data_hash: data_hash,
         data_bounds: data_bounds,
+        fixed_range: {Map.get(props, :min_value), Map.get(props, :max_value)},
         dragging_scrollbar: false,
         smooth: Map.get(props, :smooth, false),
         stacked: Map.get(props, :stacked, true),
@@ -407,8 +388,7 @@ defmodule Drafter.Widget.Chart do
         readout_format: Map.get(props, :readout_format),
         readout_sort: Map.get(props, :readout_sort, :none),
         line_thickness: Map.get(props, :line_thickness, 1),
-        connect_lines: Map.get(props, :connect_lines, false),
-        raw_data: Map.get(props, :raw_data, false),
+        connect_lines: Map.get(props, :connect_lines, true),
         renderer: Map.get(props, :renderer),
         image_scale: Map.get(props, :image_scale, 4)
       }
@@ -422,8 +402,8 @@ defmodule Drafter.Widget.Chart do
   """
   @spec handle_mouse_up(integer(), integer(), t()) :: {:ok, t()}
   @impl Drafter.Widget
-  def handle_mouse_up(x, _y, %{_internal: %{drag_last_x: nil}} = state) do
-    {:ok, update_internal(state, dragging_scrollbar: true, cursor_x: x)}
+  def handle_mouse_up(x, y, %{_internal: %{drag_last_x: nil}} = state) do
+    {:ok, update_internal(state, dragging_scrollbar: true, cursor_x: x, cursor_y: y)}
   end
 
   def handle_mouse_up(_x, _y, state) do
@@ -431,20 +411,24 @@ defmodule Drafter.Widget.Chart do
   end
 
   @doc """
-  Moves the value readout cursor to column `x` as the pointer passes over the chart.
+  Moves the value readout cursor to the cell `x`, `y` as the pointer passes over the
+  chart.
 
   On `:line`, `:braille`, `:step`, `:area`, `:braille_area` and `:stacked_area`
-  charts the cursor column is highlighted and a panel beside it, to the right
-  when it fits and otherwise to the left, lists the x label (the `:x_labels`
-  entry, or `#index`) and each series' colour, name (`:series_names`) and value
-  (`:readout_format`), ordered by `:readout_sort`. A pixel chart, whose image
-  covers its cells, shows the label and values along its first row instead.
-  Returns `{:noreply, state}` when the column is unchanged.
+  charts the point under the cursor column is read; on `:bar`, `:clustered_bar`,
+  `:stacked_bar` and `:range_bar` charts the bar or group under it, or under the
+  cursor row for horizontal bars. The cursor column is highlighted and a panel
+  beside it, to the right when it fits and otherwise to the left, lists the label
+  (the `:bar_labels` entry for a bar chart, else the `:x_labels` entry, else
+  `#index`) and each series' colour, name (`:series_names`) and value
+  (`:readout_format`; a range bar shows `low – high`), ordered by `:readout_sort`. A
+  chart drawn as an image has the panel drawn into the image. Returns
+  `{:noreply, state}` when the cursor cell is unchanged.
   """
   @spec handle_hover(integer(), integer(), t()) :: {:ok, t()} | {:noreply, t()}
   @impl Drafter.Widget
-  def handle_hover(x, _y, %{_internal: %{cursor_x: x}} = state), do: {:noreply, state}
-  def handle_hover(x, _y, state), do: {:ok, update_internal(state, cursor_x: x)}
+  def handle_hover(x, y, %{_internal: %{cursor_x: x, cursor_y: y}} = state), do: {:noreply, state}
+  def handle_hover(x, y, state), do: {:ok, update_internal(state, cursor_x: x, cursor_y: y)}
 
   @doc """
   Pans the chart.
@@ -452,7 +436,7 @@ defmodule Drafter.Widget.Chart do
   `:left`/`:ArrowLeft` and `:right`/`:ArrowRight` move the X scroll offset by 5 data
   points, clamped at `0` on the left and at one less than the longest series on
   the right. `:up`/`:ArrowUp` and `:down`/`:ArrowDown` move the Y offset by one
-  unit, unclamped. The codepoint `?c` resets the Y offset to `0`. All of those
+  step, unclamped; each step shifts the drawn value range by a tenth of its span. The codepoint `?c` resets the Y offset to `0`. All of those
   return `{:ok, state}`. `:escape` hides the value readout and bubbles; every
   other key returns `{:bubble, state}`.
 
@@ -617,8 +601,7 @@ defmodule Drafter.Widget.Chart do
       readout_format: Keyword.get(opts, :readout_format),
       readout_sort: Keyword.get(opts, :readout_sort, :none),
       line_thickness: Keyword.get(opts, :line_thickness, 1),
-      connect_lines: Keyword.get(opts, :connect_lines, false),
-      raw_data: Keyword.get(opts, :raw_data, false),
+      connect_lines: Keyword.get(opts, :connect_lines, true),
       renderer: Keyword.get(opts, :renderer),
       image_scale: Keyword.get(opts, :image_scale, 4),
       _render_timestamp: render_timestamp(Keyword.get(opts, :animated, false))
@@ -651,26 +634,55 @@ defmodule Drafter.Widget.Chart do
   Draws the chart into `rect`, padded or truncated to exactly `rect.height` strips.
 
   Returns `[]` when `rect.width` is `0` or less. Accepts either a `t:t/0` or a raw
-  props map, which is mounted first. The renderer resolved from `:renderer` and the
-  chart type decides the output: a `:pixel` chart emits blank strips for the plot
+  props map, which is mounted first. Every renderer draws the same picture of the
+  chart at its own resolution: a `:pixel` chart emits blank strips for the plot
   area, because the image itself is emitted separately by the widget server; a
-  `:braille` or cell-set chart emits those glyphs, falling back to the text renderer
-  when the data cannot be drawn that way; a `:text` chart draws blocks and box
-  characters. Every renderer draws the y axis, the x axis line and the title row
-  around the plot area when `:show_axes` and `:title` ask for them.
+  `:text` or `:braille` chart draws braille, two by four dots per cell (`:text` with
+  `pixel_style: :quadrant` draws `:quad` blocks); a cell-set chart draws that set's
+  blocks. The y axis, the x axis line and the title row are drawn around the plot
+  area when `:show_axes` and `:title` ask for them, labelled with the value range
+  the chart was drawn against.
   """
   @spec render(t() | Drafter.Widget.props(), Drafter.Widget.rect()) :: [Strip.t()]
   @impl Drafter.Widget
   def render(_state, %{width: width}) when width <= 0, do: []
 
   def render(state, rect) do
-    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    state = state |> mounted() |> ranged(rect)
+    frame = plot_frame(state, rect)
 
+    state
+    |> plot_strips(drawing(state), frame)
+    |> framed(state, rect, frame, drawing(state))
+  end
+
+  defp mounted(state), do: if(is_struct(state, __MODULE__), do: state, else: mount(state))
+
+  defp drawing(state) do
     case Pixel.mode(renderer(state), state.chart_type) do
-      :pixel -> pixel_render(state, rect)
-      :braille -> braille_render(state, rect)
-      {:cells, set} -> cells_render(state, rect, set)
-      :text -> render_text(state, rect)
+      :text when state.pixel_style == :quadrant -> {:cells, :quad}
+      :text -> :braille
+      other -> other
+    end
+  end
+
+  defp plot_strips(_state, :pixel, frame),
+    do: blank_strips(%{width: frame.cols, height: frame.rows})
+
+  defp plot_strips(state, :braille, frame) do
+    Pixel.braille_strips(pixel_spec(state), {frame.cols, frame.rows}) ||
+      blank_strips(%{width: frame.cols, height: frame.rows})
+  end
+
+  defp plot_strips(state, {:cells, set}, frame) do
+    Pixel.cells_strips(pixel_spec(state), {frame.cols, frame.rows}, set) ||
+      blank_strips(%{width: frame.cols, height: frame.rows})
+  end
+
+  defp ranged(state, rect) do
+    case Pixel.value_range(pixel_spec(state), {max(1, rect.width), max(1, rect.height)}) do
+      {lo, hi} -> %{state | min_value: lo * 1.0, max_value: hi * 1.0}
+      nil -> state
     end
   end
 
@@ -684,29 +696,31 @@ defmodule Drafter.Widget.Chart do
   when the chart does not resolve to the pixel renderer or cannot be drawn.
 
   The plot area is `rect` less the y axis column, the x axis row and the title row
-  that `render/2` draws as text.
+  that `render/2` draws as text. The image has the terminal's pixel size per cell
+  when the terminal reported it (see `:cell_size` in `Drafter.App`), and carries the
+  value readout panel while the pointer is over the chart.
   """
   @spec image_raster(t() | Drafter.Widget.props(), Drafter.Widget.rect()) ::
           Drafter.Render.Picture.t() | nil
   @impl Drafter.Widget
   def image_raster(state, rect) do
-    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+    state = state |> mounted() |> ranged(rect)
 
-    case Pixel.mode(renderer(state), state.chart_type) do
-      :pixel ->
-        frame = plot_frame(state, rect)
+    case drawing(state) do
+      :pixel -> picture(state, rect)
+      _ -> nil
+    end
+  end
 
-        case Pixel.picture(
-               pixel_spec(state),
-               Pixel.protocol(renderer(state)),
-               {frame.cols, frame.rows}
-             ) do
-          nil -> nil
-          picture -> %{picture | dx: frame.dx, dy: frame.dy}
-        end
+  defp picture(state, rect) do
+    frame = plot_frame(state, rect)
+    {_bg, fg} = chart_colors(state)
+    {marker, cells} = Readout.image_overlay(state, frame, Readout.index(state, frame), fg)
+    spec = Map.merge(pixel_spec(state), %{marker: marker, overlay: cells})
 
-      _ ->
-        nil
+    case Pixel.picture(spec, Pixel.protocol(renderer(state)), {frame.cols, frame.rows}) do
+      nil -> nil
+      picture -> %{picture | dx: frame.dx, dy: frame.dy}
     end
   end
 
@@ -726,11 +740,8 @@ defmodule Drafter.Widget.Chart do
     axes? = state.show_axes and rect.width > axis_col_width
     titled? = is_binary(state.title) and state.title != ""
 
-    reads_out? =
-      Readout.readout_type?(state.chart_type) and Map.get(state._internal, :cursor_x) != nil
-
     dx = if axes?, do: axis_col_width, else: 0
-    dy = if titled? or reads_out?, do: 1, else: 0
+    dy = if titled?, do: 1, else: 0
     axis_rows = if axes?, do: 1, else: 0
 
     %{
@@ -741,61 +752,20 @@ defmodule Drafter.Widget.Chart do
     }
   end
 
-  defp framed(plot_strips, state, rect, frame, mode) do
+  defp framed(plot_strips, state, rect, frame, drawing) do
     {bg, fg} = chart_colors(state)
 
     plot_strips
     |> apply_axes(state, %{rect | height: frame.rows + 2}, bg, fg)
     |> apply_title(state, rect, bg, fg)
-    |> pad_top(frame.dy, state)
     |> pad_strips(rect.height)
-    |> Readout.decorate(state, frame, Readout.index(state, frame, mode), fg, mode)
+    |> readout(state, frame, fg, drawing)
   end
 
-  defp pad_top(strips, 1, %{title: title}) when is_binary(title) and title != "", do: strips
-  defp pad_top(strips, 1, _state), do: [Strip.new([Segment.new("", %{})]) | strips]
-  defp pad_top(strips, _dy, _state), do: strips
+  defp readout(strips, _state, _frame, _fg, :pixel), do: strips
 
-  defp pixel_render(state, rect) do
-    frame = plot_frame(state, rect)
-    framed(blank_strips(%{width: frame.cols, height: frame.rows}), state, rect, frame, :pixel)
-  end
-
-  defp render_text(state, rect) do
-    {bg, fg} = chart_colors(state)
-
-    axis_label_width = if state.show_axes, do: compute_y_axis_width(state), else: 0
-    title_rows = if is_binary(state.title) and state.title != "", do: 1, else: 0
-    axis_rows = if state.show_axes, do: 1, else: 0
-    chart_height = max(1, rect.height - title_rows - axis_rows)
-
-    chart_width =
-      if state.show_axes, do: max(1, rect.width - axis_label_width - 1), else: rect.width
-
-    animation_offset = state._internal.animation_offset
-
-    horizontal? = state.orientation == :horizontal
-
-    {strips, effective_state} =
-      dispatch_chart(state, chart_width, chart_height, bg, fg, animation_offset, horizontal?)
-
-    box = %{
-      dx:
-        if(state.show_axes and rect.width > axis_label_width + 1,
-          do: axis_label_width + 1,
-          else: 0
-        ),
-      dy: title_rows,
-      cols: chart_width,
-      rows: chart_height
-    }
-
-    effective_state
-    |> then(&apply_axes(strips, &1, %{rect | height: chart_height + 2}, bg, fg))
-    |> apply_title(state, rect, bg, fg)
-    |> pad_strips(rect.height)
-    |> Readout.decorate(state, box, Readout.index(state, box, :text), fg, :text)
-  end
+  defp readout(strips, state, frame, fg, _drawing),
+    do: Readout.decorate(strips, state, frame, Readout.index(state, frame), fg)
 
   @doc "Whether this chart is drawing a transmitted image rather than cells."
   @spec image_active?(t()) :: boolean()
@@ -806,45 +776,91 @@ defmodule Drafter.Widget.Chart do
 
   defp renderer(state), do: Map.get(state._internal, :renderer)
 
-  defp braille_render(state, rect) do
-    frame = plot_frame(state, rect)
-
-    case Pixel.braille_strips(pixel_spec(state), {frame.cols, frame.rows}) do
-      nil -> render_text(state, rect)
-      strips -> framed(strips, state, rect, frame, :braille)
-    end
-  end
-
-  defp cells_render(state, rect, set) do
-    frame = plot_frame(state, rect)
-
-    case Pixel.cells_strips(pixel_spec(state), {frame.cols, frame.rows}, set) do
-      nil -> render_text(state, rect)
-      strips -> framed(strips, state, rect, frame, :cells)
-    end
-  end
-
   defp pixel_spec(state) do
+    {bg, _fg} = chart_colors(state)
+    {lo, hi} = panned_range(state)
+    {fixed_min, fixed_max} = Map.get(state._internal, :fixed_range, {nil, nil})
+
     %{
       type: state.chart_type,
-      data: animated_data(state),
+      data: shown_data(state),
       color: pixel_color(state),
       colors: state.colors,
-      smooth: Map.get(state._internal, :smooth, true),
+      bg: bg,
+      min: lo,
+      max: hi,
+      fixed_min: fixed_min,
+      fixed_max: fixed_max,
       fill_opacity: state.fill_opacity,
-      min: state.min_value,
-      max: state.max_value,
+      area_fill: state.area_fill,
+      stacked: Map.get(state._internal, :stacked, true),
+      zero_center: state.zero_center,
+      show_baseline: state.show_baseline,
+      smooth: Map.get(state._internal, :smooth, false),
+      line_thickness: Map.get(state._internal, :line_thickness, 1),
+      connect_lines: Map.get(state._internal, :connect_lines, true),
+      orientation: state.orientation,
+      bar_gap: state.bar_gap,
+      bar_labels: state.bar_labels,
+      show_labels: state.show_labels,
+      show_values: state.show_values,
       scale: Map.get(state._internal, :image_scale, 4)
     }
   end
+
+  defp panned_range(state) do
+    shift = (state._internal[:y_offset] || 0) * (state.max_value - state.min_value) / 10
+    {state.min_value + shift, state.max_value + shift}
+  end
+
+  @scrolled_types [
+    :line,
+    :braille,
+    :step,
+    :area,
+    :braille_area,
+    :stacked_area,
+    :bar,
+    :clustered_bar,
+    :stacked_bar,
+    :range_bar,
+    :candlestick
+  ]
+
+  @item_types [:candlestick, :range_bar]
+
+  defp shown_data(%{chart_type: type} = state) when type in @scrolled_types do
+    state
+    |> animated_data()
+    |> scrolled(type, state._internal.scroll_offset || 0)
+  end
+
+  defp shown_data(state), do: state.data
+
+  defp scrolled(data, _type, 0), do: data
+
+  defp scrolled([first | _] = data, type, offset) when is_list(first) and type not in @item_types,
+    do: Enum.map(data, &drop_tail(&1, offset))
+
+  defp scrolled(data, _type, offset) when is_list(data), do: drop_tail(data, offset)
+  defp scrolled(data, _type, _offset), do: data
+
+  defp drop_tail(items, offset), do: Enum.drop(items, -min(offset, max(length(items) - 1, 0)))
 
   @animated_types [:line, :area, :step]
 
   defp animated_data(%{chart_type: type, data: [first | _] = data} = state)
        when type in @animated_types and is_number(first),
-       do: Line.apply_animation_shift(data, state._internal.animation_offset)
+       do: rotate(data, state._internal.animation_offset)
 
   defp animated_data(state), do: state.data
+
+  defp rotate(data, offset) when offset > 0 do
+    shift = rem(offset, length(data))
+    Enum.drop(data, shift) ++ Enum.take(data, shift)
+  end
+
+  defp rotate(data, _offset), do: data
 
   defp animation_frame(true, timestamp, speed)
        when is_integer(timestamp) and is_integer(speed) and speed > 0,
@@ -911,15 +927,6 @@ defmodule Drafter.Widget.Chart do
         do: padded_range(data_bounds, props),
         else: {state.min_value, state.max_value}
 
-    live_candle = state._internal.live_candle || init_live_candle(new_data)
-
-    {new_tuple, new_hash} =
-      if data_changed do
-        {data_to_tuple(new_data), new_hash}
-      else
-        {state._internal.data_tuple, state._internal.data_hash}
-      end
-
     max_data_points = Map.get(props, :max_data_points, state.max_data_points)
 
     %{
@@ -954,9 +961,8 @@ defmodule Drafter.Widget.Chart do
           Map.merge(state._internal, %{
             precision: Map.get(props, :precision, state._internal[:precision] || 3),
             animation_offset: updated_animation_frame(props, state),
-            live_candle: live_candle,
-            data_tuple: new_tuple,
             data_hash: new_hash,
+            fixed_range: fixed_range(props, state),
             data_bounds: data_bounds,
             renderer: Map.get(props, :renderer, state._internal[:renderer]),
             smooth: Map.get(props, :smooth, state._internal[:smooth]),
@@ -969,7 +975,6 @@ defmodule Drafter.Widget.Chart do
               Map.get(props, :readout_sort, Map.get(state._internal, :readout_sort, :none)),
             line_thickness: Map.get(props, :line_thickness, state._internal[:line_thickness]),
             connect_lines: Map.get(props, :connect_lines, state._internal[:connect_lines]),
-            raw_data: Map.get(props, :raw_data, state._internal[:raw_data]),
             image_scale: Map.get(props, :image_scale, state._internal[:image_scale])
           })
     }
@@ -985,55 +990,10 @@ defmodule Drafter.Widget.Chart do
 
   defp apply_title(strips, _state, _rect, _bg, _fg), do: strips
 
-  defp dispatch_chart(state, w, h, bg, fg, anim, true) do
-    strips =
-      case state.chart_type do
-        :bar -> Bar.render_bar_chart_h(state, w, h, bg, fg)
-        :clustered_bar -> Bar.render_clustered_bar_h(state, w, h, bg)
-        :stacked_bar -> Bar.render_stacked_bar_h(state, w, h, bg)
-        :range_bar -> Bar.render_range_bar_h(state, w, h, bg, fg)
-        _ -> elem(dispatch_chart(state, w, h, bg, fg, anim, false), 0)
-      end
-
-    {strips, state}
+  defp fixed_range(props, state) do
+    {previous_min, previous_max} = Map.get(state._internal, :fixed_range, {nil, nil})
+    {Map.get(props, :min_value, previous_min), Map.get(props, :max_value, previous_max)}
   end
-
-  defp dispatch_chart(state, w, h, bg, fg, anim, false) do
-    dispatch_chart_v(state.chart_type, state, w, h, bg, fg, anim)
-  end
-
-  defp dispatch_chart_v(:braille_area, state, w, h, bg, _fg, _anim),
-    do: BrailleArea.render(state, w, h, bg)
-
-  defp dispatch_chart_v(:bar, s, w, h, bg, fg, _a),
-    do: {Bar.render_bar_chart_v(s, w, h, bg, fg), s}
-
-  defp dispatch_chart_v(:clustered_bar, s, w, h, bg, _fg, _a),
-    do: {Bar.render_clustered_bar(s, w, h, bg), s}
-
-  defp dispatch_chart_v(:stacked_bar, s, w, h, bg, _fg, _a),
-    do: {Bar.render_stacked_bar(s, w, h, bg), s}
-
-  defp dispatch_chart_v(:range_bar, s, w, h, bg, fg, _a),
-    do: {Bar.render_range_bar(s, w, h, bg, fg), s}
-
-  defp dispatch_chart_v(:candlestick, s, w, h, bg, fg, _a),
-    do: {Candlestick.render(s, w, h, bg, fg), s}
-
-  defp dispatch_chart_v(:area, s, w, h, bg, fg, a), do: {Area.render(s, w, h, bg, fg, a), s}
-  defp dispatch_chart_v(:scatter, s, w, h, bg, fg, _a), do: {Scatter.render(s, w, h, bg, fg), s}
-  defp dispatch_chart_v(:step, s, w, h, bg, fg, a), do: {Step.render(s, w, h, bg, fg, a), s}
-
-  defp dispatch_chart_v(:histogram, s, w, h, bg, fg, _a),
-    do: {Histogram.render(s, w, h, bg, fg), s}
-
-  defp dispatch_chart_v(:heatmap, s, w, h, bg, fg, _a), do: {Heatmap.render(s, w, h, bg, fg), s}
-  defp dispatch_chart_v(:bubble, s, w, h, bg, fg, _a), do: {Bubble.render(s, w, h, bg, fg), s}
-
-  defp dispatch_chart_v(:braille, s, w, h, bg, fg, a),
-    do: {Line.render_braille(s, w, h, bg, fg, a), s}
-
-  defp dispatch_chart_v(_type, s, w, h, bg, fg, a), do: {Line.render(s, w, h, bg, fg, a), s}
 
   defp scroll_left(state),
     do:
@@ -1055,59 +1015,14 @@ defmodule Drafter.Widget.Chart do
   defp max_scroll(%{data: data}) when is_list(data), do: max(0, length(data) - 1)
   defp max_scroll(_state), do: 0
 
-  defp init_live_candle(data) when is_list(data) and data != [] do
-    last_candle = List.last(data)
-
-    close =
-      case last_candle do
-        [_, _, _, c | _] -> c
-        _ -> 1.0850
-      end
-
-    %{
-      open: close,
-      high: close,
-      low: close,
-      close: close,
-      price_prints: 0,
-      prints_until_complete: 5 + :rand.uniform(10)
-    }
-  end
-
-  defp init_live_candle(_) do
-    %{
-      open: 1.0850,
-      high: 1.0850,
-      low: 1.0850,
-      close: 1.0850,
-      price_prints: 0,
-      prints_until_complete: 5 + :rand.uniform(10)
-    }
-  end
-
   defp custom_range?(props) do
     is_number(Map.get(props, :min_value)) or is_number(Map.get(props, :max_value))
   end
 
   defp data_bounds(data, props) do
-    live_candle = Map.get(props, :_live_candle)
-
-    data = data || []
-    data_values = extract_values(data, Map.get(props, :chart_type))
-
-    live_values =
-      if live_candle do
-        [live_candle.high, live_candle.low]
-      else
-        []
-      end
-
-    all_values = data_values ++ live_values
-
-    if all_values != [] do
-      Enum.min_max(all_values)
-    else
-      {0, 100}
+    case extract_values(data || [], Map.get(props, :chart_type)) do
+      [] -> {0, 100}
+      values -> Enum.min_max(values)
     end
   end
 
@@ -1174,9 +1089,6 @@ defmodule Drafter.Widget.Chart do
   defp stack_value(value) when is_number(value), do: value
   defp stack_value(nil), do: 0
 
-  defp data_to_tuple(data) when is_list(data), do: List.to_tuple(data)
-  defp data_to_tuple(data), do: data
-
   defp add_axes(strips, state, rect, bg, fg) do
     label_width = compute_y_axis_width(state)
     axis_col_width = label_width + 1
@@ -1188,6 +1100,14 @@ defmodule Drafter.Widget.Chart do
     end
   end
 
+  defp tick_label(_state, _tick, _ticks, 0), do: ""
+
+  defp tick_label(state, tick, ticks, _width) do
+    span = state.max_value - state.min_value
+    value = snap_zero(state.max_value - span * tick / ticks, span)
+    format_axis_value(value, state._internal[:precision] || 3)
+  end
+
   defp snap_zero(value, span) when abs(value) < abs(span) * 1.0e-9, do: 0.0
   defp snap_zero(value, _span), do: value
 
@@ -1196,9 +1116,7 @@ defmodule Drafter.Widget.Chart do
 
     y_axis_segments =
       for i <- 0..tick_span do
-        span = state.max_value - state.min_value
-        y_val = snap_zero(state.max_value - span * i / tick_span, span)
-        label = format_axis_value(y_val, state._internal[:precision] || 3)
+        label = tick_label(state, i, tick_span, label_width)
 
         Segment.new(IO.iodata_to_binary([String.pad_leading(label, label_width), "│"]), %{
           fg: fg,
@@ -1235,6 +1153,8 @@ defmodule Drafter.Widget.Chart do
 
     strips_with_y ++ [x_axis_strip]
   end
+
+  defp compute_y_axis_width(%{orientation: :horizontal}), do: 0
 
   defp compute_y_axis_width(state) do
     min_label = format_axis_value(state.min_value, state._internal[:precision] || 3)

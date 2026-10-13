@@ -6,7 +6,26 @@ Versions marked with ★ were published to Hex.pm.
 
 ## Unreleased
 
+### Breaking changes
+
+- **`render_multi_series/4` and `render_tall_bar_chart/3` are removed from `Drafter.Widget.Chart`**, with the text renderer modules behind them (`Chart.Line`, `Chart.MultiSeries`, `Chart.Bar`, `Chart.Area`, `Chart.BrailleArea`, `Chart.Step`, `Chart.Scatter`, `Chart.Bubble`, `Chart.Histogram`, `Chart.Heatmap`, `Chart.Candlestick`, `Chart.Pixels`, `Chart.Shared`). Draw a chart through the `chart/2` element, or `Drafter.Widget.Chart.Pixel.braille_strips/2` and `cells_strips/3` for strips.
+- **A chart with `renderer: :text` draws braille**, the same as `:braille` (with `pixel_style: :quadrant`, `:quad` blocks). Text output that matched block and box characters for bars, areas or heatmaps changes.
+- **The chart option `:raw_data` is removed.** Long series are reduced to the plot width keeping each column's extremes; drop the option.
+- **`:connect_lines` defaults to `true`.** Pass `connect_lines: false` to draw a `:line` chart's points alone.
+- **Apps ask the terminal for its cell size by default** (`cell_size: true` in `use Drafter.App`), so images are drawn at the terminal's own pixels per cell. Pass `cell_size: false` to send no query.
+- **`write_image/2` is removed from `Drafter.Render.Writer`.** A frame's image bytes are written with its text by `write/2`; `behind?/1` now covers them too.
+- **`↑`/`↓` on a focused chart pan by a tenth of the value span** per press, in every chart type, where they moved candlesticks only, by a fixed amount.
+
 ### Added
+
+- Charts are drawn once as shapes and painted at the output's own resolution: an image at the terminal's pixel size per cell when the app asks for it with `cell_size: true`, braille at two by four dots per cell, or a block-character set's sub-cell grid. Every chart type, in every renderer, has the same stacking, gaps, fills, line widths, smoothing, weighted series, `zero_center` scaling, `show_baseline`, `area_fill: :inverted`, horizontal bars, bar labels and values, `bar_gap`, scrolling and panning.
+- Frames are written whole: a widget with `image_raster/2` (charts, gauges, pie charts, sliders, digits) has its image drawn for the frame that shows it, all such images in parallel in their widget servers, and `Drafter.Compositor.present_frame/2` writes the frame's text and images in one synchronized update. Text never moves without its images while scrolling, and a chart and the axes around it change together. Widgets that send their own images (`image/3`) keep their own timing.
+- The value readout works on `:bar`, `:clustered_bar`, `:stacked_bar` and `:range_bar` charts: the bar or group under the pointer (under its row for horizontal bars) is read, labelled with its `:bar_labels` entry, and a range bar shows `low – high`.
+- Image widgets draw at the cell size the session's terminal reported, passed to each widget with the frame, so a pie chart or gauge started before the report still draws at full resolution.
+- A terminal that answers the window-size questions but not the cell-size one (iTerm2 answers `CSI 14 t` and `CSI 18 t`, not `CSI 16 t`) still gets a cell size: the startup query (`Drafter.Terminal.Reports.size_queries/0`) also asks iTerm2's own `OSC 1337 ; ReportCellSize`, whose reply becomes `{:cell_size, size}` in pixels, and failing that `Drafter.Session.Context.cell_size/0` divides the text area's pixels by its cells, rounded. Those replies arrive as `{:window_pixels, size}` and `{:text_cells, size}`.
+- Text drawn into images keeps every stroke at small cell sizes: each pixel row and column of a cell takes the glyph row or column with the most ink in the span it covers, inside the glyph's margins.
+- Chart images carry the value readout panel, drawn in the image with `Drafter.Widget.Digits.Bitmap`.
+- `Drafter.Widget.Digits.Bitmap` has lower case and `&`, `^`, `` ` ``, `{`, `|`, `}` and `~`, so the `:tall`, `:pixel` and `:braille` digit fonts draw them in their own shapes.
 
 - `:braille_area` charts accept `zero_center: :linear`: data crossing zero gets one linear axis from the lowest to the highest value, with zero where it falls.
 - `box/2` forwards `:border_style` and `:title_style`, and `Drafter.Widget.Box` applies `:border_style` to the border characters.
@@ -18,9 +37,9 @@ Versions marked with ★ were published to Hex.pm.
 - `Drafter.Visualization.Reduce`: `peaks/3`, `aligned_peaks/3`, `min_max/3` and `m4/2` reduce a series to the columns a plot can show while keeping its extremes and the original items.
 - Pixel, braille and cell-set charts fit their data to the raster width before drawing: line and step charts keep each column's minimum and maximum, area charts each column's peak, stacked series at shared indices.
 - Charts draw the y axis, the x axis line and the title around the plot in every renderer; a pixel chart's image fills the plot area inside them (`dx`/`dy` on its `Drafter.Render.Picture`).
-- Chart value readout on `:line`, `:braille`, `:step`, `:area`, `:braille_area` and `:stacked_area` charts: hovering (or clicking, when the app has hover off) highlights the column and shows a panel beside it, right of the cursor when it fits and otherwise left, with the `:x_labels` entry and each series' colour, name and value, ending in `… N more` when the series outnumber the rows; `Esc` hides it. A pixel chart, whose image covers its cells, shows the label and values along its first row. Charts now declare `:hover`.
+- Chart value readout on `:line`, `:braille`, `:step`, `:area`, `:braille_area` and `:stacked_area` charts: hovering (or clicking, when the app has hover off) highlights the column and shows a panel beside it, right of the cursor when it fits and otherwise left, with the `:x_labels` entry and each series' colour, name and value, ending in `… N more` when the series outnumber the rows; `Esc` hides it. A chart drawn as an image has the panel drawn into the image. Charts now declare `:hover`.
 - Chart options `:series_names` (names in the readout, default `series 1`, `series 2`, …), `:readout_format` (a function from a value to the text shown) and `:readout_sort` (`:none`, `:asc` or `:desc`).
-- Gaps in chart data: a `nil` in a `:line`, `:braille` or `:braille_area` series draws nothing at that position in every renderer and the series resumes after it, so series sampled on a shared time grid stay aligned. `Drafter.Visualization.Reduce` keeps a gap for a bucket holding only gaps and otherwise ignores them.
+- Gaps in chart data: a `nil` in a `:line`, `:braille`, `:step`, `:area` or `:braille_area` series draws nothing at that position in every renderer and the series resumes after it, so series sampled on a shared time grid stay aligned. `Drafter.Visualization.Reduce` keeps a gap for a bucket holding only gaps and otherwise ignores them.
 - `box/2` forwards `:content_style`, and `Drafter.Widget.Box` fills the interior with it. A title longer than the top border is cut with `…`.
 - `Drafter.Widget.Digits.Font.plain/1`: a one-row font drawing each character as itself.
 - `Drafter.Widget.Digits` `:fit`: a list of font names, largest first; each render uses the first whose height and text width fit the widget's rect.
@@ -28,19 +47,17 @@ Versions marked with ★ were published to Hex.pm.
 
 ### Changed
 
-- `:braille_area` charts reduce long series with `Reduce.aligned_peaks/3` instead of LTTB, so spikes survive and stacked layers stay aligned, and draw from one flat `:atomics` buffer. A 120×24 chart of five 300-point series renders in about 4 ms (was 59 ms).
-- The `:heatmap` text renderer indexes rows and columns as tuples.
+- `:braille_area` charts reduce long series with `Reduce.aligned_peaks/3` instead of LTTB, so spikes survive and stacked layers stay aligned.
+- A chart's y axis is labelled with the value range it was drawn against, including the stacked range of `:braille_area`, `:stacked_area` and `:stacked_bar` charts and the visible candles of a `:candlestick` chart.
+- `:fill_opacity` blends an area's colour toward the chart background rather than toward black.
 - `Drafter.Widget.Digits` `:fit` writes text that no listed font fits in plain characters on one row, cut to the width with `…`, instead of clipping the last font.
-- Text-mode multi-series `:line` charts reduce long series with `Reduce.min_max/3` instead of LTTB, keeping each column's extremes.
 - An element with `visible: false` keeps the generated ids it would take reserved, so the widgets after it keep their ids and state whether it is shown or not.
-- Vertical `:bar` charts in text mode draw each bar as a column of full blocks with a partial block on top, scaled to the chart height; each row used to repeat the same one-cell level.
 - A chart re-derives its value range only when its data changes or a fixed `:min_value`/`:max_value` is given, from cached data bounds. `:stacked_area` ranges cover the stacked totals.
 
 ### Fixed
 
 - A chart can no longer be scrolled past its data by dragging or with the arrow keys; `Drafter.ScrollMath.end_anchored_slice/3` on a tuple returns an empty slice for an empty window instead of raising. Dragging a bar chart far to the right used to crash the app.
-- Bar, clustered, stacked and histogram charts of non-negative data start their value range at 0, so bars grow from zero; text-mode vertical bars widen to fill the plot when there are fewer bars than columns.
-- Text-mode charts with axes and no title no longer leave an empty row above the x axis.
+- Bar, clustered, stacked and histogram charts of non-negative data start their value range at 0, so bars grow from zero.
 - Axis labels at zero read `0.000` rather than `-0.000`.
 - A `:line` chart given one series as a list of series (`[[1, 2, 3]]`) draws it; it used to draw nothing.
 - Showing or hiding an element with `visible:` no longer renumbers every generated id after it. The renumbered widgets were remounted under new ids while the old ones stayed registered, so their state was lost.

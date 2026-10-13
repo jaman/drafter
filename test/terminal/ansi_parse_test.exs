@@ -114,7 +114,7 @@ defmodule Drafter.Terminal.ANSIParseTest do
     end
 
     test "a control sequence no table knows produces no events" do
-      for reply <- ["\e[?62;4c", "\e[4;300;900t", "\e[?2026;2$y", "\e[>1;4000;27c"] do
+      for reply <- ["\e[?62;4c", "\e[?2026;2$y", "\e[>1;4000;27c"] do
         assert {[], ""} = ANSI.parse_sequence(reply, key_release: true), inspect(reply)
         assert {[], ""} = feed_in_chunks(reply, 1), inspect(reply)
       end

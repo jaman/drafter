@@ -1354,7 +1354,7 @@ defmodule Drafter do
   The terminal settings an app module declares with `use Drafter.App`.
 
   A keyword with `:mouse_hover` (default `true`), `:key_release` (default `false`),
-  `:cell_size` (default `false`), `:pixel_mouse` (default `false`) and `:controller`
+  `:cell_size` (default `true`), `:pixel_mouse` (default `false`) and `:controller`
   (default `false`), read from the module's `__mouse_hover__/0`, `__key_release__/0`,
   `__cell_size__/0`, `__pixel_mouse__/0` and `__controller__/0` when it defines them.
   Transports pass this to their driver's setup; `:controller` is acted on by the local
@@ -1373,7 +1373,7 @@ defmodule Drafter do
     [
       mouse_hover: app_setting(app_module, :__mouse_hover__, true),
       key_release: app_setting(app_module, :__key_release__, false),
-      cell_size: app_setting(app_module, :__cell_size__, false),
+      cell_size: app_setting(app_module, :__cell_size__, true),
       pixel_mouse: app_setting(app_module, :__pixel_mouse__, false),
       controller: app_setting(app_module, :__controller__, false)
     ]

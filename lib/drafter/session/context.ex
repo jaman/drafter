@@ -22,6 +22,8 @@ defmodule Drafter.Session.Context do
   @protocol_key :drafter_terminal_protocol
   @key_release_key :drafter_key_release
   @cell_size_key :drafter_cell_size
+  @window_pixels_key :drafter_window_pixels
+  @text_cells_key :drafter_text_cells
   @pixel_mouse_key :drafter_pixel_mouse
 
   @roles %{
@@ -53,6 +55,8 @@ defmodule Drafter.Session.Context do
       @protocol_key,
       @key_release_key,
       @cell_size_key,
+      @window_pixels_key,
+      @text_cells_key,
       @pixel_mouse_key | Enum.map(@roles, fn {_role, {key, _fallback}} -> key end)
     ]
   end
@@ -110,13 +114,47 @@ defmodule Drafter.Session.Context do
     :ok
   end
 
+  @doc "Record the terminal's text area size in pixels, from its `{:window_pixels, size}` report."
+  @spec put_window_pixels({pos_integer(), pos_integer()}) :: :ok
+  def put_window_pixels({width, height}) do
+    Process.put(@window_pixels_key, {width, height})
+    :ok
+  end
+
+  @doc "Record the terminal's text area size in cells, from its `{:text_cells, size}` report."
+  @spec put_text_cells({pos_integer(), pos_integer()}) :: :ok
+  def put_text_cells({cols, rows}) do
+    Process.put(@text_cells_key, {cols, rows})
+    :ok
+  end
+
   @doc """
-  The terminal's cell size as `{width, height}` in pixels, or `nil` when it has not
-  answered — because the app did not ask with `cell_size: true`, or the terminal does
-  not report it.
+  The terminal's cell size as `{width, height}` in pixels, or `nil` when it is not
+  known.
+
+  It is the size the terminal reported (`{:cell_size, size}`), else the text area's
+  pixel size divided by its size in cells, rounded, when the terminal reported
+  both of those instead. Nothing is known when the app did not ask (`cell_size: false`)
+  or the terminal answered none of the three questions.
+
+      iex> Drafter.Session.Context.put_window_pixels({1353, 745})
+      iex> Drafter.Session.Context.put_text_cells({221, 59})
+      iex> Drafter.Session.Context.cell_size()
+      {6, 13}
   """
   @spec cell_size() :: {pos_integer(), pos_integer()} | nil
-  def cell_size, do: Process.get(@cell_size_key)
+  def cell_size, do: Process.get(@cell_size_key) || divided_cell_size()
+
+  defp divided_cell_size do
+    with {width, height} <- Process.get(@window_pixels_key),
+         {cols, rows} <- Process.get(@text_cells_key),
+         cell_width when cell_width > 0 <- round(width / cols),
+         cell_height when cell_height > 0 <- round(height / rows) do
+      {cell_width, cell_height}
+    else
+      _unknown -> nil
+    end
+  end
 
   @doc """
   Record whether the terminal sends mouse reports in pixels.

@@ -60,11 +60,6 @@ defmodule Drafter.Widget.ChartPropUpdateTest do
       assert state._internal.image_scale == 8
     end
 
-    test "raw_data follows the props" do
-      assert remount(%{raw_data: false}, %{raw_data: true})._internal.raw_data == true
-      assert remount(%{raw_data: true}, %{raw_data: false})._internal.raw_data == false
-    end
-
     test "area and baseline props follow the props" do
       state =
         remount(
@@ -86,8 +81,16 @@ defmodule Drafter.Widget.ChartPropUpdateTest do
       |> Enum.map_join("\n", &Strip.to_plain_text/1)
     end
 
-    test "braille and text draw different glyphs" do
-      refute strips(:braille) == strips(:text)
+    test "text draws braille, or quad blocks with the quadrant pixel style" do
+      assert strips(:braille) == strips(:text)
+
+      quadrant =
+        %{data: @data, renderer: :text, pixel_style: :quadrant}
+        |> Chart.mount()
+        |> Chart.render(@rect)
+        |> Enum.map_join("\n", &Strip.to_plain_text/1)
+
+      refute quadrant == strips(:text)
     end
 
     test "a pixel renderer leaves the cells blank for the image to occupy" do

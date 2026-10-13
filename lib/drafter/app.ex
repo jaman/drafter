@@ -58,10 +58,11 @@ defmodule Drafter.App do
       terminal that speaks the protocol without them. The `{:key, ...}` events are
       unchanged.
       See `Drafter.Terminal.KittyKeyboard` for the key names.
-    * `:cell_size` - `boolean()`, default `false`. `true` asks each session's terminal
-      how many pixels a cell is; the answer arrives as `{:cell_size, {width, height}}`
-      and `Drafter.Session.Context.cell_size/0` keeps it. Widgets placing images at
-      pixel offsets need it.
+    * `:cell_size` - `boolean()`, default `true`. Asks each session's terminal how
+      many pixels a cell is; the answer arrives as `{:cell_size, {width, height}}` and
+      `Drafter.Session.Context.cell_size/0` keeps it. Image widgets draw at that size,
+      and widgets placing images at pixel offsets need it. `false` sends no query, and
+      images are drawn at a fixed pixels-per-cell scale.
     * `:pixel_mouse` - `boolean()`, default `false`. `true` asks each session's
       terminal for its cell size and then for mouse reports in pixels (SGR-Pixels,
       DECSET 1016). Mouse payloads keep `x` and `y` in cells and, once the terminal
@@ -452,7 +453,7 @@ defmodule Drafter.App do
       @inline_styles Keyword.get(unquote(opts), :styles, %{})
       @mouse_hover Keyword.get(unquote(opts), :mouse_hover, true)
       @key_release Keyword.get(unquote(opts), :key_release, false)
-      @cell_size Keyword.get(unquote(opts), :cell_size, false)
+      @cell_size Keyword.get(unquote(opts), :cell_size, true)
       @pixel_mouse Keyword.get(unquote(opts), :pixel_mouse, false)
       @controller Keyword.get(unquote(opts), :controller, false)
       @frame_pacing Keyword.get(unquote(opts), :frame_pacing, :animations)

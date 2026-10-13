@@ -51,8 +51,8 @@ defmodule Drafter.TestSupport.ScreenModel do
   end
 
   defp step("\e]" <> rest, screen, cursor) do
-    [_osc, rest] = String.split(rest, "\e\\", parts: 2)
-    step(rest, screen, cursor)
+    {index, length} = :binary.match(rest, ["\e\\", "\a"])
+    step(binary_part(rest, index + length, byte_size(rest) - index - length), screen, cursor)
   end
 
   defp step(<<?\e, _char, rest::binary>>, screen, cursor), do: step(rest, screen, cursor)

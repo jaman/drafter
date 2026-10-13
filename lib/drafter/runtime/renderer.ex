@@ -10,6 +10,7 @@ defmodule Drafter.Runtime.Renderer do
   alias Drafter.Compositor
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.LayerCompositor
+  alias Drafter.Render.FrameImages
   alias Drafter.RenderCache
   alias Drafter.Screen
   alias Drafter.ScreenManager
@@ -204,7 +205,7 @@ defmodule Drafter.Runtime.Renderer do
          _existing_hierarchy
        )
        when is_list(strips) do
-    Compositor.render_strips(strips, 0, 0)
+    present(strips)
     {:ok, nil}
   end
 
@@ -220,7 +221,7 @@ defmodule Drafter.Runtime.Renderer do
     if widget_layers == [] do
       RenderCache.put_composited(background_strips)
       RenderCache.put_layer_count(0)
-      Compositor.render_strips(background_strips, 0, 0)
+      present(background_strips)
     else
       viewport = %{width: screen_rect.width, height: screen_rect.height}
       background_layer = LayerCompositor.background_layer(background_strips, screen_rect)
@@ -232,7 +233,7 @@ defmodule Drafter.Runtime.Renderer do
       t2 = System.monotonic_time(:microsecond)
       RenderCache.put_composited(final_strips)
       RenderCache.put_layer_count(length(all_layers))
-      Compositor.render_strips(final_strips, 0, 0)
+      present(final_strips)
 
       ctrace([
         "A build_us=",
@@ -266,7 +267,7 @@ defmodule Drafter.Runtime.Renderer do
       if base_layers == [] do
         RenderCache.put_composited(background_strips)
         RenderCache.put_layer_count(0)
-        Compositor.render_strips(background_strips, 0, 0)
+        present(background_strips)
       else
         all_layers = [background_layer | base_layers]
 
@@ -275,7 +276,7 @@ defmodule Drafter.Runtime.Renderer do
 
         RenderCache.put_composited(final_strips)
         RenderCache.put_layer_count(length(all_layers))
-        Compositor.render_strips(final_strips, 0, 0)
+        present(final_strips)
       end
     else
       {screen_layers, overlay_layers} =
@@ -293,7 +294,7 @@ defmodule Drafter.Runtime.Renderer do
 
       RenderCache.put_composited(final_strips)
       RenderCache.put_layer_count(length(all_layers))
-      Compositor.render_strips(final_strips, 0, 0)
+      present(final_strips)
     end
   end
 
@@ -334,14 +335,14 @@ defmodule Drafter.Runtime.Renderer do
     if length(all_layers) == 1 do
       RenderCache.put_composited(background_strips)
       RenderCache.put_layer_count(0)
-      Compositor.render_strips(background_strips, 0, 0)
+      present(background_strips)
     else
       viewport = %{width: screen_rect.width, height: screen_rect.height}
       dirty_rows = layer_rows(overlay, viewport)
       final_strips = incremental_composite_or_full(all_layers, viewport, dirty_rows, [])
       RenderCache.put_composited(final_strips)
       RenderCache.put_layer_count(length(all_layers))
-      Compositor.render_strips(final_strips, 0, 0)
+      present(final_strips)
     end
   end
 
@@ -822,11 +823,7 @@ defmodule Drafter.Runtime.Renderer do
   defp overlay_image(widget_id, %{module: module} = widget_info, placement, shown?) do
     cond do
       image_active?(widget_id, widget_info) ->
-        visible = shown? and relative_window(placement)
-        unseen? = shown? and not WidgetStripCache.visible?(widget_id)
-        WidgetStripCache.mark_visible(widget_id, visible)
-        if unseen?, do: WidgetServer.retry_image(Map.get(widget_info, :pid))
-        do_overlay_image(widget_id, widget_info, placement, shown?)
+        active_image(widget_id, widget_info, placement, shown?)
 
       Drafter.Widget.draws_images?(module) ->
         Drafter.Compositor.clear_image(widget_id)
@@ -835,6 +832,33 @@ defmodule Drafter.Runtime.Renderer do
         :ok
     end
   end
+
+  defp active_image(widget_id, widget_info, placement, shown?) do
+    visible = shown? and relative_window(placement)
+
+    if frame_bound?(widget_info) do
+      WidgetStripCache.mark_visible(widget_id, visible)
+      frame_image(widget_id, widget_info, placement, shown?)
+    else
+      unseen? = shown? and not WidgetStripCache.visible?(widget_id)
+      WidgetStripCache.mark_visible(widget_id, visible)
+      if unseen?, do: WidgetServer.retry_image(Map.get(widget_info, :pid))
+      do_overlay_image(widget_id, widget_info, placement, shown?)
+    end
+  end
+
+  defp frame_bound?(%{pid: pid, module: module}) when is_pid(pid),
+    do: function_exported?(module, :image_raster, 2)
+
+  defp frame_bound?(_widget_info), do: false
+
+  defp frame_image(widget_id, %{pid: pid}, placement, true),
+    do: FrameImages.queue(widget_id, pid, placement)
+
+  defp frame_image(widget_id, _widget_info, _placement, false),
+    do: Drafter.Compositor.clear_image(widget_id)
+
+  defp present(strips), do: Compositor.present_frame(strips, FrameImages.ops())
 
   defp image_active?(widget_id, %{pid: pid, module: module, state: state}) when is_pid(pid) do
     case WidgetStripCache.image_active(widget_id) do

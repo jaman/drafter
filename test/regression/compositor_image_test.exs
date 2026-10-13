@@ -240,21 +240,21 @@ defmodule Drafter.Regression.CompositorImageTest do
     def writes(pid), do: pid |> Agent.get(& &1) |> Enum.reverse()
   end
 
-  test "an image frame is written after the text, outside the synchronized update, in its own write",
+  test "a frame's text and its image are one write, inside one synchronized update",
        %{cap: cap} do
-    Compositor.put_image(:chart, "PAINTBYTES", "DELETESEQ", %{dx: 0, dy: 0, cols: 6, rows: 2})
-    Compositor.place_image(:chart, 3, 5)
+    Compositor.present_frame([Strip.from_text("hello")], [
+      {:put, :chart, "PAINTBYTES", "DELETESEQ", %{dx: 0, dy: 0, cols: 6, rows: 2}},
+      {:place, :chart, 3, 5, nil}
+    ])
+
     assert poll(cap, &String.contains?(&1, "PAINTBYTES"))
 
-    out = Cap.dump(cap)
-    [before_image, _] = String.split(out, "PAINTBYTES", parts: 2)
-    assert String.contains?(before_image, "\e[?2026l")
-
-    assert length(String.split(before_image, "\e[?2026h")) ==
-             length(String.split(before_image, "\e[?2026l"))
+    [frame] = cap |> Cap.dump() |> String.split("\e[?2026l") |> Enum.filter(&(&1 =~ "PAINTBYTES"))
+    assert frame =~ "\e[?2026h"
+    assert frame =~ "hello"
   end
 
-  test "text keeps flowing while a slow terminal digests images, and only the newest image is written" do
+  test "frames presented while a slow terminal is still writing are merged, each write whole" do
     {:ok, em} = Event.Manager.start_link(name: nil)
     {:ok, slow} = SlowCap.start()
 
@@ -263,13 +263,12 @@ defmodule Drafter.Regression.CompositorImageTest do
 
     Process.put(:drafter_compositor, comp)
 
-    Compositor.put_image(:chart, "IMG1", "", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: 1})
-    Compositor.place_image(:chart, 3, 5)
-    Process.sleep(20)
+    for n <- 1..6 do
+      Compositor.present_frame([Strip.from_text("row#{n}")], [
+        {:put, :chart, "IMG#{n}", "", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: n}},
+        {:place, :chart, 3, 5, nil}
+      ])
 
-    for n <- 2..6 do
-      Compositor.put_image(:chart, "IMG#{n}", "", %{dx: 0, dy: 0, cols: 6, rows: 2, stamp: n})
-      Compositor.render_strips([Strip.from_text("row#{n}")], 0, 20)
       Process.sleep(5)
     end
 
@@ -277,10 +276,13 @@ defmodule Drafter.Regression.CompositorImageTest do
     writes = SlowCap.writes(slow)
     image_writes = Enum.filter(writes, &String.contains?(&1, "IMG"))
 
-    assert writes |> ScreenModel.apply() |> ScreenModel.row(20) == "row6"
     assert List.last(image_writes) =~ "IMG6"
     assert length(image_writes) < 6
-    assert Enum.all?(image_writes, &(not String.contains?(&1, "row")))
+
+    for {write, index} <- Enum.with_index(writes), [_, n] <- [Regex.run(~r/IMG(\d)/, write)] do
+      shown = writes |> Enum.take(index + 1) |> ScreenModel.apply() |> ScreenModel.row(0)
+      assert shown == "row#{n}", "image #{n} was written with the text of another frame"
+    end
   end
 
   describe "a stored kitty image" do

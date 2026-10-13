@@ -7,35 +7,24 @@ defmodule Drafter.Render.WriterTest do
     def start(delay_ms), do: Agent.start_link(fn -> {delay_ms, []} end)
 
     def write(pid, bytes) do
-      binary = IO.iodata_to_binary(bytes)
       {delay, _} = Agent.get(pid, & &1)
-      if delay > 0 and String.contains?(binary, "IMG"), do: Process.sleep(delay)
-      Agent.update(pid, fn {d, writes} -> {d, [binary | writes]} end)
+      if delay > 0, do: Process.sleep(delay)
+      Agent.update(pid, fn {d, writes} -> {d, [IO.iodata_to_binary(bytes) | writes]} end)
     end
 
     def writes(pid), do: pid |> Agent.get(fn {_, writes} -> writes end) |> Enum.reverse()
   end
 
-  test "an image is written after the text that preceded it, and stale images are skipped" do
-    {:ok, sink} = Sink.start(30)
+  test "writes reach the sink whole and in order, and behind? holds until they have" do
+    {:ok, sink} = Sink.start(20)
     {:ok, writer} = Writer.start_link(&Sink.write(sink, &1))
 
-    Writer.write(writer, "t1")
-    Writer.write_image(writer, "IMG1")
-    Process.sleep(5)
-
-    for n <- 2..6 do
-      Writer.write(writer, "t#{n}")
-      Writer.write_image(writer, "IMG#{n}")
-    end
+    for n <- 1..4, do: Writer.write(writer, ["frame", Integer.to_string(n)])
+    assert Writer.behind?(writer)
 
     Writer.flush(writer)
-    writes = Sink.writes(sink)
 
-    assert Enum.filter(writes, &String.starts_with?(&1, "t")) == for(n <- 1..6, do: "t#{n}")
-    images = Enum.filter(writes, &String.starts_with?(&1, "IMG"))
-    assert List.last(images) == "IMG6"
-    assert length(images) < 6
-    assert Enum.find_index(writes, &(&1 == "t6")) < Enum.find_index(writes, &(&1 == "IMG6"))
+    refute Writer.behind?(writer)
+    assert Sink.writes(sink) == for(n <- 1..4, do: "frame#{n}")
   end
 end

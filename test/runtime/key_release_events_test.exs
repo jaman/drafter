@@ -70,7 +70,7 @@ defmodule Drafter.Runtime.KeyReleaseEventsTest do
     assert Drafter.terminal_opts(Held) == [
              mouse_hover: true,
              key_release: true,
-             cell_size: false,
+             cell_size: true,
              pixel_mouse: false,
              controller: false
            ]
@@ -78,7 +78,7 @@ defmodule Drafter.Runtime.KeyReleaseEventsTest do
     assert Drafter.terminal_opts(Plain) == [
              mouse_hover: true,
              key_release: false,
-             cell_size: false,
+             cell_size: true,
              pixel_mouse: false,
              controller: false
            ]

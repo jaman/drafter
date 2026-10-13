@@ -32,8 +32,8 @@ defmodule Drafter.Widget.DigitsRasterTest do
       end
     end
 
-    test "lower case resolves to the upper-case bitmap" do
-      assert Bitmap.pixels("q") == Bitmap.pixels("Q")
+    test "lower case has a bitmap of its own" do
+      refute Bitmap.pixels("q") == Bitmap.pixels("Q")
       assert Bitmap.drawable?("q")
     end
 

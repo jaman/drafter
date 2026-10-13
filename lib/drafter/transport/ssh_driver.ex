@@ -266,7 +266,7 @@ defmodule Drafter.Transport.SSHDriver do
   defp keyboard_protocol_on(true), do: [KittyKeyboard.push(), KittyKeyboard.query()]
   defp keyboard_protocol_on(false), do: []
 
-  defp cell_size_query(true), do: [Reports.cell_size_query()]
+  defp cell_size_query(true), do: [Reports.size_queries()]
   defp cell_size_query(false), do: []
 
   defp keyboard_protocol_off(true), do: [KittyKeyboard.pop()]

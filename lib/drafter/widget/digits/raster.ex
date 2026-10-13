@@ -21,10 +21,23 @@ defmodule Drafter.Widget.Digits.Raster do
 
   """
 
-  alias Drafter.Widget.Chart.Pixels
   alias Drafter.Widget.Digits.Bitmap
 
   @type packing :: :braille | :quadrant | :half
+
+  @braille_dots %{
+    {0, 0} => 0x01,
+    {0, 1} => 0x02,
+    {0, 2} => 0x04,
+    {0, 3} => 0x40,
+    {1, 0} => 0x08,
+    {1, 1} => 0x10,
+    {1, 2} => 0x20,
+    {1, 3} => 0x80
+  }
+
+  @quadrant_bits %{{0, 0} => 1, {1, 0} => 2, {0, 1} => 4, {1, 1} => 8}
+  @quadrants " ▘▝▀▖▌▚▛▗▞▐▜▄▙▟█" |> String.graphemes() |> List.to_tuple()
 
   @doc "Pixels a cell holds, as `{across, down}`, for a packing."
   @spec cell_pixels(packing()) :: {pos_integer(), pos_integer()}
@@ -94,13 +107,13 @@ defmodule Drafter.Widget.Digits.Raster do
   end
 
   defp render_cell(:braille, lit_in_cell) do
-    bits = Enum.reduce(lit_in_cell, 0, &(&2 + Map.fetch!(Pixels.braille_dot_offsets(), &1)))
-    Pixels.braille_char(bits)
+    bits = Enum.reduce(lit_in_cell, 0, &(&2 + Map.fetch!(@braille_dots, &1)))
+    <<0x2800 + bits::utf8>>
   end
 
   defp render_cell(:quadrant, lit_in_cell) do
-    bits = Enum.reduce(lit_in_cell, 0, &(&2 + Pixels.quadrant_bit(&1)))
-    Pixels.quadrant_char(bits)
+    bits = Enum.reduce(lit_in_cell, 0, &(&2 + Map.get(@quadrant_bits, &1, 0)))
+    elem(@quadrants, bits)
   end
 
   defp render_cell(:half, lit_in_cell) do
