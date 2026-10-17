@@ -47,8 +47,9 @@ defmodule Drafter.Transport.SSH do
     * `:tunnel` - `boolean()`, default `false`. `true` lets a client ask the daemon
       to listen on a port and forward its connections back to the client, which is
       `ssh -R`.
-    * `:system_dir` - host-key directory. Default: `drafter_ssh` under the system
-      temp directory, holding an RSA host key generated in Erlang on first use.
+    * `:system_dir` - host-key directory. Default: `ssh` in
+      `:filename.basedir(:user_data, "drafter")`, holding an RSA host key generated in
+      Erlang on first use; a key in the earlier `drafter_ssh` temp directory is copied there.
     * `:mount_props` - map handed to each session's `mount/1`. Default: `%{}`. The
       connecting username is merged in under `:username` as a string.
     * `:send_buffer` - bytes of the operating system's send buffer for each
@@ -306,11 +307,14 @@ defmodule Drafter.Transport.SSH do
   end
 
   defp resolve_system_dir(nil) do
-    dir = Path.join(System.tmp_dir!(), "drafter_ssh")
+    dir = Path.join(to_string(:filename.basedir(:user_data, "drafter")), "ssh")
+    key = Path.join(dir, "ssh_host_rsa_key")
     File.mkdir_p!(dir)
 
-    unless File.exists?(Path.join(dir, "ssh_host_rsa_key")) do
-      generate_host_key(dir)
+    unless File.exists?(key) do
+      earlier = Path.join([System.tmp_dir!(), "drafter_ssh", "ssh_host_rsa_key"])
+      if File.exists?(earlier), do: File.cp!(earlier, key), else: generate_host_key(key)
+      File.chmod(key, 0o600)
     end
 
     dir
@@ -391,9 +395,9 @@ defmodule Drafter.Transport.SSH do
     for {username, _password, props} <- entries, into: %{}, do: {to_string(username), props}
   end
 
-  defp generate_host_key(dir) do
+  defp generate_host_key(path) do
     key = :public_key.generate_key({:rsa, 3072, 65_537})
     pem = :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, key)])
-    File.write!(Path.join(dir, "ssh_host_rsa_key"), pem)
+    File.write!(path, pem)
   end
 end

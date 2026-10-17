@@ -18,6 +18,10 @@ Versions marked with ★ were published to Hex.pm.
 
 - `start_ssh/2` without `system_dir:` makes its RSA host key in Erlang. It ran
   `ssh-keygen`, which Windows often lacks, so the server started with no host key there.
+- That host key is kept in drafter's user data directory (`~/.local/share/drafter/ssh`,
+  `~/Library/Application Support/drafter/ssh` or `%LOCALAPPDATA%\drafter\ssh`). It was
+  kept in the temp directory, so a cleaned temp directory gave clients a new host key to
+  be warned about. A key already in the temp directory is copied over.
 - A widget first rendered as a modal closed ran in two widget servers at once. The render that runs when a screen closes mounted the app's new widgets into a hierarchy it then discarded, so the next render mounted them again, and both servers kept receiving messages and drawing. `Drafter.Renderer.render_screens_from_manager/4` now returns the app hierarchy it rendered, and the app loop keeps it.
 - Widget servers of a closed screen kept running. Popping or replacing a screen now stops the widget servers of its hierarchy.
 - A widget that leaves the screen is forgotten by the render cache. Its bounds were kept and repainted around on every later frame, and the record grew with each widget id that came and went.

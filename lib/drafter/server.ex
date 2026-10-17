@@ -25,8 +25,8 @@ defmodule Drafter.Server do
 
   ## Generating SSH host keys
 
-  If no `system_dir:` is provided, host keys are automatically generated and
-  cached in a temp directory. For production use, generate persistent keys:
+  If no `system_dir:` is provided, a host key is generated on first use and kept in
+  drafter's user data directory (see `:system_dir` below). To use keys of your own:
 
       ssh-keygen -t rsa -b 2048 -f /etc/drafter/ssh_host_rsa_key -N ""
 
@@ -57,9 +57,13 @@ defmodule Drafter.Server do
       atom `:anonymous` to accept any username and password, or
       `{:public_key, user_dir}` to accept clients whose public key is in
       `user_dir/authorized_keys`, with no passwords. Default `[{"admin", "admin"}]`.
-    * `:system_dir` - path to the directory holding the SSH host keys. Default: a
-      `drafter_ssh` directory under the system temp directory, holding an RSA host key
-      generated in Erlang on first use, on every platform.
+    * `:system_dir` - path to the directory holding the SSH host keys. Default: an
+      `ssh` directory in drafter's user data directory (`:filename.basedir(:user_data,
+      "drafter")`: `~/.local/share/drafter` or `$XDG_DATA_HOME/drafter` on Linux,
+      `~/Library/Application Support/drafter` on macOS, `%LOCALAPPDATA%\\drafter` on
+      Windows), holding an RSA host key generated in Erlang on first use, so clients
+      see the same key across restarts. A key in the earlier `drafter_ssh` temp directory
+      is copied there.
     * `:mount_props` - `map()` handed to each session's `mount/1`. Default `%{}`.
       The authenticated username is added to it under `:username` as a string, so
       every SSH session's mount props carry that key whether or not you set it.
