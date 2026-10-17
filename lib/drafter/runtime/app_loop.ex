@@ -11,6 +11,7 @@ defmodule Drafter.Runtime.AppLoop do
 
   alias Drafter.Runtime
   alias Drafter.Runtime.FrameClock
+  alias Drafter.Runtime.IdleCollect
   alias Drafter.Runtime.Renderer
   alias Drafter.Session.Context
   alias Drafter.Session.SharedState
@@ -161,6 +162,16 @@ defmodule Drafter.Runtime.AppLoop do
     publish_shared_state(app_state)
     ctx = {app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack}
 
+    receive do
+      msg -> dispatch_loop_msg(msg, ctx)
+    after
+      IdleCollect.after_ms() -> :erlang.hibernate(__MODULE__, :resume_event_loop, [ctx])
+    end
+  end
+
+  @doc false
+  @spec resume_event_loop(tuple()) :: no_return()
+  def resume_event_loop(ctx) do
     receive do
       msg -> dispatch_loop_msg(msg, ctx)
     end
@@ -575,8 +586,8 @@ defmodule Drafter.Runtime.AppLoop do
   end
 
   defp dispatch_loop_msg(:screen_render_needed, {app_module, app_state, rect, timers, wh, ss}) do
-    Renderer.render_screens_from_manager(rect, app_module, app_state, wh)
-    app_event_loop(app_module, app_state, rect, timers, wh, ss)
+    new_wh = Renderer.render_screens_from_manager(rect, app_module, app_state, wh)
+    app_event_loop(app_module, app_state, rect, timers, new_wh, ss)
   end
 
   defp dispatch_loop_msg(
@@ -985,8 +996,10 @@ defmodule Drafter.Runtime.AppLoop do
   defp render_screens_and_loop(
          {app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack}
        ) do
-    Renderer.render_screens_from_manager(screen_rect, app_module, app_state, widget_hierarchy)
-    app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, session_stack)
+    new_hierarchy =
+      Renderer.render_screens_from_manager(screen_rect, app_module, app_state, widget_hierarchy)
+
+    app_event_loop(app_module, app_state, screen_rect, timers, new_hierarchy, session_stack)
   end
 
   defp restyle_widgets(%{widgets: widgets}),

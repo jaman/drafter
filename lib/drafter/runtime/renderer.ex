@@ -42,13 +42,11 @@ defmodule Drafter.Runtime.Renderer do
 
     cond do
       screens != [] ->
-        render_screens_from_manager(screen_rect, app_module, app_state, existing_hierarchy)
-        {:ok, existing_hierarchy}
+        {:ok, render_screens_from_manager(screen_rect, app_module, app_state, existing_hierarchy)}
 
       toasts != [] ->
         hierarchy = rebuild_app_hierarchy(app_module, app_state, screen_rect, existing_hierarchy)
-        render_screens_from_manager(screen_rect, app_module, app_state, hierarchy)
-        {:ok, hierarchy}
+        {:ok, render_screens_from_manager(screen_rect, app_module, app_state, hierarchy)}
 
       true ->
         render_app_direct(app_module, app_state, screen_rect, existing_hierarchy)
@@ -301,18 +299,20 @@ defmodule Drafter.Runtime.Renderer do
   @doc """
   Composite the app, every screen on the screen stack, and any toasts, in that order.
 
-  `existing_hierarchy` supplies the app's base layers when it is not `nil`; otherwise
-  the app is re-rendered to produce them. Note the argument order: `screen_rect` comes
+  `existing_hierarchy` supplies the app's base layers while screens are open;
+  otherwise the app is re-rendered into it to produce them. Returns the app's
+  hierarchy after this render, which the caller must keep: widgets mounted while
+  producing the base layers live in it. Note the argument order: `screen_rect` comes
   first here, unlike `render_app/4`.
   """
-  @spec render_screens_from_manager(rect(), module(), term(), map() | nil) :: :ok
+  @spec render_screens_from_manager(rect(), module(), term(), map() | nil) :: map() | nil
   def render_screens_from_manager(screen_rect, app_module, app_state, existing_hierarchy) do
     screens = ScreenManager.get_all_screens()
     toasts = ScreenManager.get_toasts()
     current_theme = ThemeManager.get_current_theme()
     background_strips = create_app_background(screen_rect, current_theme)
 
-    base_layers =
+    {base_layers, hierarchy} =
       compute_base_layers(
         screens,
         existing_hierarchy,
@@ -332,18 +332,23 @@ defmodule Drafter.Runtime.Renderer do
     overlay = List.flatten(screen_layers) ++ overlay_layers ++ toast_layers
     all_layers = [background_layer] ++ base_layers ++ overlay
 
-    if length(all_layers) == 1 do
-      RenderCache.put_composited(background_strips)
-      RenderCache.put_layer_count(0)
-      present(background_strips)
-    else
-      viewport = %{width: screen_rect.width, height: screen_rect.height}
-      dirty_rows = layer_rows(overlay, viewport)
-      final_strips = incremental_composite_or_full(all_layers, viewport, dirty_rows, [])
-      RenderCache.put_composited(final_strips)
-      RenderCache.put_layer_count(length(all_layers))
-      present(final_strips)
-    end
+    present_layers(all_layers, background_strips, overlay, screen_rect)
+    hierarchy
+  end
+
+  defp present_layers([_background], background_strips, _overlay, _screen_rect) do
+    RenderCache.put_composited(background_strips)
+    RenderCache.put_layer_count(0)
+    present(background_strips)
+  end
+
+  defp present_layers(all_layers, _background_strips, overlay, screen_rect) do
+    viewport = %{width: screen_rect.width, height: screen_rect.height}
+    dirty_rows = layer_rows(overlay, viewport)
+    final_strips = incremental_composite_or_full(all_layers, viewport, dirty_rows, [])
+    RenderCache.put_composited(final_strips)
+    RenderCache.put_layer_count(length(all_layers))
+    present(final_strips)
   end
 
   defp layer_rows(layers, viewport) do
@@ -363,14 +368,14 @@ defmodule Drafter.Runtime.Renderer do
          _theme
        )
        when screens != [] and not is_nil(existing_hierarchy) do
-    create_widget_layers_from_hierarchy(existing_hierarchy, screen_rect)
+    {create_widget_layers_from_hierarchy(existing_hierarchy, screen_rect), existing_hierarchy}
   end
 
-  defp compute_base_layers(_screens, _existing_hierarchy, nil, _app_state, _screen_rect, _theme),
-    do: []
+  defp compute_base_layers(_screens, existing_hierarchy, nil, _app_state, _screen_rect, _theme),
+    do: {[], existing_hierarchy}
 
-  defp compute_base_layers(_screens, _existing_hierarchy, _app_module, nil, _screen_rect, _theme),
-    do: []
+  defp compute_base_layers(_screens, existing_hierarchy, _app_module, nil, _screen_rect, _theme),
+    do: {[], existing_hierarchy}
 
   defp compute_base_layers(
          _screens,
@@ -398,10 +403,10 @@ defmodule Drafter.Runtime.Renderer do
             app_module: app_module
           )
 
-        create_widget_layers_from_hierarchy(hierarchy, screen_rect)
+        {create_widget_layers_from_hierarchy(hierarchy, screen_rect), hierarchy}
 
       _ ->
-        []
+        {[], existing_hierarchy}
     end
   end
 
@@ -576,9 +581,12 @@ defmodule Drafter.Runtime.Renderer do
   end
 
   defp collect_vanished_bounds(visible_ids) do
-    RenderCache.get_all_widget_bounds()
-    |> Enum.reject(fn {id, _} -> MapSet.member?(visible_ids, id) end)
-    |> Enum.map(fn {_, bounds} -> bounds end)
+    vanished =
+      RenderCache.get_all_widget_bounds()
+      |> Enum.reject(fn {id, _} -> MapSet.member?(visible_ids, id) end)
+
+    vanished |> Enum.map(fn {id, _} -> id end) |> RenderCache.forget_widgets()
+    Enum.map(vanished, fn {_, bounds} -> bounds end)
   end
 
   defp incremental_composite_or_full(all_layers, viewport, dirty_rows, stale_bounds) do

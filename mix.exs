@@ -4,7 +4,7 @@ defmodule Drafter.MixProject do
   def project do
     [
       app: :drafter,
-      version: "0.5.6",
+      version: "0.5.7",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:elixir_make | Mix.compilers()],
@@ -27,6 +27,7 @@ defmodule Drafter.MixProject do
           "guides/remote_tui.md": [title: "Remote TUI"],
           "guides/writing_widgets.md": [title: "Writing Widgets & Libraries"],
           "guides/large_text.md": [title: "Large Text"],
+          "guides/memory.md": [title: "Memory"],
           "guides/design_notes.md": [title: "Design Notes"]
         ],
         groups_for_modules: [
@@ -133,8 +134,7 @@ defmodule Drafter.MixProject do
 
   defp deps do
     [
-      {:elixir_make, "~> 0.9"},
-      {:spark, "~> 2.6"},
+      {:elixir_make, "~> 0.9", runtime: false},
       family(:french_curve, "~> 0.2.1", "../french_curve"),
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:plumb, "~> 0.1", only: :dev, runtime: false},

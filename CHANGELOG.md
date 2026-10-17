@@ -4,7 +4,25 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
-## Unreleased
+## [0.5.7]
+
+### Added
+
+- `Drafter.Server.start_ssh/2` accepts `auth: {:public_key, user_dir}`, which logs clients in by the keys in `user_dir/authorized_keys` with no passwords, and `ssh_opts:`, further `:ssh.daemon/2` options such as `subsystems:` for an SSH subsystem on the same port.
+
+### Changed
+
+- The compositor, every widget server and the app loop compact their heaps after 250 ms without a message, so the terms built for a frame no longer stay allocated between frames. A Vitals-sized app (four large widgets, one update per second) holds about 11 MB less in its processes. `config :drafter, idle_collect_ms: ms` sets the wait and `:infinity` turns it off; see the new Memory guide.
+
+### Fixed
+
+- `start_ssh/2` without `system_dir:` makes its RSA host key in Erlang. It ran
+  `ssh-keygen`, which Windows often lacks, so the server started with no host key there.
+- A widget first rendered as a modal closed ran in two widget servers at once. The render that runs when a screen closes mounted the app's new widgets into a hierarchy it then discarded, so the next render mounted them again, and both servers kept receiving messages and drawing. `Drafter.Renderer.render_screens_from_manager/4` now returns the app hierarchy it rendered, and the app loop keeps it.
+- Widget servers of a closed screen kept running. Popping or replacing a screen now stops the widget servers of its hierarchy.
+- A widget that leaves the screen is forgotten by the render cache. Its bounds were kept and repainted around on every later frame, and the record grew with each widget id that came and went.
+
+## [0.5.6]
 
 ### Breaking changes
 

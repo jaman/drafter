@@ -77,6 +77,23 @@ defmodule Drafter.RenderCache do
   @spec get_all_widget_bounds() :: %{term() => map()}
   def get_all_widget_bounds, do: Process.get(@widget_bounds_key, %{})
 
+  @doc """
+  Drop the recorded bounds and row fingerprints of the widgets in `widget_ids`.
+
+  Called for widgets that left the screen, once their old bounds have been marked
+  dirty, so a widget that is gone is neither repainted around nor remembered.
+  """
+  @spec forget_widgets([term()]) :: :ok
+  def forget_widgets([]), do: :ok
+
+  def forget_widgets(widget_ids) do
+    for key <- [@widget_bounds_key, @widget_rowkeys_key], map = Process.get(key) do
+      Process.put(key, Map.drop(map, widget_ids))
+    end
+
+    :ok
+  end
+
   @spec get_app_state_hash() :: non_neg_integer() | nil
   def get_app_state_hash, do: Process.get(@app_state_hash_key)
 

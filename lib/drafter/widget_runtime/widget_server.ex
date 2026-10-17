@@ -4,6 +4,7 @@ defmodule Drafter.WidgetServer do
   use GenServer
 
   alias Drafter.Render.Picture
+  alias Drafter.Runtime.IdleCollect
   alias Drafter.Session.Context
   alias Drafter.Widget.DataChannel
   alias Drafter.Widget.Trait.Pipeline
@@ -337,7 +338,20 @@ defmodule Drafter.WidgetServer do
   defp auto_buffer?(opts), do: Keyword.get(opts, :buffer) == :auto
 
   @impl true
-  def handle_cast({:event, event}, state) do
+  def handle_cast(message, state), do: message |> do_cast(state) |> idle()
+
+  @impl true
+  def handle_call(request, from, state), do: request |> do_call(from, state) |> idle()
+
+  @impl true
+  def handle_info(:timeout, state), do: {:noreply, state, :hibernate}
+  def handle_info(message, state), do: message |> do_info(state) |> idle()
+
+  defp idle({:noreply, state}), do: {:noreply, state, IdleCollect.after_ms()}
+  defp idle({:reply, reply, state}), do: {:reply, reply, state, IdleCollect.after_ms()}
+  defp idle(other), do: other
+
+  defp do_cast({:event, event}, state) do
     case state.module.handle_event(event, state.state) do
       {:ok, new_widget_state} ->
         {:noreply, advance(state, new_widget_state, event)}
@@ -351,7 +365,7 @@ defmodule Drafter.WidgetServer do
     end
   end
 
-  def handle_cast({:update_props, props}, state) do
+  defp do_cast({:update_props, props}, state) do
     new_widget_state = Drafter.Widget.apply_props(state.module, props, state.state)
 
     if new_widget_state === state.state do
@@ -363,50 +377,49 @@ defmodule Drafter.WidgetServer do
     end
   end
 
-  def handle_cast({:push_data, item}, %{data_channel: ch} = state) when not is_nil(ch) do
+  defp do_cast({:push_data, item}, %{data_channel: ch} = state) when not is_nil(ch) do
     {:noreply, pushed(state, DataChannel.push(ch, item))}
   end
 
-  def handle_cast({:push_data, _item}, state), do: {:noreply, state}
+  defp do_cast({:push_data, _item}, state), do: {:noreply, state}
 
-  def handle_cast({:push_data_many, items}, %{data_channel: ch} = state) when not is_nil(ch) do
+  defp do_cast({:push_data_many, items}, %{data_channel: ch} = state) when not is_nil(ch) do
     {:noreply, pushed(state, DataChannel.push_many(ch, items))}
   end
 
-  def handle_cast({:push_data_many, _items}, state), do: {:noreply, state}
+  defp do_cast({:push_data_many, _items}, state), do: {:noreply, state}
 
-  def handle_cast(:pause_data, %{data_channel: ch} = state) when not is_nil(ch) do
+  defp do_cast(:pause_data, %{data_channel: ch} = state) when not is_nil(ch) do
     {:noreply, %{state | data_channel: DataChannel.pause(ch)}}
   end
 
-  def handle_cast(:pause_data, state), do: {:noreply, state}
+  defp do_cast(:pause_data, state), do: {:noreply, state}
 
-  def handle_cast(:resume_data, %{data_channel: ch} = state) when not is_nil(ch) do
+  defp do_cast(:resume_data, %{data_channel: ch} = state) when not is_nil(ch) do
     {:noreply, %{state | data_channel: DataChannel.resume(ch)}}
   end
 
-  def handle_cast(:resume_data, state), do: {:noreply, state}
+  defp do_cast(:resume_data, state), do: {:noreply, state}
 
-  def handle_cast(:maybe_generate_image, state) do
+  defp do_cast(:maybe_generate_image, state) do
     {:noreply, schedule_image(state)}
   end
 
-  def handle_cast(:restyle, state) do
+  defp do_cast(:restyle, state) do
     state = %{state | image_hash: nil}
     render_and_push(state)
     {:noreply, state}
   end
 
-  @impl true
-  def handle_call({:frame_image, window, cell_size}, _from, state) do
+  defp do_call({:frame_image, window, cell_size}, _from, state) do
     if cell_size, do: Context.put_cell_size(cell_size)
     {reply, new_state} = frame_picture(state, window)
     {:reply, reply, new_state}
   end
 
-  def handle_call({:update_rect, rect}, _from, %{rect: rect} = state), do: {:reply, :ok, state}
+  defp do_call({:update_rect, rect}, _from, %{rect: rect} = state), do: {:reply, :ok, state}
 
-  def handle_call({:update_rect, rect}, _from, state) do
+  defp do_call({:update_rect, rect}, _from, state) do
     new_widget_state = maybe_on_rect_change(state, rect)
     new_channel = maybe_resize_auto_buffer(state, rect)
     new_state = %{state | rect: rect, state: new_widget_state, data_channel: new_channel}
@@ -414,17 +427,16 @@ defmodule Drafter.WidgetServer do
     {:reply, :ok, new_state}
   end
 
-  @impl true
-  def handle_call(:get_state, _from, state) do
+  defp do_call(:get_state, _from, state) do
     {:reply, state.state, state}
   end
 
-  def handle_call({:get_state_fields, keys}, _from, state) do
+  defp do_call({:get_state_fields, keys}, _from, state) do
     fields = Map.new(keys, fn key -> {key, Map.get(state.state, key)} end)
     {:reply, fields, state}
   end
 
-  def handle_call(:get_render, _from, state) do
+  defp do_call(:get_render, _from, state) do
     Process.put(:widget_last_render_ms, System.monotonic_time(:millisecond))
 
     result =
@@ -443,7 +455,7 @@ defmodule Drafter.WidgetServer do
     {:reply, result, state}
   end
 
-  def handle_call({:dispatch_event, event}, _from, state) do
+  defp do_call({:dispatch_event, event}, _from, state) do
     result = state.module.handle_event(event, state.state)
 
     case Drafter.EventResult.parse(result, state.state) do
@@ -457,7 +469,7 @@ defmodule Drafter.WidgetServer do
     end
   end
 
-  def handle_call({:event_sync, event}, _from, state) do
+  defp do_call({:event_sync, event}, _from, state) do
     result = state.module.handle_event(event, state.state)
 
     case result do
@@ -483,7 +495,7 @@ defmodule Drafter.WidgetServer do
     end
   end
 
-  def handle_call({:set_state, new_widget_state}, _from, state) do
+  defp do_call({:set_state, new_widget_state}, _from, state) do
     new_state = %{state | state: new_widget_state}
     strips = new_state.module.render(new_state.state, new_state.rect)
     WidgetStripCache.put(new_state.id, new_state.rect, strips)
@@ -492,7 +504,7 @@ defmodule Drafter.WidgetServer do
     {:reply, :ok, new_state}
   end
 
-  def handle_call({:capture_event, event}, _from, state) do
+  defp do_call({:capture_event, event}, _from, state) do
     if function_exported?(state.module, :handle_event_capture, 2) do
       result = state.module.handle_event_capture(event, state.state)
 
@@ -519,9 +531,8 @@ defmodule Drafter.WidgetServer do
     end
   end
 
-  @impl true
-  def handle_info(:data_channel_tick, %{data_channel: ch, module: module} = state)
-      when not is_nil(ch) do
+  defp do_info(:data_channel_tick, %{data_channel: ch, module: module} = state)
+       when not is_nil(ch) do
     {new_ch, had_data} = DataChannel.flush(ch)
 
     if had_data and not recently_rendered?(state) do
@@ -536,28 +547,28 @@ defmodule Drafter.WidgetServer do
     end
   end
 
-  def handle_info(:data_channel_tick, state), do: {:noreply, state}
+  defp do_info(:data_channel_tick, state), do: {:noreply, state}
 
-  def handle_info(:deferred_push, state) do
+  defp do_info(:deferred_push, state) do
     {:noreply, push_now(%{state | pending_push_ref: nil})}
   end
 
-  def handle_info(:image_task_done, state) do
+  defp do_info(:image_task_done, state) do
     done = %{state | image_task: nil, last_image_ms: System.monotonic_time(:millisecond)}
     {:noreply, schedule_image(done)}
   end
 
-  def handle_info(:image_retry, state) do
+  defp do_info(:image_retry, state) do
     {:noreply, schedule_image(%{state | image_retry_ref: nil})}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason} = msg, state) do
+  defp do_info({:DOWN, _ref, :process, pid, _reason} = msg, state) do
     if pid in state.session_pids,
       do: {:stop, :normal, state},
       else: widget_info(msg, state)
   end
 
-  def handle_info(msg, state), do: widget_info(msg, state)
+  defp do_info(msg, state), do: widget_info(msg, state)
 
   defp widget_info(msg, state) do
     result =

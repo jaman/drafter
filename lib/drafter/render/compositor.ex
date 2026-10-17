@@ -51,6 +51,7 @@ defmodule Drafter.Compositor do
 
   alias Drafter.Draw.Strip
   alias Drafter.Render.{Picture, RowDamage, Writer}
+  alias Drafter.Runtime.IdleCollect
   alias FrenchCurve.Backend.Kitty
 
   @behind_poll_ms 4
@@ -534,15 +535,20 @@ defmodule Drafter.Compositor do
   def handle_info(:render_frame, state) do
     cond do
       not frame_pending?(state) ->
-        {:noreply, %{state | rendering: false}}
+        {:noreply, %{state | rendering: false}, IdleCollect.after_ms()}
 
       Writer.behind?(state.writer) ->
         Process.send_after(self(), :render_frame, @behind_poll_ms)
         {:noreply, stalled(state, System.monotonic_time(:millisecond))}
 
       true ->
-        {:noreply, state |> drained(System.monotonic_time(:millisecond)) |> write_frame()}
+        {:noreply, state |> drained(System.monotonic_time(:millisecond)) |> write_frame(),
+         IdleCollect.after_ms()}
     end
+  end
+
+  def handle_info(:timeout, state) do
+    {:noreply, state, :hibernate}
   end
 
   def handle_info(_msg, state) do

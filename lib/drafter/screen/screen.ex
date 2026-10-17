@@ -443,7 +443,8 @@ defmodule Drafter.Screen do
   end
 
   @doc """
-  Calls the screen module's `c:unmount/1` if it exports one. Returns `:ok`.
+  Calls the screen module's `c:unmount/1` if it exports one, then stops the widget
+  servers of the screen's hierarchy. Returns `:ok`.
 
   The callback's return value is ignored, and a module without one is left alone.
   """
@@ -453,7 +454,7 @@ defmodule Drafter.Screen do
       screen.module.unmount(screen.state)
     end
 
-    :ok
+    Drafter.WidgetHierarchy.stop_all_servers(screen.widget_hierarchy)
   end
 
   @doc """

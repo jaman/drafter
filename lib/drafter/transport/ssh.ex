@@ -36,7 +36,9 @@ defmodule Drafter.Transport.SSH do
     * `:auth` - `[{username, password}]` pairs, `[{username, password, props}]`
       triples whose `props` map is merged into that user's mount props,
       `{:accounts, server}` to check passwords against a `Drafter.Accounts`
-      server, or `:anonymous` to accept anything. Default: `[{"admin", "admin"}]`.
+      server, `:anonymous` to accept anything, or `{:public_key, user_dir}` to
+      accept the keys in `user_dir/authorized_keys` and no passwords. Default:
+      `[{"admin", "admin"}]`.
     * `:register_as` - with `{:accounts, server}`, a username that opens the
       registration form instead of an account. Default `nil`: no registration.
     * `:register_app` - `{module, props}`, the app the registration form runs
@@ -46,13 +48,15 @@ defmodule Drafter.Transport.SSH do
       to listen on a port and forward its connections back to the client, which is
       `ssh -R`.
     * `:system_dir` - host-key directory. Default: `drafter_ssh` under the system
-      temp directory, populated by `ssh-keygen` on first use.
+      temp directory, holding an RSA host key generated in Erlang on first use.
     * `:mount_props` - map handed to each session's `mount/1`. Default: `%{}`. The
       connecting username is merged in under `:username` as a string.
     * `:send_buffer` - bytes of the operating system's send buffer for each
       connection. Default: `nil`, the system's own, which may grow to megabytes.
     * `:login_timeout` - milliseconds a client has from connecting to logging in,
       host key question and password included. Default: `nil`, `:ssh`'s two minutes.
+    * `:ssh_opts` - further `:ssh.daemon/2` options, such as `subsystems:`, added
+      after the ones above. Default: `[]`.
 
   """
   @type bind :: :inet.ip_address() | :any
@@ -100,7 +104,8 @@ defmodule Drafter.Transport.SSH do
       ] ++
         auth_opts(auth, registration) ++
         send_buffer_opts(Keyword.get(opts, :send_buffer)) ++
-        login_timeout_opts(Keyword.get(opts, :login_timeout))
+        login_timeout_opts(Keyword.get(opts, :login_timeout)) ++
+        Keyword.get(opts, :ssh_opts, [])
 
     started =
       case ip do
@@ -358,6 +363,10 @@ defmodule Drafter.Transport.SSH do
     ]
   end
 
+  defp auth_opts({:public_key, user_dir}) do
+    [auth_methods: ~c"publickey", user_dir: to_charlist(user_dir)]
+  end
+
   defp auth_opts(entries) when is_list(entries) do
     user_passwords =
       Enum.map(entries, fn entry ->
@@ -375,6 +384,7 @@ defmodule Drafter.Transport.SSH do
   defp credentials({username, password, _props}), do: {username, password}
 
   defp user_props(:anonymous), do: %{}
+  defp user_props({:public_key, _user_dir}), do: %{}
   defp user_props({:accounts, _accounts}), do: %{}
 
   defp user_props(entries) do
@@ -382,10 +392,8 @@ defmodule Drafter.Transport.SSH do
   end
 
   defp generate_host_key(dir) do
-    System.cmd(
-      "ssh-keygen",
-      ["-t", "rsa", "-b", "2048", "-f", Path.join(dir, "ssh_host_rsa_key"), "-N", ""],
-      stderr_to_stdout: true
-    )
+    key = :public_key.generate_key({:rsa, 3072, 65_537})
+    pem = :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, key)])
+    File.write!(Path.join(dir, "ssh_host_rsa_key"), pem)
   end
 end
