@@ -22,7 +22,8 @@ defmodule Drafter.StateHash do
 
   @doc "The hash of the widget `module`'s `state` together with `placement`, or of its `image_key/1` together with `placement`."
   @spec widget(module(), term(), term()) :: non_neg_integer()
-  def widget(module, state, placement), do: hashed(module, :image_key, state, {:placement, placement})
+  def widget(module, state, placement),
+    do: hashed(module, :image_key, state, {:placement, placement})
 
   defp hashed(module, callback, state, placement) do
     started = System.monotonic_time(:microsecond)
