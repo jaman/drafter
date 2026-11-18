@@ -4,6 +4,25 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [Unreleased]
+
+### Added
+
+- `Drafter.Prompt`: questions, menus and progress lines for command-line tools, drawn below the shell prompt with no alternate screen and no app module. `text/2`, `password/2`, `number/2`, `confirm/2`, `select/3`, `multiselect/3`, `search/3` and `readline/2` each return `{:ok, value}` or `{:error, reason}` and have a `!` twin; `form/1` asks a list of questions into a map; `spinner/3` and `progress/4` show a moving line while a function runs and keep what it prints above the line; `say/2` writes a status line. Text input has editing keys, history and Tab completion (`Drafter.Prompt.Completion` has word, path and command-line sources). When standard input is not a terminal each question reads one line instead. `Drafter.Prompt.Script.run/3` drives prompts from a list of keys in tests, and `Drafter.Prompt.Component` is the behaviour for a prompt of your own. See the new Command-Line Prompts guide and `examples/prompt/`.
+- `Drafter.Terminal.Stdin`, the one reader of standard input on the node, started with the application. It sends input to one subscriber at a time and holds what arrives while nobody is subscribed.
+- `Drafter.Terminal.RawMode`, which enters and leaves raw mode and reports a standard input that is not a terminal.
+
+### Changed
+
+- `Drafter.Terminal.Driver` reads standard input through `Drafter.Terminal.Stdin` instead of a reader of its own. The key typed after an app exited is no longer lost to that reader, so a program can ask a `Drafter.Prompt` question before or after `Drafter.run/2` (with `halt_on_exit: false`).
+
+- Native code lives in `priv/native/<os>-<cpu>` (`darwin-aarch64`, `linux-x86_64`, `windows-x86_64`) instead of a folder named after the full system architecture, which carried the build machine's OS version. `Drafter.Native.directory/0` returns the name. The `Makefile` derives it from the machine it builds for, including a cross compiler's `-target`, and writes under `$MIX_APP_PATH/priv` for a cross build, so releases cross-compiled with Burrito carry the right library. On a Windows target the `Makefile` builds nothing and the Elixir fallbacks stay in place.
+
+### Fixed
+
+- A widget that leaves the screen while it has focus no longer hands focus to the first focusable widget of the next screen when the app called `Drafter.blur/1` since that widget took focus. Keys pressed after the screen change reach the application, as `Drafter.blur/1` documents.
+- On Windows the terminal size is read from the Erlang terminal (`:io.columns/1`, `:io.rows/1`) with PowerShell only as the fallback, and a size change is noticed by polling, since Windows sends no `SIGWINCH`. A resized window now sends `{:resize, {cols, rows}}`.
+
 ## [0.5.7]
 
 ### Added

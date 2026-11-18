@@ -233,7 +233,7 @@ defmodule Drafter.Runtime.AppLoop do
     if Drafter.Trace.enabled?(),
       do: Drafter.Trace.log_sync(["I ", Drafter.Trace.ts(), " ", inspect(event), "\n"])
 
-    case check_global_quit(event) do
+    case check_global_quit(app_module, event) do
       :quit -> handle_stop(:normal, app_module, app_state, rect, timers, wh, ss)
       :continue -> handle_continue_event(app_module, app_state, rect, timers, wh, ss, event)
     end
@@ -1180,12 +1180,18 @@ defmodule Drafter.Runtime.AppLoop do
     end
   end
 
-  defp check_global_quit(event) do
+  defp check_global_quit(app_module, event) do
     case event do
-      %{type: :key, key: :q, modifiers: [:ctrl]} -> :quit
-      {:key, :q, [:ctrl]} -> :quit
+      %{type: :key, key: :q, modifiers: [:ctrl]} -> quit_unless_handled(app_module)
+      {:key, :q, [:ctrl]} -> quit_unless_handled(app_module)
       _ -> :continue
     end
+  end
+
+  defp quit_unless_handled(app_module) do
+    if function_exported?(app_module, :handles_ctrl_q?, 0) and app_module.handles_ctrl_q?(),
+      do: :continue,
+      else: :quit
   end
 
   defp unmount(app_module, app_state) do

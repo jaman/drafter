@@ -15,6 +15,7 @@ An Elixir Terminal User Interface framework inspired by Python's Textual. Build 
 - **Animation Support** - Smooth property animations with easing functions
 - **Remote TUI** - Serve apps over SSH or Telnet with isolated or shared sessions (see [Remote TUI](guides/remote_tui.md))
 - **Headless Testing** - Drive an app from ExUnit with no terminal and assert on the rendered screen (see [Testing](#testing))
+- **Command-Line Prompts** - Questions, menus, Tab completion, spinners and progress bars drawn below the shell prompt, for tools that do not need a full screen (see [Command-line prompts](#command-line-prompts))
 - **Embeddable** - Run an app against an in-memory cell grid instead of a terminal and render the rows yourself (see [Embedding](#embedding))
 - **Minimal Dependencies** - Elixir implementation with NIF-based terminal I/O
 
@@ -754,6 +755,38 @@ send and the assertion after it need no sleep between them.
 The three assertion helpers are macros, so `import Drafter.Test` or
 `require Drafter.Test` before calling them.
 
+## Command-line prompts
+
+`Drafter.Prompt` is for tools that ask a few questions rather than take over the
+screen. It draws below the shell prompt, with no alternate screen and no app module;
+a question is one function call:
+
+```elixir
+alias Drafter.Prompt
+
+with {:ok, name} <- Prompt.text("Project name", default: "my_app"),
+     {:ok, kind} <- Prompt.select("Template", ["Phoenix", "Escript", "Library"]),
+     {:ok, extras} <- Prompt.multiselect("Extras", ["Credo", "Dialyxir", "ExDoc"]),
+     {:ok, true} <- Prompt.confirm("Create it?") do
+  Prompt.spinner("Creating #{name}", fn -> create(name, kind, extras) end)
+end
+```
+
+```
+✔ Project name · my_app
+✔ Template · Escript
+✔ Extras · Credo, ExDoc
+✔ Create it? · Yes
+✔ Creating my_app
+```
+
+There are text, password and number inputs with validation, history and Tab
+completion, single and multiple choice lists with filtering, a bare `readline/2` for
+command loops, `form/1` for a list of questions, and spinners and progress bars that
+keep a step's own output above them. When standard input is a pipe the same calls
+read one line per question, and `Drafter.Prompt.Script` drives them from a list of
+keys in tests. See [Command-Line Prompts](guides/prompts.md).
+
 ## Embedding
 
 `Drafter.CellSession` runs an app against an in-memory cell grid rather than a
@@ -872,6 +905,7 @@ Standalone scripts live under `examples/`, grouped by the API style they use:
 - `examples/reducer/` - the Elm-style runtime: `use Drafter, runtime: :reducer` with
   a single `update/2` message handler
 - `examples/internal/` - the `use Drafter.App` style this README documents
+- `examples/prompt/` - command-line tools built on `Drafter.Prompt`, with no full-screen app
 
 The examples and `run_examples.exs` ship in the git repository,
 <https://github.com/jaman/drafter>, not in the Hex package. From a clone, run one
@@ -890,6 +924,9 @@ elixir examples/internal/25_file_picker.exs
 
 elixir examples/spark/04_counter.exs
 elixir examples/reducer/04_counter.exs
+
+elixir examples/prompt/01_wizard.exs
+elixir examples/prompt/03_command_loop.exs
 ```
 
 `examples/README.md` indexes all of them. To browse them in a gallery:
@@ -909,6 +946,7 @@ elixir examples/spark/34_breakpoints.exs
 
 - [Writing Widgets & Libraries](guides/writing_widgets.md) - build a custom widget and package it for reuse
 - [Remote TUI](guides/remote_tui.md) - serve an app over SSH or Telnet
+- [Command-Line Prompts](guides/prompts.md) - questions, menus, completion and progress lines without a full-screen app
 - [Large Text](guides/large_text.md) - the `digits` font catalogue, how the fonts are built, and how to choose between them
 - [Design Notes](guides/design_notes.md) - for contributors: why the internals are built the way they are
 

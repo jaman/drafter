@@ -11,6 +11,8 @@ Examples are grouped by the API style they use:
   the reducer **falls back to the callback API** when an app doesn't define `update/2`, so any
   app runs either way and `update/2` is adopted incrementally. (That's the point — there's no
   app the reducer runtime can't run.)
+- **`prompt/`** — command-line tools built on `Drafter.Prompt`: questions, menus and
+  progress lines drawn below the shell prompt, with no full-screen app.
 - **`internal/`** — the original `use Drafter.App` examples (the lower-level surface the
   flat DSL is built on). Kept for reference and full feature coverage.
 
@@ -19,9 +21,19 @@ Run any example with:
 ```bash
 elixir examples/spark/04_counter.exs
 elixir examples/reducer/04_counter.exs
+elixir examples/prompt/01_wizard.exs
 ```
 
 Or browse them all in the gallery: `elixir run_examples.exs`.
+
+## `prompt/` index
+
+| Example | Description |
+|---------|-------------|
+| `01_wizard.exs` | A project wizard: validated text, a list with hints and a disabled entry, multiple choice, a number, a confirmation, then a spinner and a progress bar |
+| `02_form.exs` | `Drafter.Prompt.form/1` with questions that depend on earlier answers, a password, and path completion |
+| `03_command_loop.exs` | A small shell: `readline/2` with history and Tab completion of commands and paths |
+| `04_menu.exs` | A menu that comes back after each action, with entries that change as the state does |
 
 ## `internal/` index
 

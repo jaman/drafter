@@ -302,6 +302,19 @@ defmodule Drafter.Widget do
   @callback image_active?(state()) :: boolean()
 
   @doc """
+  A small value that changes whenever the widget's image changes.
+
+  Before it generates an image Drafter compares a hash of the widget's state and rect with
+  the hash of the last image. A widget whose state holds large data that does not affect the
+  picture, or data that is expensive to hash, implements this to name what does: the hash is
+  taken of the returned value in place of the state. Absent, the whole state is hashed.
+
+  Called on every frame, so it must be cheap. A value that stays the same while the picture
+  changes leaves the old picture on screen. See the Performance guide.
+  """
+  @callback image_key(state()) :: term()
+
+  @doc """
   Folds the items accumulated in the widget's data channel into its state.
 
   Called when the throttle window of a widget declared with `:buffer` and `:refresh`
@@ -326,7 +339,8 @@ defmodule Drafter.Widget do
     handle_event_capture: 2,
     apply_data_buffer: 3,
     image_raster: 2,
-    image_active?: 1
+    image_active?: 1,
+    image_key: 1
   ]
 
   @doc """

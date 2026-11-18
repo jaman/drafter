@@ -92,3 +92,44 @@ defmodule Drafter.Runtime.BlurBeforeMountTest do
     DT.stop(ctx)
   end
 end
+
+defmodule Drafter.Runtime.BlurAsFocusLeavesTest do
+  use ExUnit.Case, async: false
+
+  alias Drafter.Test, as: DT
+
+  defmodule Menu do
+    @moduledoc false
+    use Drafter.App, frame_pacing: :always
+
+    def mount(_props), do: %{screen: :title, keys: [], chat: ""}
+    def on_ready(state), do: tap(state, fn _ -> Drafter.focus(:play) end)
+
+    def render(%{screen: :title}), do: vertical([button("play", id: :play, on_click: :play)])
+
+    def render(%{screen: :lobby} = state),
+      do: vertical([label("keys=#{inspect(state.keys)}"), text_input(id: :chat, bind: :chat)])
+
+    def handle_event(:play, _data, state) do
+      Drafter.blur(:chat)
+      {:ok, %{state | screen: :lobby}}
+    end
+
+    def handle_event(_name, _data, state), do: {:noreply, state}
+
+    def handle_event({:key, key}, state), do: {:ok, %{state | keys: state.keys ++ [key]}}
+    def handle_event(_event, state), do: {:noreply, state}
+  end
+
+  test "a blur asked for while the focused widget is about to leave the screen keeps focus away" do
+    ctx = DT.start_headless(Menu, %{}, size: {40, 6})
+    DT.send_key(ctx, :enter)
+    assert DT.get_state(ctx).screen == :lobby
+
+    DT.send_key(ctx, :enter)
+    DT.send_key(ctx, :j)
+    assert DT.get_state(ctx).keys == [:enter, :j]
+    assert DT.get_state(ctx).chat == ""
+    DT.stop(ctx)
+  end
+end

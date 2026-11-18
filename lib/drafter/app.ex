@@ -149,7 +149,8 @@ defmodule Drafter.App do
   `handle_event/2` clause — is not the first thing to see an input event. Three
   things run ahead of it.
 
-  **`Ctrl+Q` stops the loop** before any callback runs, always. A
+  **`Ctrl+Q` stops the loop** before any callback runs, unless the module defines
+  `handles_ctrl_q?/0` returning `true`. Without it a
   `keybinding {:q, [:ctrl]}` clause and a hand-written `{:key, :q, [:ctrl]}` clause
   are both unreachable. `Ctrl+C` is *not* reserved and does reach the module.
 
@@ -430,6 +431,30 @@ defmodule Drafter.App do
   """
   @callback refresh_rate() :: pos_integer() | String.t() | :unlimited
 
+  @doc """
+  Whether the application handles `Ctrl+Q` itself.
+
+  When it returns `true`, `{:key, :q, [:ctrl]}` is delivered to `handle_event/2` like any other
+  key and the application decides what it does (leave a screen, ask first, stop with
+  `{:stop, :normal}`). `false` is used when the callback is not defined: `Ctrl+Q` stops the
+  loop before any callback runs.
+  """
+  @callback handles_ctrl_q?() :: boolean()
+
+  @doc """
+  A small value that changes whenever what `render/1` returns changes.
+
+  Before each render Drafter compares a hash of the app's state with the hash of the
+  last render and draws the tree again only when they differ. An app whose state holds large
+  data that does not affect the screen, or data that is expensive to hash, implements this to
+  name what does: the hash is taken of the returned value in place of the state. Absent, the
+  whole state is hashed.
+
+  Called before every render, so it must be cheap. A value that stays the same while the
+  screen should change leaves the old screen up. See the Performance guide.
+  """
+  @callback render_key(state()) :: term()
+
   @optional_callbacks [
     update: 2,
     unmount: 1,
@@ -439,7 +464,9 @@ defmodule Drafter.App do
     on_scroll_active: 1,
     on_scroll_idle: 1,
     on_message: 2,
-    refresh_rate: 0
+    refresh_rate: 0,
+    handles_ctrl_q?: 0,
+    render_key: 1
   ]
 
   defmacro __using__(opts) do

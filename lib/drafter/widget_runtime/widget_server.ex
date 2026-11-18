@@ -718,7 +718,7 @@ defmodule Drafter.WidgetServer do
   end
 
   defp current_or_drawn(state, window) do
-    hash = :erlang.phash2({state.state, state.rect, Context.cell_size()})
+    hash = Drafter.StateHash.widget(state.module, state.state, {state.rect, Context.cell_size()})
 
     cond do
       hash != state.image_hash -> encoded(state, drawn_picture(state), hash, window)
@@ -796,7 +796,7 @@ defmodule Drafter.WidgetServer do
   end
 
   defp maybe_start_image(state) do
-    hash = :erlang.phash2({state.state, state.rect})
+    hash = Drafter.StateHash.widget(state.module, state.state, state.rect)
     window = WidgetStripCache.visible_rect(state.id)
 
     if hash != state.image_hash,

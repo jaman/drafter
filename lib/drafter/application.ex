@@ -12,13 +12,15 @@ defmodule Drafter.Application do
   `Drafter.SkinManager`, the `Drafter.Widget.Supervisor` dynamic supervisor, a
   `Phoenix.PubSub` named `Drafter.PubSub`, `Drafter.Style.StylesheetLoader`,
   `Drafter.Animation`, the unique `Drafter.Session.Registry`, the ssh sessions'
-  registry (`Drafter.Transport.SSH.Sessions`), and `Drafter.Session`. As it stops,
-  every ssh session is ended with its client's terminal restored.
+  registry (`Drafter.Transport.SSH.Sessions`), `Drafter.Session`, and
+  `Drafter.Terminal.Stdin`. As it stops, every ssh session is ended with its client's
+  terminal restored.
   """
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
     children = [
+      Drafter.Terminal.Stdin,
       Drafter.TableOwner,
       Drafter.ThemeManager,
       Drafter.SkinManager,

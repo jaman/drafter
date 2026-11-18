@@ -97,7 +97,7 @@ defmodule Drafter.Runtime.Renderer do
   end
 
   defp render_app_direct(app_module, app_state, screen_rect, existing_hierarchy) do
-    app_hash = :erlang.phash2(app_state)
+    app_hash = Drafter.StateHash.app(app_module, app_state)
     prev_hash = RenderCache.get_app_state_hash()
     layout_dirty = Process.get(:render_cache_layout_dirty, true)
 

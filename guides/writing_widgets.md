@@ -419,7 +419,10 @@ rect changes. Drafter encodes the raster, moves the image when the widget
 moves, and shows only the visible rows when the widget is partly scrolled out
 of view. A raster that is a whole number of pixels per cell crops exactly at
 row boundaries. Implement `image_active?/1` too when the widget only draws an
-image in some of its modes.
+image in some of its modes. "Called again only when the state or the rect changes"
+is decided by hashing the state, so a state holding large data makes every
+check expensive: give the state a handle to the data, or implement `image_key/1`
+to return the small value that decides the picture (see the Performance guide).
 
 `image/3` is the lower-level alternative: it returns encoded bytes and a
 placement box itself, and is drawn only while all of it is visible.

@@ -10,7 +10,6 @@ defmodule Drafter.MixProject do
       compilers: [:elixir_make | Mix.compilers()],
       make_targets: ["all"],
       make_clean: ["clean"],
-      make_env: %{"PRIV_DIR" => "priv/native/#{:erlang.system_info(:system_architecture)}"},
       start_permanent: Mix.env() == :prod,
       elixirc_options: [warnings_as_errors: true],
       deps: deps(),
@@ -25,9 +24,11 @@ defmodule Drafter.MixProject do
           "README.md",
           "CHANGELOG.md",
           "guides/remote_tui.md": [title: "Remote TUI"],
+          "guides/prompts.md": [title: "Command-Line Prompts"],
           "guides/writing_widgets.md": [title: "Writing Widgets & Libraries"],
           "guides/large_text.md": [title: "Large Text"],
           "guides/memory.md": [title: "Memory"],
+          "guides/performance.md": [title: "Performance"],
           "guides/design_notes.md": [title: "Design Notes"]
         ],
         groups_for_modules: [
@@ -40,6 +41,25 @@ defmodule Drafter.MixProject do
             Drafter.WidgetLibrary,
             Drafter.Screen,
             Drafter.Layout
+          ],
+          "Command-Line Prompts": [
+            Drafter.Prompt,
+            Drafter.Prompt.Choice,
+            Drafter.Prompt.Completion,
+            Drafter.Prompt.Script,
+            Drafter.Prompt.Style,
+            Drafter.Prompt.Stopped,
+            Drafter.Prompt.Component,
+            Drafter.Prompt.Frame,
+            Drafter.Prompt.Editor,
+            Drafter.Prompt.Text,
+            Drafter.Prompt.Confirm,
+            Drafter.Prompt.Select,
+            Drafter.Prompt.Region,
+            Drafter.Prompt.Terminal,
+            Drafter.Prompt.Terminal.Local,
+            Drafter.Prompt.Terminal.Piped,
+            Drafter.Prompt.Terminal.Scripted
           ],
           Events: [
             Drafter.Event,
@@ -57,6 +77,8 @@ defmodule Drafter.MixProject do
             Drafter.Clipboard,
             Drafter.CharacterWidth,
             Drafter.Terminal.Probe,
+            Drafter.Terminal.Stdin,
+            Drafter.Terminal.RawMode,
             Drafter.Pty
           ],
           Sessions: [Drafter.Session.Context, Drafter.CellSession],

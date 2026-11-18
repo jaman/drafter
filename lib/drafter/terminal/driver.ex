@@ -43,6 +43,7 @@ defmodule Drafter.Terminal.Driver do
     PixelMouse,
     Probe,
     Reports,
+    Stdin,
     TermiosNif
   }
 
@@ -143,12 +144,12 @@ defmodule Drafter.Terminal.Driver do
   Disables bracketed paste, pixel mouse reports when they were turned on, mouse
   reporting and the kitty keyboard protocol when `setup/1` turned it on, shows the
   cursor, leaves the
-  alternate screen, restores the saved terminal mode and stops the stdin reader.
+  alternate screen, restores the saved terminal mode and stops receiving standard input.
   Safe to call when `setup/1` was never called or already undone.
 
   Mouse reporting is turned off as `Drafter.Terminal.ANSI.disable_mouse/1` does
   with its defaults, so it clears the any-motion mode that `setup/1` enables when
-  `:hover` is left at `true`. Everything except the stdin reader is skipped when
+  `:hover` is left at `true`. Everything except that last step is skipped when
   raw mode is not in force. The sequences are written straight to `/dev/tty` by
   `write_synchronously/1`, so they land even while the driver is shutting down.
 
@@ -195,7 +196,9 @@ defmodule Drafter.Terminal.Driver do
   @doc """
   Start reading stdin and emitting events.
 
-  Idempotent: a second call while a reader is running does nothing. When stdin ends
+  Standard input arrives through `Drafter.Terminal.Stdin`, and whatever it read
+  before this call is dropped. Idempotent: a second call while input is being read
+  does nothing. When stdin ends
   or fails — the terminal closed — the process that called this is sent
   `:drafter_end_session`, so its app loop stops.
   """
@@ -651,25 +654,14 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp setup_stdin do
-    :io.setopts(:stdio, [:binary, {:encoding, :unicode}])
-    spawn_link(&stdin_reader/0)
-  end
-
-  defp stdin_reader do
-    case IO.read(:stdio, 1) do
-      data when is_binary(data) ->
-        send(__MODULE__, {:stdin, data})
-        stdin_reader()
-
-      _closed ->
-        send(__MODULE__, :stdin_closed)
-    end
+    Stdin.subscribe(self(), :discard)
+    Process.whereis(Stdin)
   end
 
   defp maybe_stop_stdin_reader(nil), do: :ok
 
-  defp maybe_stop_stdin_reader(pid) do
-    if Process.alive?(pid), do: Process.exit(pid, :kill)
+  defp maybe_stop_stdin_reader(_reader) do
+    if Process.whereis(Stdin), do: Stdin.unsubscribe(self())
     :ok
   end
 
@@ -723,6 +715,7 @@ defmodule Drafter.Terminal.Driver do
   defp setup_signal_handling do
     case :os.type() do
       {:unix, _} -> if watch_sigwinch() == :ok, do: :ok, else: start_size_poll()
+      {:win32, _} -> start_size_poll()
       _ -> :ok
     end
   end
@@ -827,6 +820,13 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp detect_terminal_size_windows do
+    case {io_size(:columns), io_size(:rows)} do
+      {cols, rows} when is_integer(cols) and is_integer(rows) -> {cols, rows}
+      _ -> powershell_terminal_size()
+    end
+  end
+
+  defp powershell_terminal_size do
     with {"" <> cols_str, 0} <-
            System.cmd("powershell", ["-Command", "$Host.UI.RawUI.WindowSize.Width"]),
          {"" <> lines_str, 0} <-

@@ -70,8 +70,9 @@ defmodule Drafter.ComponentRenderer do
 
   Widgets present in `existing_hierarchy` but not rendered this time are recorded
   in the returned hierarchy's `hidden_widgets`. Focus is preserved when the focused
-  widget rendered again, and otherwise moves to the first focusable widget, or is
-  cleared when there is none.
+  widget rendered again, and otherwise moves to the first focusable widget. It is
+  cleared when there is none, and when `Drafter.blur/1` was called after the last
+  widget took focus.
   """
   @spec render_tree(
           tuple(),
@@ -134,6 +135,9 @@ defmodule Drafter.ComponentRenderer do
     do: focus_first_or_nil(hierarchy)
 
   defp focus_when_unfocused(hierarchy), do: hierarchy
+
+  defp focus_first_or_clear(%{focus_cleared: true} = hierarchy),
+    do: %{hierarchy | focused_widget: nil}
 
   defp focus_first_or_clear(hierarchy) do
     case find_first_focusable_widget(hierarchy) do
