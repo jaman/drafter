@@ -23,6 +23,15 @@ Versions marked with ★ were published to Hex.pm.
 - A widget that leaves the screen while it has focus no longer hands focus to the first focusable widget of the next screen when the app called `Drafter.blur/1` since that widget took focus. Keys pressed after the screen change reach the application, as `Drafter.blur/1` documents.
 - On Windows the terminal size is read from the Erlang terminal (`:io.columns/1`, `:io.rows/1`) with PowerShell only as the fallback, and a size change is noticed by polling, since Windows sends no `SIGWINCH`. A resized window now sends `{:resize, {cols, rows}}`.
 
+## [0.5.8]
+
+### Changed
+
+- `Drafter.Server` and its SSH transport keep the generated SSH host key in
+  drafter's user data directory (`:filename.basedir(:user_data, "drafter")/ssh`)
+  instead of the system temp directory, so a client sees the same key across
+  restarts. A key in the earlier `drafter_ssh` temp directory is copied there.
+
 ## [0.5.7]
 
 ### Added

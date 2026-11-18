@@ -1,10 +1,13 @@
 defmodule Drafter.MixProject do
   use Mix.Project
 
+  @version "0.5.8"
+  @source_url "https://github.com/jaman/drafter"
+
   def project do
     [
       app: :drafter,
-      version: "0.5.8",
+      version: @version,
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:elixir_make | Mix.compilers()],
@@ -15,11 +18,13 @@ defmodule Drafter.MixProject do
       deps: deps(),
       description: "An Elixir Terminal User Interface framework",
       package: package(),
-      source_url: "https://github.com/jaman/drafter",
-      homepage_url: "https://github.com/jaman/drafter",
+      source_url: @source_url,
+      homepage_url: @source_url,
       plumb: [readme: :exact],
       docs: [
         main: "Drafter",
+        source_ref: "v#{@version}",
+        source_url_pattern: "#{@source_url}/blob/v#{@version}/%{path}#L%{line}",
         extras: [
           "README.md",
           "CHANGELOG.md",
