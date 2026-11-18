@@ -973,8 +973,4 @@ Match it in `handle_event/2` and return `{:stop, :normal}` if you want it to exi
 
 ## License
 
-[AGPL-3.0-only](https://github.com/jaman/drafter/blob/main/LICENSE). You may use, study, change and share it under the AGPL at
-no cost.
-
-A game or service whose source you do not publish needs a
-[commercial license](https://github.com/jaman/drafter/blob/main/COMMERCIAL.md).
+MIT — see [LICENSE](https://github.com/jaman/drafter/blob/main/LICENSE).
