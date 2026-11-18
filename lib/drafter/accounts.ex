@@ -28,6 +28,8 @@ defmodule Drafter.Accounts do
       its bytes. A file written as `:erlang.term_to_binary/1` by an earlier version is
       read and written back as text, as is one an earlier version wrote as Latin-1
   """
+  # A wedged peer must not block its caller for ever.
+  @call_timeout 30_000
 
   use GenServer
 
@@ -111,7 +113,7 @@ defmodule Drafter.Accounts do
           :ok | :error | {:error, :weak_password}
   def change_password(server, username, current, new_password) do
     with :ok <- validate_password(new_password) do
-      GenServer.call(server, {:change_password, username, current, new_password}, :infinity)
+      GenServer.call(server, {:change_password, username, current, new_password}, @call_timeout)
     end
   end
 

@@ -1,5 +1,7 @@
 defmodule Drafter.Transport.TelnetDriver do
   @moduledoc false
+  # A wedged peer must not block its caller for ever.
+  @call_timeout 30_000
 
   use GenServer
 
@@ -48,7 +50,7 @@ defmodule Drafter.Transport.TelnetDriver do
   def cleanup(server), do: GenServer.call(server, :cleanup)
 
   @spec write(pid(), iodata()) :: :ok
-  def write(server, data), do: GenServer.call(server, {:driver_write, data}, :infinity)
+  def write(server, data), do: GenServer.call(server, {:driver_write, data}, @call_timeout)
 
   @spec get_size(pid()) :: {pos_integer(), pos_integer()}
   def get_size(server), do: GenServer.call(server, :get_size)

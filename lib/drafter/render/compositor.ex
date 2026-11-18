@@ -349,7 +349,7 @@ defmodule Drafter.Compositor do
   """
   @spec sync(pid()) :: :ok
   def sync(pid) do
-    GenServer.call(pid, :sync, :infinity)
+    GenServer.call(pid, :sync, 60_000)
   end
 
   @impl GenServer

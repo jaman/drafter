@@ -1,5 +1,7 @@
 defmodule Drafter.Transport.SSHDriver do
   @moduledoc false
+  # A wedged peer must not block its caller for ever.
+  @call_timeout 30_000
 
   use GenServer
 
@@ -76,7 +78,7 @@ defmodule Drafter.Transport.SSHDriver do
   end
 
   @spec write(pid(), iodata()) :: :ok
-  def write(server, data), do: GenServer.call(server, {:driver_write, data}, :infinity)
+  def write(server, data), do: GenServer.call(server, {:driver_write, data}, @call_timeout)
 
   @spec get_size(pid()) :: {pos_integer(), pos_integer()}
   def get_size(server), do: GenServer.call(server, :get_size)

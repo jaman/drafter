@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  MIX_ENV: test
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-drafter-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-drafter-
+
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+      - run: mix test
+      - run: mix docs --warnings-as-errors
+        env:
+          MIX_ENV: dev

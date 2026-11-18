@@ -34,7 +34,7 @@ defmodule Drafter.Render.Writer do
 
   @doc "Return once everything handed over so far has been written."
   @spec flush(GenServer.server()) :: :ok
-  def flush(writer), do: GenServer.call(writer, :flush, :infinity)
+  def flush(writer), do: GenServer.call(writer, :flush, 60_000)
 
   defp counters(writer) do
     case Process.get({__MODULE__, writer}) do
