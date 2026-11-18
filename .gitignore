@@ -26,6 +26,12 @@ drafter-*.tar
 # Compiled NIF binaries (platform-specific, built at compile time)
 /priv/*.so
 /priv/*.dll
+/priv/*.dylib
+/priv/*.dSYM/
+/priv/native/
+
+# Build products land here, but priv/fonts is data the package ships, so priv
+# itself is not ignored.
 
 # Ignore beam files at root level (from elixir/iex direct compilation)
 *.beam
@@ -39,5 +45,4 @@ CLEANUPS_TO_DO.md
 CONTRIBUTING.md
 dev/
 docs/
-priv/
 image_memory_repro.exs

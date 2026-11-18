@@ -173,9 +173,9 @@ defmodule Drafter.MixProject do
 
   defp package do
     [
-      maintainers: ["Drafter"],
+      maintainers: ["Jarius Jenkins"],
       files:
-        ~w(lib c_src guides Makefile Makefile.win mix.exs .formatter.exs README.md CHANGELOG.md),
+        ~w(lib c_src guides priv/fonts Makefile Makefile.win mix.exs .formatter.exs README.md CHANGELOG.md),
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/jaman/drafter"}
     ]
