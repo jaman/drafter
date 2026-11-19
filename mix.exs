@@ -1,7 +1,7 @@
 defmodule Drafter.MixProject do
   use Mix.Project
 
-  @version "0.5.8"
+  @version "0.6.0"
   @source_url "https://github.com/jaman/drafter"
 
   def project do
@@ -162,7 +162,7 @@ defmodule Drafter.MixProject do
   defp deps do
     [
       {:elixir_make, "~> 0.9", runtime: false},
-      family(:french_curve, "~> 0.2.1", "../french_curve"),
+      family(:french_curve, "~> 0.2.2", "../french_curve"),
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:plumb, "~> 0.1", only: :dev, runtime: false},
       {:phoenix_pubsub, "~> 2.1"},

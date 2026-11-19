@@ -4,7 +4,7 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
-## [Unreleased]
+## [0.6.0]
 
 ### Added
 
@@ -17,9 +17,12 @@ Versions marked with ★ were published to Hex.pm.
 - `Drafter.Terminal.Driver` reads standard input through `Drafter.Terminal.Stdin` instead of a reader of its own. The key typed after an app exited is no longer lost to that reader, so a program can ask a `Drafter.Prompt` question before or after `Drafter.run/2` (with `halt_on_exit: false`).
 
 - Native code lives in `priv/native/<os>-<cpu>` (`darwin-aarch64`, `linux-x86_64`, `windows-x86_64`) instead of a folder named after the full system architecture, which carried the build machine's OS version. `Drafter.Native.directory/0` returns the name. The `Makefile` derives it from the machine it builds for, including a cross compiler's `-target`, and writes under `$MIX_APP_PATH/priv` for a cross build, so releases cross-compiled with Burrito carry the right library. On a Windows target the `Makefile` builds nothing and the Elixir fallbacks stay in place.
+- `Drafter.Transport.SessionDriver.write/2`, the SSH and telnet drivers' writes and `Drafter.Accounts.change_password/4` time out after 30 seconds instead of waiting for ever, and the render writer's `flush/1` and the compositor's `sync/1` after 60 seconds, so a peer that stops reading cannot hold a caller. The wx window's wait still has no limit: it ends when the window does.
+- The package ships its MIT `LICENSE`.
 
 ### Fixed
 
+- The bundled FIGlet fonts are in the package: `Drafter.Widget.Digits.Figlet.bundled/0`, `bundled_directory/0` and `register_bundled/0` read `priv/fonts/figlet`, which earlier releases did not ship.
 - A widget that leaves the screen while it has focus no longer hands focus to the first focusable widget of the next screen when the app called `Drafter.blur/1` since that widget took focus. Keys pressed after the screen change reach the application, as `Drafter.blur/1` documents.
 - On Windows the terminal size is read from the Erlang terminal (`:io.columns/1`, `:io.rows/1`) with PowerShell only as the fallback, and a size change is noticed by polling, since Windows sends no `SIGWINCH`. A resized window now sends `{:resize, {cols, rows}}`.
 
