@@ -97,7 +97,7 @@ defmodule Drafter.ComponentRenderer do
     Process.put(:rendered_widget_ids, MapSet.new())
 
     hierarchy = existing_hierarchy || WidgetHierarchy.new()
-    hierarchy = %{hierarchy | widget_scroll_parents: %{}}
+    hierarchy = %{hierarchy | widget_scroll_parents: %{}, widget_surfaces: %{}}
     ctx = make_ctx(theme, app_state, app_module)
 
     {hierarchy, _} = render_component(hierarchy, component_tree, rect, ctx, nil, 1)
@@ -395,6 +395,7 @@ defmodule Drafter.ComponentRenderer do
     title_style = Keyword.get(opts, :title_style, %{})
     content_style = Keyword.get(opts, :content_style, %{})
     highlight_focus = Keyword.get(opts, :highlight_focus, false)
+    surface = box_surface(Keyword.get(opts, :surface), ctx.theme)
     border_offset = if border == :none, do: 0, else: 1
 
     mount_props = %{
@@ -406,6 +407,7 @@ defmodule Drafter.ComponentRenderer do
       title_style: title_style,
       content_style: content_style,
       highlight_focus: highlight_focus,
+      surface: surface,
       app_module: ctx.app_module
     }
 
@@ -417,7 +419,8 @@ defmodule Drafter.ComponentRenderer do
       border_style: border_style,
       title_style: title_style,
       content_style: content_style,
-      highlight_focus: highlight_focus
+      highlight_focus: highlight_focus,
+      surface: surface
     }
 
     content_rect = %{
@@ -428,7 +431,9 @@ defmodule Drafter.ComponentRenderer do
     }
 
     new_h =
-      upsert_named_widget(hierarchy, widget_id, Box, mount_props, update_props, parent_id, rect)
+      hierarchy
+      |> upsert_named_widget(widget_id, Box, mount_props, update_props, parent_id, rect)
+      |> WidgetHierarchy.set_widget_surface(widget_id, surface)
 
     wrapped = List.wrap(children)
 
@@ -443,6 +448,11 @@ defmodule Drafter.ComponentRenderer do
         render_layout(new_h, :vertical, many, content_rect, ctx, widget_id, id_counter + 1, [])
     end
   end
+
+  defp box_surface(nil, _theme), do: nil
+
+  defp box_surface(colour, theme),
+    do: %{from: theme.background, to: Drafter.Style.resolve_color(colour, theme)}
 
   defp render_card(hierarchy, children, opts, rect, parent_id, id_counter, app_module) do
     widget_id = ns_widget_id(opts, app_module, "card", id_counter)
@@ -566,7 +576,8 @@ defmodule Drafter.ComponentRenderer do
          id_counter,
          next_counter
        ) do
-    effective_content_height = content_height || 10
+    effective_content_height =
+      content_height || Layout.content_height(content, hierarchy, rect.width)
 
     content_rect = %{
       x: rect.x,
@@ -792,7 +803,9 @@ defmodule Drafter.ComponentRenderer do
     content_rect = %{rect | width: rect.width - scrollbar_width}
 
     child_heights =
-      Enum.map(children, fn child -> Layout.get_preferred_height(child, hierarchy) end)
+      Enum.map(children, fn child ->
+        Layout.get_preferred_height(child, hierarchy, content_rect.width)
+      end)
 
     total_content_height = Enum.sum(child_heights)
 
@@ -808,7 +821,8 @@ defmodule Drafter.ComponentRenderer do
       show_horizontal_scrollbar: Keyword.get(opts, :show_horizontal_scrollbar, :never),
       click_to_scroll: click_to_scroll,
       focusable: focusable,
-      scrollbar: Keyword.get(opts, :scrollbar, :block)
+      scrollbar: Keyword.get(opts, :scrollbar, :block),
+      follow: Keyword.get(opts, :follow, false)
     }
 
     scrollbar_rect = %{
@@ -857,7 +871,9 @@ defmodule Drafter.ComponentRenderer do
       end)
 
     footer_height =
-      if footer_child == [], do: 0, else: Layout.get_preferred_height(hd(footer_child), hierarchy)
+      if footer_child == [],
+        do: 0,
+        else: Layout.get_preferred_height(hd(footer_child), hierarchy, content_rect.width)
 
     scrollable_rect = %{content_rect | height: max(0, content_rect.height - footer_height)}
 
@@ -878,7 +894,7 @@ defmodule Drafter.ComponentRenderer do
     {updated_hierarchy, final_counter, _} =
       Enum.reduce(scrollable_children, {hierarchy, start_counter, 0}, fn child,
                                                                          {h, counter, virtual_y} ->
-        child_height = Layout.get_preferred_height(child, h)
+        child_height = Layout.get_preferred_height(child, h, scrollable_rect.width)
 
         below_viewport = virtual_y >= scroll_offset_y + viewport_height
         above_viewport = virtual_y + child_height <= scroll_offset_y
@@ -1024,7 +1040,7 @@ defmodule Drafter.ComponentRenderer do
   end
 
   defp dock_extent(child, edge, hierarchy, rect) when edge in [:top, :bottom] do
-    min(Layout.get_preferred_height(child, hierarchy), rect.height)
+    min(Layout.get_preferred_height(child, hierarchy, rect.width), rect.height)
   end
 
   defp dock_extent(child, _edge, _hierarchy, rect) do

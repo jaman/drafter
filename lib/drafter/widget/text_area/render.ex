@@ -4,21 +4,23 @@ defmodule Drafter.Widget.TextArea.Render do
   alias Drafter.Draw.Segment
   alias Drafter.Widget.TextArea.{Highlight, Selection}
 
-  @spec render_content(map(), pos_integer(), pos_integer(), map()) ::
+  @spec render_content(map(), pos_integer(), pos_integer(), map(), map() | nil) ::
           [{String.t() | nil, [Segment.t()] | nil}]
-  def render_content(state, content_width, content_height, effective_style) do
+  def render_content(
+        state,
+        content_width,
+        content_height,
+        effective_style,
+        placeholder_style \\ nil
+      ) do
     lines = state.lines
-    focused = state.focused
-    placeholder = state.placeholder
 
-    if Enum.all?(lines, &(&1 == "")) and not focused and placeholder != "" do
+    if placeholder_shown?(state) do
       placeholder_lines =
-        String.split(placeholder, "\n")
-        |> Enum.map(fn line ->
-          padded = String.pad_trailing(String.slice(line, 0, content_width), content_width)
-          {padded, nil}
-        end)
+        String.split(state.placeholder, "\n")
+        |> Enum.map(&placeholder_line(&1, content_width, placeholder_style))
         |> Enum.take(content_height)
+        |> with_placeholder_cursor(state, content_width, effective_style)
 
       padding_needed = max(0, content_height - length(placeholder_lines))
 
@@ -37,6 +39,41 @@ defmodule Drafter.Widget.TextArea.Render do
         List.duplicate({String.duplicate(" ", content_width), nil}, padding_needed)
     end
   end
+
+  @doc """
+  Whether the placeholder is drawn: the text is empty, there is a placeholder, and
+  the editor is unfocused or its `:placeholder_when` is `:empty`.
+  """
+  @spec placeholder_shown?(map()) :: boolean()
+  def placeholder_shown?(state) do
+    Enum.all?(state.lines, &(&1 == "")) and state.placeholder != "" and
+      (not state.focused or state.appearance.placeholder_when == :empty)
+  end
+
+  defp placeholder_line(line, content_width, nil),
+    do: {String.pad_trailing(String.slice(line, 0, content_width), content_width), nil}
+
+  defp placeholder_line(line, content_width, style),
+    do:
+      {nil,
+       [
+         Segment.new(
+           String.pad_trailing(String.slice(line, 0, content_width), content_width),
+           style
+         )
+       ]}
+
+  defp with_placeholder_cursor([first | rest], %{focused: true}, content_width, style) do
+    segments =
+      case first do
+        {text, nil} -> [Segment.new(text, style)]
+        {nil, segments} -> segments
+      end
+
+    [{nil, overlay_cursor(segments, 0, content_width, style)} | rest]
+  end
+
+  defp with_placeholder_cursor(lines, _state, _content_width, _style), do: lines
 
   @spec render_visible_line({String.t(), non_neg_integer()}, map(), pos_integer(), map()) ::
           {nil, [Segment.t()]}

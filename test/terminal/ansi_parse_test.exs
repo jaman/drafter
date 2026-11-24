@@ -132,4 +132,19 @@ defmodule Drafter.Terminal.ANSIParseTest do
       assert {[{:key, :escape}, {:key, :"["}], ""} = ANSI.flush_sequence("\e[")
     end
   end
+
+  describe "alt" do
+    test "escape followed by a key in the same read is that key with alt" do
+      assert {[{:key, :enter, [:alt]}], ""} = ANSI.parse_sequence("\e\r")
+      assert {[{:key, :b, [:alt]}], ""} = ANSI.parse_sequence("\eb")
+      assert {[{:key, :backspace, [:alt]}], ""} = ANSI.parse_sequence("\e\d")
+      assert {[{:key, :a, [:ctrl, :alt]}], ""} = ANSI.parse_sequence(<<27, 1>>)
+    end
+
+    test "escape before a sequence or another escape stays escape" do
+      assert {[{:key, :escape}, {:key, :up}], ""} = ANSI.parse_sequence("\e\e[A")
+      assert {[{:key, :escape}], "\e"} = ANSI.parse_sequence("\e\e")
+      assert {[{:key, :escape}, {:key, :"["}], ""} = ANSI.flush_sequence("\e[")
+    end
+  end
 end

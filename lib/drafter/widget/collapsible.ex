@@ -11,8 +11,8 @@ defmodule Drafter.Widget.Collapsible do
   list of child widgets built with the same helper functions available in
   `Drafter.App` (e.g. `checkbox/2`, `radio_set/2`, `text_input/1`). Child
   widgets are fully interactive — they receive focus, keyboard, and mouse events
-  just like top-level widgets. Use `:content_height` to reserve the right number
-  of rows for the expanded body when passing child widgets.
+  just like top-level widgets. Expanded, child widgets get the rows they ask for
+  at the collapsible's width; `:content_height` fixes that number instead.
 
   ## Component tag
 
@@ -35,8 +35,8 @@ defmodule Drafter.Widget.Collapsible do
     * `:content` - body string or list of child widget descriptors. Default `""`.
       Supplied positionally through the element
     * `:content_height` - rows reserved for child widgets when expanded. Default
-      `10` for any non-string content and `nil` for a string, which is word-wrapped
-      to fit instead
+      `nil`: child widgets get the rows they ask for at the collapsible's width, and a
+      string is word-wrapped to fit
     * `:expanded` - `t:boolean/0` initial expansion state. Default `false`
     * `:on_toggle` - atom event name or one-arity function invoked with the new
       `expanded` boolean. Default `nil`. An exception raised inside it is caught and
@@ -48,9 +48,7 @@ defmodule Drafter.Widget.Collapsible do
     * `:rule` - `t:boolean/0`, fill the toggle row between the title and the summary
       with a dimmed horizontal line. Default `false`
 
-  `update/2` merges the whole props map into the state, so every option is live;
-  `:content_height` is recomputed from the default only when the content switches
-  between a string and a non-string and no explicit `:content_height` was given.
+  `update/2` merges the whole props map into the state, so every option is live.
 
   ## Widget value
 
@@ -119,8 +117,7 @@ defmodule Drafter.Widget.Collapsible do
   @doc """
   Builds the collapsible state from `props`.
 
-  `:content_height` falls back to `nil` for string content and `10` for anything
-  else.
+  `:content_height` defaults to `nil`, sizing the body from its content.
 
       iex> c = Drafter.Widget.Collapsible.mount(%{title: "About", content: "text"})
       iex> {c.title, c.content_height, c.expanded}
@@ -128,7 +125,7 @@ defmodule Drafter.Widget.Collapsible do
 
       iex> c = Drafter.Widget.Collapsible.mount(%{content: [:a, :b]})
       iex> {c.title, c.content_height}
-      {"Collapsible", 10}
+      {"Collapsible", nil}
 
       iex> c = Drafter.Widget.Collapsible.mount(%{})
       iex> {c.content, c.focused, c.hovered, c.on_toggle}
@@ -141,7 +138,7 @@ defmodule Drafter.Widget.Collapsible do
     %__MODULE__{
       title: Map.get(props, :title, "Collapsible"),
       content: content,
-      content_height: Map.get(props, :content_height, default_content_height(content)),
+      content_height: Map.get(props, :content_height),
       expanded: Map.get(props, :expanded, false),
       focused: Map.get(props, :focused, false),
       hovered: Map.get(props, :hovered, false),
@@ -156,8 +153,9 @@ defmodule Drafter.Widget.Collapsible do
 
   Returns exactly `rect.height` strips, padded with blanks or truncated. Collapsed,
   only the title row carries content. Expanded, string content is word-wrapped to
-  `rect.width - 2` and indented two columns, while list content becomes
-  `:content_height` blank rows for the component renderer to draw the children into.
+  `rect.width - 2` and indented two columns, while list content becomes blank rows,
+  `:content_height` of them or the rest of `rect`, for the component renderer to
+  draw the children into.
   """
   @spec render(t(), Drafter.Widget.rect()) :: [Strip.t()]
   def render(state, rect) do
@@ -226,14 +224,12 @@ defmodule Drafter.Widget.Collapsible do
   @doc """
   Merges `props` into `state`, so every option is live-updatable.
 
-  `:content_height` is taken from `props` when present. Otherwise it is recomputed
-  from the default only when `:content` is present and switches between a string and
-  a non-string; in every other case the current value is kept.
+  `:content_height` is taken from `props` when present and kept otherwise.
 
       iex> c = Drafter.Widget.Collapsible.mount(%{title: "About", content: "text"})
       iex> updated = Drafter.Widget.Collapsible.update(%{content: [:a]}, c)
       iex> {updated.content, updated.content_height}
-      {[:a], 10}
+      {[:a], nil}
 
       iex> c = Drafter.Widget.Collapsible.mount(%{content: [:a]})
       iex> Drafter.Widget.Collapsible.update(%{content_height: 3}, c).content_height
@@ -241,24 +237,9 @@ defmodule Drafter.Widget.Collapsible do
   """
   @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
-    new_content =
-      if Map.has_key?(props, :content), do: props.content, else: state.content
-
-    new_content_height =
-      cond do
-        Map.has_key?(props, :content_height) ->
-          props.content_height
-
-        Map.has_key?(props, :content) and is_binary(new_content) != is_binary(state.content) ->
-          default_content_height(new_content)
-
-        true ->
-          state.content_height
-      end
-
     state
     |> Map.merge(props)
-    |> Map.put(:content_height, new_content_height)
+    |> Map.put(:content_height, Map.get(props, :content_height, state.content_height))
   end
 
   @doc """
@@ -304,13 +285,10 @@ defmodule Drafter.Widget.Collapsible do
     end)
   end
 
-  defp render_content(content, content_height, _rect, bg_style) when is_list(content) do
+  defp render_content(content, content_height, rect, bg_style) when is_list(content) do
     empty_strip = Strip.new([Segment.new("", bg_style)])
-    List.duplicate(empty_strip, content_height || 0)
+    List.duplicate(empty_strip, content_height || max(rect.height - 1, 0))
   end
-
-  defp default_content_height(content) when is_binary(content), do: nil
-  defp default_content_height(_content), do: 10
 
   defp toggle(state) do
     new_state = %{state | expanded: not state.expanded}

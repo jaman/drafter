@@ -3,15 +3,18 @@ defmodule Drafter.Widget.TextInput.Rendering do
 
   alias Drafter.Draw.Segment
 
+  @spec placeholder_shown?(map()) :: boolean()
+  def placeholder_shown?(state),
+    do: Map.get(state, :text, "") == "" and not Map.get(state, :focused, false)
+
   @spec get_display_text(map(), non_neg_integer()) :: String.t()
   def get_display_text(state, content_width) do
     text = Map.get(state, :text, "")
     placeholder = Map.get(state, :placeholder, "")
-    focused = Map.get(state, :focused, false)
     scroll_offset = Map.get(state, :scroll_offset, 0)
     password = Map.get(state, :password, false)
 
-    if String.length(text) == 0 and not focused do
+    if placeholder_shown?(state) do
       String.slice(placeholder, 0, content_width)
     else
       visible_text = String.slice(text, scroll_offset, content_width)

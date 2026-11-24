@@ -38,6 +38,12 @@ defmodule Drafter.Widget.Box do
       primary colour while a widget inside the box has keyboard focus (default
       `false`). The widget hierarchy keeps the box's `:focus_within` flag current
       as focus moves
+    * `:surface` — `%{from: rgb, to: rgb}` or `nil` (default). The interior is
+      filled with `to`, and every cell drawn by a widget inside the box whose
+      background is `from` (or unset) is drawn on `to` instead. The `box/2`
+      element sets `from` to the theme's background, so children drawn on the
+      theme background sit on the box's colour. The nearest box with a surface
+      decides
 
   `:classes` is read by `mount/1` only; the `{:box, children, opts}` element does
   not forward it.
@@ -69,8 +75,12 @@ defmodule Drafter.Widget.Box do
           classes: [atom()],
           app_module: module() | nil,
           highlight_focus: boolean(),
-          focus_within: boolean()
+          focus_within: boolean(),
+          surface: surface() | nil
         }
+
+  @typedoc "The colour a box's descendants draw on in place of `from`."
+  @type surface :: %{from: Drafter.Theme.rgb(), to: Drafter.Theme.rgb()}
 
   @border_chars %{
     none: %{tl: " ", tr: " ", bl: " ", br: " ", h: " ", v: " "},
@@ -93,7 +103,8 @@ defmodule Drafter.Widget.Box do
     :classes,
     :app_module,
     highlight_focus: false,
-    focus_within: false
+    focus_within: false,
+    surface: nil
   ]
 
   @doc """
@@ -123,7 +134,8 @@ defmodule Drafter.Widget.Box do
       classes: Map.get(props, :classes, []),
       app_module: Map.get(props, :app_module),
       highlight_focus: Map.get(props, :highlight_focus, false),
-      focus_within: Map.get(props, :focus_within, false)
+      focus_within: Map.get(props, :focus_within, false),
+      surface: Map.get(props, :surface)
     }
   end
 
@@ -148,7 +160,7 @@ defmodule Drafter.Widget.Box do
     fg = computed[:color] || {200, 200, 200}
     border_fg = computed[:border_color] || {100, 100, 120}
 
-    base_style = Map.merge(%{fg: fg, bg: bg}, state.content_style)
+    base_style = Map.merge(%{fg: fg, bg: fill(state.surface, bg)}, state.content_style)
 
     border_style_map =
       %{fg: border_fg, bg: bg} |> Map.merge(state.border_style) |> focus_accent(state)
@@ -221,6 +233,32 @@ defmodule Drafter.Widget.Box do
   def handle_event(_event, state) do
     {:noreply, state}
   end
+
+  @doc """
+  `strips` with every segment whose background is the surface's `from`, or
+  unset, drawn on its `to`. `nil` returns `strips` unchanged.
+
+      iex> strip = Drafter.Draw.Strip.new([Drafter.Draw.Segment.new("a", %{bg: {1, 1, 1}})])
+      iex> [on] = Drafter.Widget.Box.on_surface([strip], %{from: {1, 1, 1}, to: {9, 9, 9}})
+      iex> hd(on.segments).style.bg
+      {9, 9, 9}
+  """
+  @spec on_surface([Strip.t()], surface() | nil) :: [Strip.t()]
+  def on_surface(strips, nil), do: strips
+  def on_surface(strips, surface), do: Enum.map(strips, &strip_on_surface(&1, surface))
+
+  defp strip_on_surface(strip, surface),
+    do: Strip.new(Enum.map(strip.segments, &segment_on_surface(&1, surface)))
+
+  defp segment_on_surface(%Segment{style: style} = segment, %{from: from, to: to}) do
+    case Map.get(style || %{}, :bg) do
+      bg when bg == from or bg == nil -> %{segment | style: Map.put(style || %{}, :bg, to)}
+      _other -> segment
+    end
+  end
+
+  defp fill(nil, bg), do: bg
+  defp fill(%{to: to}, _bg), do: to
 
   defp focus_accent(style, %{highlight_focus: true, focus_within: true}),
     do: Map.put(style, :fg, ThemeManager.get_current_theme().primary)

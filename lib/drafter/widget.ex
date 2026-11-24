@@ -324,7 +324,18 @@ defmodule Drafter.Widget do
   """
   @callback apply_data_buffer(state(), Drafter.RingBuffer.t(), rect()) :: state()
 
+  @doc """
+  The rows the element `{tag, args, opts}` needs at `width` columns, for a
+  widget whose height depends on its width, such as wrapped text. Layouts
+  that know the width a child gets (a column, a box, a card, a scrollable,
+  a collapsible's content) ask this in place of `preferred_height/2`; an
+  element given `:height` keeps it.
+  """
+  @callback height_for_width(args :: term(), opts :: keyword(), width :: pos_integer()) ::
+              pos_integer()
+
   @optional_callbacks [
+    height_for_width: 3,
     update: 2,
     unmount: 1,
     handle_scroll: 2,

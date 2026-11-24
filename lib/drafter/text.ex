@@ -92,6 +92,46 @@ defmodule Drafter.Text do
   end
 
   @doc """
+  Wrap styled runs, `{text, style}`, into lines of at most `width`
+  display columns, breaking between words. Each line is a list of runs,
+  neighbouring runs of the same style joined. The break falls before
+  the spaces between two words, and a wrapped line does not start with
+  them; spaces at the start of the first line are kept. A word wider
+  than a line is cut between graphemes. A `width` of `0` or less returns
+  the runs as one line.
+
+  ## Examples
+
+      iex> Drafter.Text.wrap_runs([{"aa bb ", :plain}, {"cc", :bold}], 5)
+      [[{"aa bb", :plain}], [{"cc", :bold}]]
+
+      iex> Drafter.Text.wrap_runs([{"  - item", :plain}], 20)
+      [[{"  - item", :plain}]]
+
+      iex> Drafter.Text.wrap_runs([{"abcdefg", :code}], 3)
+      [[{"abc", :code}], [{"def", :code}], [{"g", :code}]]
+
+      iex> Drafter.Text.wrap_runs([], 10)
+      [[]]
+
+  """
+  @spec wrap_runs([{String.t(), term()}], integer()) :: [[{String.t(), term()}]]
+  def wrap_runs(runs, width) when width <= 0, do: [merge_runs(runs)]
+
+  def wrap_runs(runs, width) do
+    {lines, line, _used} =
+      runs
+      |> Enum.flat_map(fn {text, style} ->
+        for [piece] <- Regex.scan(~r/\s+|\S+/u, text), do: {piece, style}
+      end)
+      |> Enum.reduce({[], [], 0}, &place_run(&1, &2, width))
+
+    [line | lines]
+    |> Enum.reverse()
+    |> Enum.map(&(&1 |> Enum.reverse() |> merge_runs()))
+  end
+
+  @doc """
   Cut `text` down to at most `width` display columns.
 
   Nothing is appended. A double-width grapheme that would straddle the limit is
@@ -411,4 +451,34 @@ defmodule Drafter.Text do
   end
 
   defp grapheme_width(grapheme), do: Drafter.CharacterWidth.grapheme(grapheme)
+
+  defp place_run({piece, style} = run, {lines, line, used}, width) do
+    size = display_width(piece)
+    blank? = String.trim(piece) == ""
+
+    cond do
+      blank? and used == 0 and lines != [] -> {lines, line, used}
+      used + size <= width -> {lines, [run | line], used + size}
+      blank? -> {[line | lines], [], 0}
+      size > width -> place_long(piece, style, closed(lines, line), width)
+      true -> {[line | lines], [run], size}
+    end
+  end
+
+  defp closed(lines, []), do: lines
+  defp closed(lines, line), do: [line | lines]
+
+  defp place_long(piece, style, lines, width) do
+    {full, [last]} = piece |> wrap(width, :char) |> Enum.split(-1)
+    lines = Enum.reduce(full, lines, &[[{&1, style}] | &2])
+    {lines, [{last, style}], display_width(last)}
+  end
+
+  defp merge_runs(runs) do
+    runs
+    |> Enum.chunk_by(&elem(&1, 1))
+    |> Enum.map(fn [{_text, style} | _rest] = same ->
+      {Enum.map_join(same, &elem(&1, 0)), style}
+    end)
+  end
 end

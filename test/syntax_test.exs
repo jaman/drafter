@@ -71,6 +71,11 @@ defmodule Drafter.SyntaxTest do
       assert Enum.any?(line3, fn {_sc, ec, type} -> ec == 4 and type == :string end)
     end
 
+    test "keeps the most specific known part of a dotted name" do
+      result = TSFeatures.build([{1, 0, 1, 3, "keyword.riddle_unknown_part"}])
+      assert [{0, 3, :keyword}] = TSFeatures.get_spans(result, 1)
+    end
+
     test "separates fold captures from highlights" do
       captures = [{1, 0, 5, 3, "fold.default"}]
       result = TSFeatures.build(captures)

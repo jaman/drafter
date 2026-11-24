@@ -48,7 +48,7 @@ defmodule Drafter.Widget.ImageActiveTest do
 
   describe "gauge" do
     test "is inactive while drawing braille" do
-      refute Widget.image_active?(Gauge, Gauge.mount(%{value: 0.5}))
+      refute Widget.image_active?(Gauge, Gauge.mount(%{value: 0.5, renderer: :braille}))
     end
 
     test "is active while drawing a picture" do
@@ -58,7 +58,7 @@ defmodule Drafter.Widget.ImageActiveTest do
 
   describe "pie chart" do
     test "is inactive while drawing cells" do
-      refute Widget.image_active?(PieChart, PieChart.mount(%{data: [1, 2]}))
+      refute Widget.image_active?(PieChart, PieChart.mount(%{data: [1, 2], renderer: :text}))
     end
 
     test "is active while drawing a picture" do
@@ -68,7 +68,7 @@ defmodule Drafter.Widget.ImageActiveTest do
 
   describe "digits" do
     test "is inactive while drawing cells" do
-      refute Widget.image_active?(Digits, Digits.mount(%{text: "42"}))
+      refute Widget.image_active?(Digits, Digits.mount(%{text: "42", renderer: :text}))
     end
 
     test "is active while drawing a picture" do

@@ -5,7 +5,10 @@ defmodule Drafter.Widget.Markdown do
   Supported syntax: `#` and `##` headings, `**bold**`, `*italic*`, and
   `` `inline code` ``. Block elements are styled via the theme system using
   the `:h1`, `:h2`, and `:text` theme parts. A configurable horizontal
-  padding is applied inside the widget boundaries.
+  padding is applied inside the widget boundaries. Lines wider than the
+  widget wrap between words (`Drafter.Text.wrap_runs/2`), and in a layout
+  that knows its width the widget asks for the rows the wrapped text takes
+  (`height_for_width/3`).
 
   ## Component tag
 
@@ -25,13 +28,16 @@ defmodule Drafter.Widget.Markdown do
       Default `1`. A rect narrower than `2 * padding` renders nothing.
     * `:style` - `t:map/0` of base style attributes merged under the computed theme
       styles. Default `%{}`.
+    * `:color` - `{r, g, b}` or a theme colour token the text is drawn in, over the
+      theme's text colour, such as `:text_muted` for a dimmed paragraph. Headings
+      keep theirs. Default `nil`, the theme's.
     * `:height` - `t:pos_integer/0` read only by `preferred_height/2`, never by
       `mount/1`. Default is the line count of the content, at least `3`.
 
   Every option is live-updatable: `update/2` merges the props map straight into the
-  state. `update_props_from_mount/3` narrows a re-render to `:content` alone, so a
-  `:padding` or `:style` change made after mount through the component tree is not
-  picked up.
+  state. `update_props_from_mount/3` narrows a re-render to `:content` and `:color`,
+  so a `:padding` or `:style` change made after mount through the component tree is
+  not picked up.
 
   ## Usage
 
@@ -47,32 +53,35 @@ defmodule Drafter.Widget.Markdown do
   @type t :: %{
           content: String.t(),
           style: map(),
-          padding: non_neg_integer()
+          padding: non_neg_integer(),
+          color: Drafter.Theme.rgb() | atom() | nil
         }
 
   @doc """
   Builds the widget state from `props`.
 
-  Reads `:content` (default `""`), `:style` (default `%{}`) and `:padding`
-  (default `1`).
+  Reads `:content` (default `""`), `:style` (default `%{}`), `:padding`
+  (default `1`) and `:color` (default `nil`).
 
       iex> Drafter.Widget.Markdown.mount(%{})
-      %{content: "", padding: 1, style: %{}}
+      %{content: "", padding: 1, style: %{}, color: nil}
 
       iex> Drafter.Widget.Markdown.mount(%{content: "# Title", padding: 2})
-      %{content: "# Title", padding: 2, style: %{}}
+      %{content: "# Title", padding: 2, style: %{}, color: nil}
   """
   @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
     %{
       content: Map.get(props, :content, ""),
       style: Map.get(props, :style, %{}),
-      padding: Map.get(props, :padding, 1)
+      padding: Map.get(props, :padding, 1),
+      color: Map.get(props, :color)
     }
   end
 
   @doc """
-  Renders the parsed Markdown into `rect`, one `Drafter.Draw.Strip` per source line.
+  Renders the parsed Markdown into `rect`, one `Drafter.Draw.Strip` per line once
+  wrapped to the width inside the padding.
 
   Headings are styled through the `:h1` and `:h2` theme parts and every other line
   through `:text`. Returns `[]` when `rect.width` leaves no room after padding.
@@ -90,7 +99,7 @@ defmodule Drafter.Widget.Markdown do
 
       iex> state = Drafter.Widget.Markdown.mount(%{content: "a"})
       iex> Drafter.Widget.Markdown.update(%{content: "b"}, state)
-      %{content: "b", padding: 1, style: %{}}
+      %{content: "b", padding: 1, style: %{}, color: nil}
   """
   @spec update(Drafter.Widget.props(), t()) :: t()
   def update(props, state) do
@@ -143,6 +152,24 @@ defmodule Drafter.Widget.Markdown do
   end
 
   @doc """
+  The rows the element needs at `width` columns: its lines wrapped to the
+  width inside its `:padding` (default `1`), at least one. `args` is the
+  positional content string, or `nil` for `opts[:content]`.
+
+      iex> Drafter.Widget.Markdown.height_for_width("one two three four", [padding: 0], 9)
+      3
+
+      iex> Drafter.Widget.Markdown.height_for_width("# Title", [], 40)
+      1
+  """
+  @spec height_for_width(String.t() | nil, keyword(), pos_integer()) :: pos_integer()
+  def height_for_width(args, opts, width) do
+    content = args || Keyword.get(opts, :content, "")
+    padding = Keyword.get(opts, :padding, 1)
+    content |> parse_markdown(max(width - padding * 2, 1)) |> length() |> max(1)
+  end
+
+  @doc """
   The component tag this widget registers under.
 
       iex> Drafter.Widget.Markdown.component_tag()
@@ -155,49 +182,48 @@ defmodule Drafter.Widget.Markdown do
   Builds the props map for a `{:markdown, content, opts}` element.
 
   `content` is the positional argument; when it is `nil`, `opts[:content]` is used
-  instead, defaulting to `""`. Also reads `:style` (default `%{}`) and `:padding`
-  (default `1`).
+  instead, defaulting to `""`. Also reads `:style` (default `%{}`), `:padding`
+  (default `1`) and `:color` (default `nil`).
 
       iex> Drafter.Widget.Markdown.from_component_opts("# Title", padding: 0)
-      %{content: "# Title", padding: 0, style: %{}}
+      %{content: "# Title", padding: 0, style: %{}, color: nil}
 
       iex> Drafter.Widget.Markdown.from_component_opts(nil, content: "fallback")
-      %{content: "fallback", padding: 1, style: %{}}
+      %{content: "fallback", padding: 1, style: %{}, color: nil}
   """
   @spec from_component_opts(String.t() | nil, keyword()) :: t()
   def from_component_opts(content, opts) do
     %{
       content: content || Keyword.get(opts, :content, ""),
       style: Keyword.get(opts, :style, %{}),
-      padding: Keyword.get(opts, :padding, 1)
+      padding: Keyword.get(opts, :padding, 1),
+      color: Keyword.get(opts, :color)
     }
   end
 
   @doc """
   Narrows a re-render to the props that may change after mount.
 
-  Only `:content` is carried over, so a `:padding` or `:style` change made through
-  the component tree after the first mount is not picked up.
+  Only `:content` and `:color` are carried over, so a `:padding` or `:style` change
+  made through the component tree after the first mount is not picked up.
 
       iex> props = Drafter.Widget.Markdown.from_component_opts("# New", padding: 4)
       iex> Drafter.Widget.Markdown.update_props_from_mount(props, %{}, [])
-      %{content: "# New"}
+      %{content: "# New", color: nil}
   """
-  @spec update_props_from_mount(t(), term(), keyword()) :: %{content: String.t()}
+  @spec update_props_from_mount(t(), term(), keyword()) :: %{content: String.t(), color: term()}
   def update_props_from_mount(mount_props, _existing_state, _opts) do
-    %{content: mount_props.content}
+    %{content: mount_props.content, color: Map.get(mount_props, :color)}
   end
 
   defp render_markdown_line(text, base_part, state, padding) when is_binary(text) do
-    base_computed = Computed.for_part(:markdown, state, base_part)
-    base_style = Map.merge(state.style, Computed.to_segment_style(base_computed))
+    base_style = line_style(state, base_part)
     segments = [Segment.new(text, base_style)]
     wrap_with_padding(segments, padding, base_style)
   end
 
   defp render_markdown_line(specs, base_part, state, padding) when is_list(specs) do
-    base_computed = Computed.for_part(:markdown, state, base_part)
-    base_style = Map.merge(state.style, Computed.to_segment_style(base_computed))
+    base_style = line_style(state, base_part)
 
     segments =
       Enum.map(specs, fn {text, inline_style} ->
@@ -206,6 +232,16 @@ defmodule Drafter.Widget.Markdown do
 
     wrap_with_padding(segments, padding, base_style)
   end
+
+  defp line_style(state, base_part) do
+    computed = Computed.for_part(:markdown, state, base_part)
+    state.style |> Map.merge(Computed.to_segment_style(computed)) |> coloured(state, base_part)
+  end
+
+  defp coloured(style, %{color: color}, :text) when color != nil,
+    do: Map.put(style, :fg, Drafter.Style.resolve_color(color, nil))
+
+  defp coloured(style, _state, _part), do: style
 
   defp wrap_with_padding(segments, 0, _style), do: Strip.new(segments)
 
@@ -226,7 +262,9 @@ defmodule Drafter.Widget.Markdown do
     content
     |> String.split("\n")
     |> Enum.flat_map(fn line ->
-      parse_line(line, width)
+      for {segments, part} <- parse_line(line, width),
+          wrapped <- Drafter.Text.wrap_runs(segments, width),
+          do: {wrapped, part}
     end)
   end
 

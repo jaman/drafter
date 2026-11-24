@@ -8,9 +8,7 @@ defmodule Drafter.PtyCloseTest do
     Pty.close(first)
     {:ok, second} = Pty.spawn("/bin/cat")
 
-    assert {second.master, second.slave} == {first.master, first.slave}
-
-    Pty.close(first)
+    Pty.close(%{first | master: second.master, slave: second.slave})
 
     assert Pty.resize(second, 100, 30) == :ok
 

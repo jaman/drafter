@@ -46,3 +46,4 @@ CONTRIBUTING.md
 dev/
 docs/
 image_memory_repro.exs
+.expert/

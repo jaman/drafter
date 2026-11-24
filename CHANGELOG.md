@@ -4,6 +4,42 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## Unreleased
+
+### Added
+
+- `TextArea`'s `enter: :submit` with `:on_submit`: `enter` submits the text and `shift`, `ctrl`, `alt` or `meta` with `enter` starts a new line, as a chat composer does.
+- `scrollable`'s `:follow`: a viewport at the bottom of its content stays at the bottom as the content grows, in the same frame.
+- `FilePicker`'s `:show_hidden` (list dot-entries from the start) and `:places` (`{label, path}` entries added to its sidebar).
+- `TextArea` keeps a cursor that was at the end of its text at the end when the app replaces the text (through `:bind` or `update/2`), so text the app completes is typed on after.
+- `ESC` followed in the same read by another key parses as that key with `:alt` (`ESC CR` is `{:key, :enter, [:alt]}`), except before a sequence opener or another `ESC`.
+- `CodeView`'s `:highlighter`: a module implementing the now documented `Drafter.Syntax.Highlighter` behaviour, whose captures colour the code ahead of the `tree-sitter` CLI and the built-in Elixir highlighter.
+- `Drafter.Text.wrap_runs/2`: styled runs wrapped between words into lines of runs.
+- `Drafter.Widget`'s optional `height_for_width/3` and `Drafter.Layout.get_preferred_height/3`'s width: columns, scrollables, boxes, cards and a collapsible's content pass the width a child gets, and a widget whose height depends on it (wrapped text) answers for that width.
+- `box`'s `:surface`: the box is filled with that colour and its descendants are drawn on it: a cell a child draws on the theme's background, or with no background, takes the surface colour, so labels, lists, buttons and layout gaps inside a coloured panel sit on the panel. The nearest box with a surface decides.
+- `Drafter.Widget.SourceList` and `source_list/2`: a sidebar list in sections, as a desktop app's window sidebar, with rows of an icon and a title under section headings, the selected row drawn as selected, keyboard and mouse opening, and `source_list` stylesheet parts (`::heading`, `::icon`, `::item:selected`, `::item:hover`).
+- `Drafter.set_theme/1` and `Drafter.ThemeManager.set_theme/1` take a `%Drafter.Theme{}` of the app's own as well as a built-in theme's name.
+- `TextArea`'s `:border` (`:single`, `:rounded` or `:none`, which gives the border's rows and columns to the text) and `:placeholder_when: :empty` (the placeholder stays while the editor is focused and empty, with the cursor on its first cell).
+- `TextInput`'s `:border` (`:single`, `:rounded`, or `:none` for a one-row field) and `:prefix` (text drawn before the value that is not part of it, such as a search icon). The `text_input/1` element forwards `:style`.
+- `scrollable`'s `scrollbar: :overlay`: a muted line thumb with no track, as a desktop app's overlay scrollbar.
+- `Markdown`'s `:color`: the colour its text is drawn in over the theme's (headings keep theirs), such as `:text_muted` for a dimmed paragraph; `:style` stays under the theme.
+
+### Changed
+
+- Widgets with an image renderer (gauge, chart, pie chart, digits, slider) draw with the terminal's graphics protocol by default: an unset `:renderer` and an unset run `:mode` resolve to `:auto` (kitty, iTerm2 or sixel, braille where the terminal has none) instead of `:text`. `renderer: :text`, `mode: :text` or `DRAFTER_MODE=text` keep cells.
+- `Markdown` wraps lines wider than the widget between words, keeping their styles, and asks for the rows the wrapped text takes where the layout knows its width; before, long lines ran off the right edge.
+- `Collapsible` list content defaults to the rows its child widgets need at the collapsible's width, in place of a fixed 10; `:content_height` still fixes it.
+- A `horizontal` row divides the width between its `:flex` children by their weights, as a `vertical` column divides height; before, every flexible child got an equal share whatever its `:flex`. A flexible child's `:max_width` caps it, and the columns it leaves go to the other flexible children, so a column can be centred with a flexible spacer on each side.
+- A `horizontal` row asks each child for its height at the width the child gets, so wrapped text in a row is as tall as its lines; children with `visible: false` no longer count.
+- A widget nested deeper is drawn over its ancestors among the layers of the same kind, so a box inside a box shows its border over the outer box's fill.
+- `TextArea` no longer takes `:focused_style`, which it stored and never drew with.
+
+### Fixed
+
+- `TextInput` draws its placeholder in the theme's muted text colour, so an empty field no longer looks as if the placeholder had been typed.
+- `TextArea` draws its placeholder in the `text_area::placeholder` colour, and its `:style` is applied over the theme's text area style.
+- A tree-sitter capture with a dotted name (`keyword.function`, `string.special.symbol`) is coloured by its most specific part the theme has, down to `keyword` or `string`, instead of the default text colour.
+
 ## [0.6.0]
 
 ### Added

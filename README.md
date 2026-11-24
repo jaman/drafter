@@ -161,8 +161,10 @@ state %{count: 0}
 - `:syntax_highlighting` - `false` (default). `true` starts the tree-sitter server
   `code_view` needs
 - `:widget_libraries` - modules to register before the app mounts. Default `[]`
-- `:mode` - global chart rendering mode: `:auto`, `:pixel`, `:kitty`, `:iterm2`,
-  `:sixel`, `:braille`, or `:text`. A per-widget `:renderer` overrides it, and the
+- `:mode` - how widgets with an image renderer (gauge, chart, pie chart, digits,
+  slider) draw: `:auto` (default: the terminal's graphics protocol, kitty, iTerm2
+  or sixel, and braille where it has none), `:pixel`, `:kitty`, `:iterm2`, `:sixel`,
+  `:braille`, or `:text`. A per-widget `:renderer` overrides it, and the
   `DRAFTER_MODE` env var overrides both
 - `:log` - `false` (default) silences the console handler so logs cannot corrupt the
   display; `true` writes `drafter.log` in the current directory; a path string

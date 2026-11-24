@@ -42,6 +42,11 @@ defmodule Drafter.Terminal.ANSI do
   Control characters `\\x01`..`\\x1a` decode as `{:key, letter, [:ctrl]}`, except
   `\\x09` which is `{:key, :tab}` and `\\x0a`/`\\x0d` which are both `{:key, :enter}`.
 
+  `ESC` followed in the same read by another key is that key with `:alt`, as
+  terminals send Alt with a key (`ESC CR` is `{:key, :enter, [:alt]}`), unless the
+  byte after it opens a sequence (`[`, `O`, `P`, `]`, `X`, `^`, `_`) or is another
+  `ESC`: those stay `{:key, :escape}` followed by what comes next.
+
   ## Mouse payloads
 
   `x` and `y` are zero-based column and row. `modifiers` is a subset of
@@ -141,6 +146,7 @@ defmodule Drafter.Terminal.ANSI do
   alias Drafter.Terminal.{KittyKeyboard, Reports}
 
   @string_openers ~c"_P]X^"
+  @sequence_openers ~c"[O_P]X^"
 
   @key_sequences %{
     "\e[A" => {:key, :up},
@@ -365,6 +371,9 @@ defmodule Drafter.Terminal.ANSI do
         {:reports, reports, rest} ->
           do_parse(rest, Enum.reverse(reports, events), read_reports(mode, reports))
 
+        {{:key, :escape}, rest} when rest != "" ->
+          escape_or_alt(rest, events, mode)
+
         {event, rest} ->
           do_parse(rest, with_key_down(event, mode) ++ events, mode)
 
@@ -373,6 +382,32 @@ defmodule Drafter.Terminal.ANSI do
       end
     end
   end
+
+  defp escape_or_alt(<<opener, _::binary>> = rest, events, mode)
+       when opener in @sequence_openers,
+       do: do_parse(rest, with_key_down({:key, :escape}, mode) ++ events, mode)
+
+  defp escape_or_alt(<<char, rest::binary>>, events, mode) when char >= 32 and char <= 126,
+    do: do_parse(rest, with_key_down({:key, printable_key(char), [:alt]}, mode) ++ events, mode)
+
+  defp escape_or_alt(<<"\e", _::binary>> = rest, events, mode),
+    do: do_parse(rest, with_key_down({:key, :escape}, mode) ++ events, mode)
+
+  defp escape_or_alt(rest, events, mode) do
+    case find_longest_match(rest, mode) do
+      {{:key, key}, after_key} ->
+        do_parse(after_key, with_key_down({:key, key, [:alt]}, mode) ++ events, mode)
+
+      {{:key, key, modifiers}, after_key} ->
+        do_parse(after_key, with_key_down({:key, key, with_alt(modifiers)}, mode) ++ events, mode)
+
+      _other ->
+        do_parse(rest, with_key_down({:key, :escape}, mode) ++ events, mode)
+    end
+  end
+
+  defp with_alt(modifiers),
+    do: Enum.filter([:ctrl, :alt, :shift], &(&1 == :alt or &1 in modifiers))
 
   defp with_key_down({:key, _} = event, {_, %{key_release: true}}),
     do: [KittyKeyboard.key_down(event), event]

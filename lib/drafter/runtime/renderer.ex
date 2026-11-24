@@ -15,6 +15,7 @@ defmodule Drafter.Runtime.Renderer do
   alias Drafter.Screen
   alias Drafter.ScreenManager
   alias Drafter.ThemeManager
+  alias Drafter.Widget.Box
   alias Drafter.Widget.Collapsible
   alias Drafter.WidgetHierarchy
   alias Drafter.WidgetServer
@@ -748,7 +749,9 @@ defmodule Drafter.Runtime.Renderer do
       )
 
     final_rect = apply_animated_presentation(overflowed_rect, widget_info)
-    final_strips = overflowed_strips
+
+    final_strips =
+      Box.on_surface(overflowed_strips, WidgetHierarchy.surface_for(hierarchy, widget_id))
 
     placement =
       hierarchy
@@ -763,13 +766,22 @@ defmodule Drafter.Runtime.Renderer do
           widget_id,
           final_strips,
           final_rect,
-          z_base,
+          z_base + nesting(hierarchy, widget_id),
           widget_info.module,
           layer_opacity(widget_info)
         )
       ]
     else
       []
+    end
+  end
+
+  defp nesting(hierarchy, widget_id), do: min(ancestors(hierarchy, widget_id, 0), 99) / 100
+
+  defp ancestors(hierarchy, widget_id, count) do
+    case WidgetHierarchy.get_parent(hierarchy, widget_id) do
+      nil -> count
+      parent -> ancestors(hierarchy, parent, count + 1)
     end
   end
 

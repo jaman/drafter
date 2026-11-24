@@ -60,79 +60,114 @@ defmodule Drafter.Layout do
 
   Container components sum their children plus their own chrome; a registered widget
   is asked through the widget registry. `hierarchy` supplies live widget state
-  where a widget's height depends on it, and defaults to `nil`. Anything unrecognised
-  is `1`.
+  where a widget's height depends on it, and defaults to `nil`. `width`, when
+  given, is the columns the component gets: columns, scrollables, boxes, cards and
+  a collapsible's content pass it on to their children, less their borders and
+  padding, and a widget implementing `c:Drafter.Widget.height_for_width/3` answers
+  for that width. Anything unrecognised is `1`.
   """
-  @spec get_preferred_height(component(), hierarchy() | nil) :: pos_integer() | :auto
-  def get_preferred_height(component, hierarchy \\ nil)
+  @spec get_preferred_height(component(), hierarchy() | nil, pos_integer() | nil) ::
+          pos_integer() | :auto
+  def get_preferred_height(component, hierarchy \\ nil, width \\ nil)
 
-  def get_preferred_height({:layout, :horizontal, children, opts}, hierarchy) do
+  def get_preferred_height({:layout, :horizontal, children, opts}, hierarchy, width) do
     children
-    |> Enum.map(&get_preferred_height(&1, hierarchy))
+    |> Enum.filter(&component_visible?/1)
+    |> row_heights(hierarchy, width, opts)
     |> Enum.max(fn -> 1 end)
     |> cap_at_max_height(opts)
   end
 
-  def get_preferred_height({:layout, :vertical, children, opts}, hierarchy) do
+  def get_preferred_height({:layout, :vertical, children, opts}, hierarchy, width) do
     children
-    |> Enum.map(&get_preferred_height(&1, hierarchy))
+    |> Enum.map(&get_preferred_height(&1, hierarchy, width))
     |> Enum.sum()
     |> cap_at_max_height(opts)
   end
 
-  def get_preferred_height({:scrollable, children, opts}, hierarchy) do
+  def get_preferred_height({:scrollable, children, opts}, hierarchy, width) do
     Keyword.get(
       opts,
       :height,
-      children |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
+      children |> Enum.map(&get_preferred_height(&1, hierarchy, width)) |> Enum.sum()
     )
   end
 
-  def get_preferred_height({:box, children, opts}, hierarchy) do
+  def get_preferred_height({:box, children, opts}, hierarchy, width) do
     border = Keyword.get(opts, :border, CharacterSet.style(:border) || :rounded)
     padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
-    border_height = if border == :none, do: 0, else: 2
+    border_size = if border == :none, do: 0, else: 1
+    inner = inner_width(width, border_size + padding)
 
     content_height =
-      children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
+      children
+      |> List.wrap()
+      |> Enum.map(&get_preferred_height(&1, hierarchy, inner))
+      |> Enum.sum()
 
-    Keyword.get(opts, :height, border_height + padding * 2 + content_height)
+    Keyword.get(opts, :height, border_size * 2 + padding * 2 + content_height)
   end
 
-  def get_preferred_height({:card, children, opts}, hierarchy) do
+  def get_preferred_height({:card, children, opts}, hierarchy, width) do
     padding = Keyword.get(opts, :padding, CharacterSet.style(:padding) || 1)
+    inner = inner_width(width, padding)
 
     content_height =
-      children |> List.wrap() |> Enum.map(&get_preferred_height(&1, hierarchy)) |> Enum.sum()
+      children
+      |> List.wrap()
+      |> Enum.map(&get_preferred_height(&1, hierarchy, inner))
+      |> Enum.sum()
 
     Keyword.get(opts, :height, padding * 2 + content_height)
   end
 
-  def get_preferred_height({:collapsible, title, content, opts}, hierarchy) do
-    collapsible_height(hierarchy, title, content, opts)
+  def get_preferred_height({:collapsible, title, content, opts}, hierarchy, width) do
+    collapsible_height(hierarchy, title, content, opts, width)
   end
 
-  def get_preferred_height({:split_pane, _children, opts}, _hierarchy) do
+  def get_preferred_height({:split_pane, _children, opts}, _hierarchy, _width) do
     Keyword.get(opts, :height, 1)
   end
 
-  def get_preferred_height({:theme_selector, _opts}, _hierarchy), do: 10
+  def get_preferred_height({:theme_selector, _opts}, _hierarchy, _width), do: 10
 
-  def get_preferred_height({tag, opts}, _hierarchy) when is_atom(tag) and is_list(opts) do
-    case Registry.lookup(tag) do
-      nil -> 1
-      module -> module.preferred_height(nil, opts)
-    end
+  def get_preferred_height({tag, opts}, _hierarchy, width) when is_atom(tag) and is_list(opts),
+    do: measured(tag, nil, opts, width)
+
+  def get_preferred_height({tag, args, opts}, _hierarchy, width)
+      when is_atom(tag) and is_list(opts),
+      do: measured(tag, args, opts, width)
+
+  def get_preferred_height(_component, _hierarchy, _width), do: 1
+
+  defp row_heights(children, hierarchy, nil, _opts),
+    do: Enum.map(children, &get_preferred_height(&1, hierarchy))
+
+  defp row_heights(children, hierarchy, width, opts) do
+    widths =
+      calculate_horizontal_layout(children, %{x: 0, y: 0, width: width, height: 1},
+        children_opts: Enum.map(children, &component_opts/1),
+        gap: Keyword.get(opts, :gap, 0)
+      )
+
+    Enum.zip_with(children, widths, &get_preferred_height(&1, hierarchy, &2.width))
   end
 
-  def get_preferred_height({tag, args, opts}, _hierarchy) when is_atom(tag) and is_list(opts) do
-    case Registry.lookup(tag) do
-      nil -> 1
-      module -> module.preferred_height(args, opts)
-    end
+  @doc """
+  The rows the children of a collapsible's content take at `width` columns, or
+  with `nil`, at their width-free heights; a child asking for `:auto` counts one.
+  """
+  @spec content_height([component()], hierarchy() | nil, pos_integer() | nil) ::
+          non_neg_integer()
+  def content_height(children, hierarchy, width) do
+    children
+    |> Enum.map(&get_preferred_height(&1, hierarchy, width))
+    |> Enum.map(fn
+      :auto -> 1
+      height -> height
+    end)
+    |> Enum.sum()
   end
-
-  def get_preferred_height(_component, _hierarchy), do: 1
 
   @doc """
   A child's vertical sizing inputs, as `{preferred, weight, flexes?, max_height}`.
@@ -141,62 +176,84 @@ defmodule Drafter.Layout do
   never less than `1`. `flexes?` says whether the child should absorb leftover space.
   `max_height` is its `:max_height` option, or `nil`.
   """
-  @spec get_child_vertical_spec(component(), hierarchy() | nil) ::
+  @spec get_child_vertical_spec(component(), hierarchy() | nil, pos_integer() | nil) ::
           {pos_integer() | :auto, non_neg_integer(), boolean(), pos_integer() | nil}
-  def get_child_vertical_spec({:layout, _direction, _children, opts} = child, hierarchy) do
-    flex_spec(opts, fn -> get_preferred_height(child, hierarchy) end)
+  def get_child_vertical_spec(child, hierarchy, width \\ nil)
+
+  def get_child_vertical_spec({:layout, _direction, _children, opts} = child, hierarchy, width) do
+    flex_spec(opts, fn -> get_preferred_height(child, hierarchy, width) end)
   end
 
-  def get_child_vertical_spec({:scrollable, _children, opts} = child, hierarchy) do
-    flex_spec(opts, fn -> get_preferred_height(child, hierarchy) end)
+  def get_child_vertical_spec({:scrollable, _children, opts} = child, hierarchy, width) do
+    flex_spec(opts, fn -> get_preferred_height(child, hierarchy, width) end)
   end
 
-  def get_child_vertical_spec({:split_pane, _children, opts}, _hierarchy) do
+  def get_child_vertical_spec({:split_pane, _children, opts}, _hierarchy, _width) do
     flex_spec(opts, fn -> 1 end)
   end
 
-  def get_child_vertical_spec({:box, children, opts}, hierarchy) do
-    flex_spec(opts, fn -> get_preferred_height({:box, children, opts}, hierarchy) end)
+  def get_child_vertical_spec({:box, children, opts}, hierarchy, width) do
+    flex_spec(opts, fn -> get_preferred_height({:box, children, opts}, hierarchy, width) end)
   end
 
-  def get_child_vertical_spec({:card, children, opts}, hierarchy) do
-    flex_spec(opts, fn -> get_preferred_height({:card, children, opts}, hierarchy) end)
+  def get_child_vertical_spec({:card, children, opts}, hierarchy, width) do
+    flex_spec(opts, fn -> get_preferred_height({:card, children, opts}, hierarchy, width) end)
   end
 
-  def get_child_vertical_spec({:collapsible, title, content, opts}, hierarchy) do
-    preferred = collapsible_height(hierarchy, title, content, opts)
+  def get_child_vertical_spec({:collapsible, title, content, opts}, hierarchy, width) do
+    preferred = collapsible_height(hierarchy, title, content, opts, width)
     {preferred, 0, false, nil}
   end
 
-  def get_child_vertical_spec(child, hierarchy) do
+  def get_child_vertical_spec(child, hierarchy, width) do
     opts = component_opts(child)
 
     if Keyword.has_key?(opts, :flex) or match?({:fr, _}, Keyword.get(opts, :height)) do
-      flex_spec(opts, fn -> get_preferred_height(child, hierarchy) end)
+      flex_spec(opts, fn -> get_preferred_height(child, hierarchy, width) end)
     else
-      preferred = get_preferred_height(child, hierarchy)
+      preferred = get_preferred_height(child, hierarchy, width)
       if preferred == :auto, do: {1, 1, true, nil}, else: {preferred, 0, false, nil}
     end
   end
 
-  defp collapsible_height(nil, _title, content, opts) do
-    collapsible_height_from_opts(content, opts)
+  defp measured(tag, args, opts, width) do
+    case Registry.lookup(tag) do
+      nil -> 1
+      module -> widget_height(module, args, opts, width)
+    end
   end
 
-  defp collapsible_height(hierarchy, title, content, opts) do
+  defp widget_height(module, args, opts, width) when is_integer(width) and width > 0 do
+    if not Keyword.has_key?(opts, :height) and Code.ensure_loaded?(module) and
+         function_exported?(module, :height_for_width, 3),
+       do: module.height_for_width(args, opts, width),
+       else: module.preferred_height(args, opts)
+  end
+
+  defp widget_height(module, args, opts, _width), do: module.preferred_height(args, opts)
+
+  defp inner_width(nil, _inset), do: nil
+  defp inner_width(width, inset), do: max(width - inset * 2, 1)
+
+  defp collapsible_height(nil, _title, content, opts, width) do
+    collapsible_height_from_opts(content, opts, nil, width)
+  end
+
+  defp collapsible_height(hierarchy, title, content, opts, width) do
     case find_collapsible_state(hierarchy, title) do
-      %{expanded: true} = state -> estimate_collapsible_height(state)
-      nil -> collapsible_height_from_opts(content, opts)
+      %{expanded: true} = state -> estimate_collapsible_height(state, hierarchy, width)
+      nil -> collapsible_height_from_opts(content, opts, hierarchy, width)
       _ -> 1
     end
   end
 
-  defp collapsible_height_from_opts(content, opts) do
+  defp collapsible_height_from_opts(content, opts, hierarchy, width) do
     if Keyword.get(opts, :expanded, false) do
-      estimate_collapsible_height(%{
-        content: content,
-        content_height: Keyword.get(opts, :content_height)
-      })
+      estimate_collapsible_height(
+        %{content: content, content_height: Keyword.get(opts, :content_height)},
+        hierarchy,
+        width
+      )
     else
       1
     end
@@ -250,7 +307,7 @@ defmodule Drafter.Layout do
 
     child_specs =
       Enum.map(children, fn child ->
-        {preferred, flex, has_flex, max_h} = get_child_vertical_spec(child, hierarchy)
+        {preferred, flex, has_flex, max_h} = get_child_vertical_spec(child, hierarchy, rect.width)
         child_opts = component_opts(child)
 
         preferred =
@@ -685,14 +742,62 @@ defmodule Drafter.Layout do
     component |> component_opts() |> Keyword.get(:visible, true)
   end
 
-  defp apply_width_spec({:fixed, w}, {acc, remaining_pixels}, _base_flex_width) do
-    {[w | acc], remaining_pixels}
+  defp capped_flex_widths(widths, specs, children_opts) do
+    caps =
+      Enum.zip_with([widths, specs, children_opts], fn
+        [width, {:flex, _}, opts] -> flex_cap(width, Keyword.get(opts, :max_width))
+        [width, {:fixed, _}, _opts] -> {:fixed, width}
+      end)
+
+    excess = Enum.sum(for {:capped, _width, spare} <- caps, do: spare)
+    open = Enum.count(caps, &match?({:open, _}, &1))
+    share_excess(caps, excess, open)
   end
 
-  defp apply_width_spec({:flex, _}, {acc, remaining_pixels}, base_flex_width) do
-    extra = if remaining_pixels > 0, do: 1, else: 0
-    {[base_flex_width + extra | acc], remaining_pixels - extra}
+  defp flex_cap(width, max) when is_integer(max) and width > max, do: {:capped, max, width - max}
+  defp flex_cap(width, _max), do: {:open, width}
+
+  defp share_excess(caps, excess, open) when excess == 0 or open == 0,
+    do: Enum.map(caps, &cap_width/1)
+
+  defp share_excess(caps, excess, open) do
+    {widths, _left} =
+      Enum.map_reduce(caps, {div(excess, open), rem(excess, open)}, fn
+        {:open, width}, {share, extra} when extra > 0 -> {width + share + 1, {share, extra - 1}}
+        {:open, width}, {share, extra} -> {width + share, {share, extra}}
+        cap, acc -> {cap_width(cap), acc}
+      end)
+
+    widths
   end
+
+  defp cap_width({:fixed, width}), do: width
+  defp cap_width({:open, width}), do: width
+  defp cap_width({:capped, width, _spare}), do: width
+
+  defp weighted_widths(specs, available) do
+    total = Enum.sum(for {:flex, weight} <- specs, do: weight)
+
+    {widths, _left} =
+      Enum.map_reduce(specs, available - flex_floor_sum(specs, available, total), fn
+        {:fixed, width}, left ->
+          {width, left}
+
+        {:flex, weight}, left when left > 0 ->
+          {flex_floor(weight, available, total) + 1, left - 1}
+
+        {:flex, weight}, left ->
+          {flex_floor(weight, available, total), left}
+      end)
+
+    widths
+  end
+
+  defp flex_floor_sum(specs, available, total),
+    do: Enum.sum(for {:flex, weight} <- specs, do: flex_floor(weight, available, total))
+
+  defp flex_floor(_weight, _available, 0), do: 0
+  defp flex_floor(weight, available, total), do: div(available * weight, total)
 
   defp accumulate_width_spec(
          {_child_item, child_opts, available},
@@ -717,28 +822,17 @@ defmodule Drafter.Layout do
     child_specs =
       Enum.zip(children, children_opts) |> Enum.map(fn {c, o} -> {c, o, rect.width} end)
 
-    {fixed_total, flexible_count, reversed_specs} =
+    {fixed_total, _flexible_count, reversed_specs} =
       Enum.reduce(child_specs, {0, 0, []}, &accumulate_width_spec/2)
 
     width_specs = Enum.reverse(reversed_specs)
 
     available_for_flex = max(0, rect.width - fixed_total)
 
-    {base_flex_width, remainder} =
-      if flexible_count > 0 do
-        {div(available_for_flex, flexible_count), rem(available_for_flex, flexible_count)}
-      else
-        {0, 0}
-      end
-
-    {reversed_widths, _} =
-      Enum.reduce(width_specs, {[], remainder}, fn spec, acc ->
-        apply_width_spec(spec, acc, base_flex_width)
-      end)
-
     {reversed_sizes, _} =
-      reversed_widths
-      |> Enum.reverse()
+      width_specs
+      |> weighted_widths(available_for_flex)
+      |> capped_flex_widths(width_specs, children_opts)
       |> Enum.reduce({[], rect.x}, fn width, {acc, current_x} ->
         {[%{x: current_x, width: max(1, width)} | acc], current_x + width}
       end)
@@ -835,15 +929,16 @@ defmodule Drafter.Layout do
     end)
   end
 
-  defp estimate_collapsible_height(%{content: content, content_height: content_height})
+  defp estimate_collapsible_height(%{content: content} = state, hierarchy, width)
        when is_list(content) do
-    1 + (content_height || 10)
+    1 + (Map.get(state, :content_height) || content_height(content, hierarchy, width))
   end
 
-  defp estimate_collapsible_height(%{content: content}) when is_binary(content) do
-    lines = Drafter.Text.wrap(content, 80, :word)
+  defp estimate_collapsible_height(%{content: content}, _hierarchy, width)
+       when is_binary(content) do
+    lines = Drafter.Text.wrap(content, width || 80, :word)
     1 + length(lines)
   end
 
-  defp estimate_collapsible_height(_state), do: 2
+  defp estimate_collapsible_height(_state, _hierarchy, _width), do: 2
 end

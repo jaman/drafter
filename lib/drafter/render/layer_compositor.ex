@@ -23,7 +23,7 @@ defmodule Drafter.LayerCompositor do
 
   @type layer :: %{
           id: term(),
-          z_index: integer(),
+          z_index: number(),
           strips: [Strip.t()],
           bounds: bounds(),
           opacity: float()
@@ -43,7 +43,7 @@ defmodule Drafter.LayerCompositor do
 
   No validation is performed; the values are stored as given.
   """
-  @spec create_layer(term(), [Strip.t()] | nil, bounds(), integer(), float()) :: layer()
+  @spec create_layer(term(), [Strip.t()] | nil, bounds(), number(), float()) :: layer()
   def create_layer(id, strips, bounds, z_index \\ 0, opacity \\ 1.0) do
     %{
       id: id,
@@ -201,7 +201,7 @@ defmodule Drafter.LayerCompositor do
 
   `z_base` defaults to `0` and `opacity` to `1.0`.
   """
-  @spec widget_layer(term(), [Strip.t()] | nil, bounds(), integer(), module() | nil, float()) ::
+  @spec widget_layer(term(), [Strip.t()] | nil, bounds(), number(), module() | nil, float()) ::
           layer()
   def widget_layer(widget_id, strips, bounds, z_base \\ 0, widget_module \\ nil, opacity \\ 1.0) do
     create_layer(

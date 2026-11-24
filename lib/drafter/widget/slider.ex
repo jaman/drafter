@@ -44,12 +44,14 @@ defmodule Drafter.Widget.Slider do
       bubbles every key and click.
     * `:track_color` / `:fill_color` / `:thumb_color` - `{r, g, b}` overrides for the
       three parts. Default `nil`, which takes them from the theme.
-    * `:renderer` - `:text` (default) draws characters; `:braille` draws the shape
+    * `:renderer` - `:text` draws characters; `:braille` draws the shape
       through `Drafter.Widget.Slider.Pixel`, as do `:half`, `:quad`, `:sextant` and
       `:octant`, the block-character sets of `FrenchCurve.Backend.Cells`; a graphics protocol atom (`:pixel`,
       `:kitty`, `:iterm2`, `:sixel`, `:auto`) transmits a picture, falling back to
-      braille where the terminal has no protocol. Unset, the mode the app was run with
-      applies; `DRAFTER_MODE` overrides both.
+      braille where the terminal has no protocol. Unset (the default), the mode the app was run with applies (`Drafter.run/2`'s
+      `:mode`), and without one `:auto`: an image with the terminal's graphics
+      protocol (kitty, iTerm2 or sixel), braille cells where it has none.
+      `DRAFTER_MODE` overrides both.
     * `:class` - theme class atom or list of them. Default `[]`.
     * `:style` - inline style map merged over the theme. Default `%{}`.
 

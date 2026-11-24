@@ -186,7 +186,7 @@ defmodule Drafter.Widget.Chart do
       `:sixel` to force a protocol. Overrides the runtime `mode:` config, but the
       `DRAFTER_MODE` env var still forces over it. When unset, the global mode applies:
       `DRAFTER_MODE`, then the `mode:` run option (`Drafter.run(App, mode: :pixel)` /
-      `Drafter.render_mode/1`), then `:text`.
+      `Drafter.render_mode/1`), then `:auto`: the best the terminal can draw.
     * `:image_scale` — for `:pixel` charts on a terminal that has not reported its
       cell size, pixels drawn per cell column (rows use `2×`); default `4`. When the
       terminal reports its cell size (see `:cell_size` in `Drafter.App`), images are

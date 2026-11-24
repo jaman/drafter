@@ -10,7 +10,7 @@ defmodule Drafter.Widget.ChartGapTest do
   end
 
   defp drawn_cells(data) do
-    %{data: data, chart_type: :line, connect_lines: true, height: 6}
+    %{data: data, chart_type: :line, connect_lines: true, height: 6, renderer: :braille}
     |> Chart.mount()
     |> Chart.render(%{x: 0, y: 0, width: 20, height: 6})
     |> Enum.flat_map(& &1.segments)

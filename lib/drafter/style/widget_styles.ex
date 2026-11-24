@@ -13,7 +13,7 @@ defmodule Drafter.Style.WidgetStyles do
   own rules layered on top of these win a tie.
 
   Widget kinds covered: `button`, `checkbox`, `text_input`, `label`, `collapsible`,
-  `switch`, `slider`, `progress_bar`, `option_list`, `data_table`, `tree`, `scrollbar`,
+  `switch`, `slider`, `progress_bar`, `option_list`, `source_list`, `data_table`, `tree`, `scrollbar`,
   `radio_set`, `selection_list`, `tabbed_content`, `digits`, `placeholder`,
   `markdown`, `text_area`, `command_palette`, `header` and `footer`.
 
@@ -72,6 +72,7 @@ defmodule Drafter.Style.WidgetStyles do
     |> add_slider_styles()
     |> add_progress_bar_styles()
     |> add_option_list_styles()
+    |> add_source_list_styles()
     |> add_data_table_styles()
     |> add_tree_styles()
     |> add_scrollbar_styles()
@@ -294,6 +295,28 @@ defmodule Drafter.Style.WidgetStyles do
       },
       "option_list::item:disabled" => %{
         color: :text_disabled
+      }
+    })
+  end
+
+  defp add_source_list_styles(stylesheet) do
+    Stylesheet.add_rules(stylesheet, %{
+      "source_list" => %{
+        color: :text_primary,
+        background: :background
+      },
+      "source_list::heading" => %{
+        color: :text_muted,
+        bold: true
+      },
+      "source_list::icon" => %{
+        color: :primary
+      },
+      "source_list::item:hover" => %{
+        background: :block_hover
+      },
+      "source_list::item:selected" => %{
+        background: :panel
       }
     })
   end

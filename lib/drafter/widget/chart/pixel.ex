@@ -96,10 +96,11 @@ defmodule Drafter.Widget.Chart.Pixel do
   @doc """
   Resolve an effective mode from precedence: the `DRAFTER_MODE` env var forces and
   wins over everything; otherwise an explicit per-widget `renderer` (any mode atom),
-  then the runtime `:drafter` `:render_mode` application env, then `:text`.
+  then the runtime `:drafter` `:render_mode` application env, then `:auto`: the best the
+  terminal can draw.
   """
   @spec resolve(atom() | nil) :: atom()
-  def resolve(renderer), do: env_mode() || widget_mode(renderer) || runtime_mode() || :text
+  def resolve(renderer), do: env_mode() || widget_mode(renderer) || runtime_mode() || :auto
 
   defp widget_mode(renderer) when renderer in @modes, do: renderer
   defp widget_mode(_renderer), do: nil

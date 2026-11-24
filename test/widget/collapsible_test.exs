@@ -21,11 +21,12 @@ defmodule Drafter.Widget.CollapsibleTest do
       assert new_state.content_height == 7
     end
 
-    test "changing :content from list to string sets content_height to nil" do
-      state = Collapsible.mount(%{content: [%{}]})
-      assert state.content_height == 10
-      new_state = Collapsible.update(%{content: "new text"}, state)
-      assert new_state.content_height == nil
+    test "expanded child widgets take the rows they need once wrapped to the width" do
+      collapsible =
+        {:collapsible, "T", [{:markdown, "one two three four", [padding: 0]}], [expanded: true]}
+
+      assert Drafter.Layout.get_preferred_height(collapsible, nil, 9) == 4
+      assert Drafter.Layout.get_preferred_height(collapsible, nil, 40) == 2
     end
   end
 

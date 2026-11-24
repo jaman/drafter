@@ -2,7 +2,8 @@ defmodule Drafter.Widget.TextInput do
   @moduledoc """
   A single-line text input widget with cursor navigation, text selection, and clipboard support.
 
-  Renders inside a bordered box and shows a blinking-style cursor block when focused.
+  Renders inside a border (square, rounded, or none) and shows a blinking-style cursor
+  block when focused.
   Placeholder text is displayed when the field is empty and unfocused. Validation errors
   appear below the input border in red when the field has been touched (blurred at least once).
 
@@ -51,6 +52,10 @@ defmodule Drafter.Widget.TextInput do
       `false`.
     * `:style` - `t:map/0` of style overrides passed to the theme computation.
       Default `%{}`.
+    * `:border` - `:single` (default), `:rounded`, or `:none`. `:none` draws the
+      field as one row with no border columns.
+    * `:prefix` - `t:String.t/0` drawn before the text, such as a search icon. It
+      is not part of the value and cannot be edited. Default `""`.
     * `:class` - theme class atom or list of them, normalised by
       `Drafter.Style.normalize_classes/1` and reaching `mount/1` as `:classes`.
       Default `[]`.
@@ -134,7 +139,9 @@ defmodule Drafter.Widget.TextInput do
     :password,
     :restrict,
     :type,
-    :select_on_focus
+    :select_on_focus,
+    border: :single,
+    prefix: ""
   ]
 
   @type validation_result :: {:ok, String.t()} | {:error, [String.t()]}
@@ -208,7 +215,9 @@ defmodule Drafter.Widget.TextInput do
       password: Map.get(props, :password, false),
       restrict: Validation.compile_restrict(Map.get(props, :restrict)),
       type: Map.get(props, :type, :text),
-      select_on_focus: Map.get(props, :select_on_focus, false)
+      select_on_focus: Map.get(props, :select_on_focus, false),
+      border: Map.get(props, :border, :single),
+      prefix: Map.get(props, :prefix, "")
     }
   end
 
@@ -235,13 +244,17 @@ defmodule Drafter.Widget.TextInput do
       end
 
     width = Map.get(normalized_state, :width, 40)
-    content_width = min(width, rect.width - 2)
+    chrome = chrome(normalized_state)
+    prefix = Map.get(normalized_state, :prefix, "")
+    prefix_width = String.length(prefix)
+    content_width = max(0, min(width, rect.width - 2 * chrome - prefix_width))
     display_text = Rendering.get_display_text(normalized_state, content_width)
+    corners = corners(Map.get(normalized_state, :border, :single))
+    frame_width = content_width + prefix_width
 
-    top_border = "┌" <> String.duplicate("─", content_width) <> "┐"
-    bottom_border = "└" <> String.duplicate("─", content_width) <> "┘"
+    top_border = corners.tl <> String.duplicate("─", frame_width) <> corners.tr
+    bottom_border = corners.bl <> String.duplicate("─", frame_width) <> corners.br
 
-    focused = Map.get(normalized_state, :focused, false)
     classes = Map.get(normalized_state, :classes, [])
     app_module = Map.get(normalized_state, :app_module)
     error = Map.get(normalized_state, :error)
@@ -264,51 +277,41 @@ defmodule Drafter.Widget.TextInput do
     selection_style = Map.merge(content_style, %{reverse: true})
 
     content_segments =
-      if Selection.has_selection?(normalized_state) do
-        Selection.render_with_selection(
-          normalized_state,
-          display_text,
-          content_width,
-          content_style,
-          selection_style
-        )
-      else
-        cursor_pos = Rendering.get_visible_cursor_position(normalized_state, content_width)
-        padded_text = String.pad_trailing(display_text, content_width)
+      content_segments(
+        normalized_state,
+        display_text,
+        content_width,
+        content_style,
+        selection_style
+      )
 
-        if focused do
-          Rendering.insert_cursor(padded_text, cursor_pos, content_style)
-        else
-          [Segment.new(padded_text, content_style)]
-        end
-      end
+    side = if chrome == 1, do: [Segment.new("│", border_style)], else: []
+    prefix_segments = if prefix == "", do: [], else: [Segment.new(prefix, content_style)]
 
-    strips = [
-      Strip.new([
-        Segment.new(top_border, border_style),
-        Segment.new(
-          String.duplicate(" ", max(0, rect.width - String.length(top_border))),
-          bg_style
-        )
-      ]),
+    content_row =
       Strip.new(
-        [
-          Segment.new("│", border_style)
-        ] ++
+        side ++
+          prefix_segments ++
           content_segments ++
+          side ++
           [
-            Segment.new("│", border_style),
-            Segment.new(String.duplicate(" ", max(0, rect.width - content_width - 2)), bg_style)
+            Segment.new(
+              String.duplicate(" ", max(0, rect.width - frame_width - 2 * chrome)),
+              bg_style
+            )
           ]
-      ),
-      Strip.new([
-        Segment.new(bottom_border, border_style),
-        Segment.new(
-          String.duplicate(" ", max(0, rect.width - String.length(bottom_border))),
-          bg_style
-        )
-      ])
-    ]
+      )
+
+    strips =
+      framed(
+        content_row,
+        chrome,
+        top_border,
+        bottom_border,
+        rect.width,
+        border_style,
+        bg_style
+      )
 
     error_strips =
       if error do
@@ -671,7 +674,7 @@ defmodule Drafter.Widget.TextInput do
   end
 
   defp handle_mouse_click(state, x) do
-    click_pos = max(0, x - 1)
+    click_pos = max(0, x - text_offset(state))
     actual_pos = min(click_pos + state.scroll_offset, String.length(state.text))
 
     new_state =
@@ -685,7 +688,7 @@ defmodule Drafter.Widget.TextInput do
   end
 
   defp handle_mouse_drag(state, x) do
-    drag_pos = max(0, x - 1)
+    drag_pos = max(0, x - text_offset(state))
     actual_pos = min(drag_pos + state.scroll_offset, String.length(state.text))
 
     new_state =
@@ -778,20 +781,58 @@ defmodule Drafter.Widget.TextInput do
         password: Map.get(props, :password, state.password),
         restrict: Validation.compile_restrict(Map.get(props, :restrict, state.restrict)),
         type: Map.get(props, :type, state.type),
-        select_on_focus: Map.get(props, :select_on_focus, state.select_on_focus)
+        select_on_focus: Map.get(props, :select_on_focus, state.select_on_focus),
+        border: Map.get(props, :border, Map.get(state, :border, :single)),
+        prefix: Map.get(props, :prefix, Map.get(state, :prefix, ""))
     }
   end
 
   @doc """
-  The number of rows the element asks for: always `3`, the two border rows plus the
-  content row. There is no `:height` override, and a validation error row is not
-  accounted for.
+  The number of rows the element asks for: `3`, the two border rows plus the
+  content row, or `1` with `border: :none`. There is no `:height` override, and a
+  validation error row is not accounted for.
 
       iex> Drafter.Widget.TextInput.preferred_height(nil, height: 10)
       3
+
+      iex> Drafter.Widget.TextInput.preferred_height(nil, border: :none)
+      1
   """
-  @spec preferred_height(term(), keyword()) :: 3
-  def preferred_height(_args, _opts), do: 3
+  @spec preferred_height(term(), keyword()) :: 1 | 3
+  def preferred_height(_args, opts),
+    do: if(Keyword.get(opts, :border) == :none, do: 1, else: 3)
+
+  @doc """
+  The columns the border takes on each side: `0` for `border: :none`, `1`
+  otherwise.
+
+      iex> Drafter.Widget.TextInput.chrome(%{border: :none})
+      0
+  """
+  @spec chrome(map()) :: 0 | 1
+  def chrome(%{border: :none}), do: 0
+  def chrome(_state), do: 1
+
+  defp text_offset(state), do: chrome(state) + String.length(Map.get(state, :prefix, ""))
+
+  defp corners(:rounded), do: %{tl: "╭", tr: "╮", bl: "╰", br: "╯"}
+  defp corners(_square), do: %{tl: "┌", tr: "┐", bl: "└", br: "┘"}
+
+  defp framed(row, 0, _top, _bottom, _width, _border_style, _bg_style), do: [row]
+
+  defp framed(row, _chrome, top, bottom, width, border_style, bg_style),
+    do: [
+      edge(top, width, border_style, bg_style),
+      row,
+      edge(bottom, width, border_style, bg_style)
+    ]
+
+  defp edge(line, width, border_style, bg_style),
+    do:
+      Strip.new([
+        Segment.new(line, border_style),
+        Segment.new(String.duplicate(" ", max(0, width - String.length(line))), bg_style)
+      ])
 
   @doc """
   The component tag this widget registers under.
@@ -834,10 +875,16 @@ defmodule Drafter.Widget.TextInput do
     classes = Drafter.Style.normalize_classes(Keyword.get(opts, :class, []))
     on_submit_fn = build_submit_fn(on_submit, keep_focus, session_pid, widget_id)
 
+    border = Keyword.get(opts, :border, :single)
+    prefix = Keyword.get(opts, :prefix, "")
+
     %{
       text: value,
       placeholder: Keyword.get(opts, :placeholder, ""),
-      width: rect.width - 2,
+      width: rect.width - 2 * chrome(%{border: border}) - String.length(prefix),
+      border: border,
+      prefix: prefix,
+      style: Keyword.get(opts, :style, %{}),
       classes: classes,
       validators: Keyword.get(opts, :validators),
       disabled: Keyword.get(opts, :disabled, false),
@@ -883,7 +930,10 @@ defmodule Drafter.Widget.TextInput do
       password: mount_props.password,
       restrict: mount_props.restrict,
       type: mount_props.type,
-      select_on_focus: mount_props.select_on_focus
+      select_on_focus: mount_props.select_on_focus,
+      border: mount_props.border,
+      prefix: mount_props.prefix,
+      style: mount_props.style
     }
 
     base =
@@ -979,5 +1029,41 @@ defmodule Drafter.Widget.TextInput do
       wrapped.(text)
       if keep_focus, do: send(session_pid, {:focus_widget, widget_id})
     end
+  end
+
+  defp placeholder_style(content_style),
+    do: Map.put(content_style, :fg, Drafter.ThemeManager.get_current_theme().text_muted)
+
+  defp content_segments(state, display_text, content_width, content_style, selection_style) do
+    if Selection.has_selection?(state) do
+      Selection.render_with_selection(
+        state,
+        display_text,
+        content_width,
+        content_style,
+        selection_style
+      )
+    else
+      text_segments(
+        state,
+        String.pad_trailing(display_text, content_width),
+        content_width,
+        content_style
+      )
+    end
+  end
+
+  defp text_segments(%{focused: true} = state, padded_text, content_width, content_style),
+    do:
+      Rendering.insert_cursor(
+        padded_text,
+        Rendering.get_visible_cursor_position(state, content_width),
+        content_style
+      )
+
+  defp text_segments(state, padded_text, _content_width, content_style) do
+    if Rendering.placeholder_shown?(state),
+      do: [Segment.new(padded_text, placeholder_style(content_style))],
+      else: [Segment.new(padded_text, content_style)]
   end
 end

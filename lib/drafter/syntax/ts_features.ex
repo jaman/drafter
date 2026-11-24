@@ -98,10 +98,19 @@ defmodule Drafter.Syntax.TSFeatures do
   defp textobject_type?(name), do: String.starts_with?(name, "textobject")
 
   defp capture_name_to_atom(name) do
-    name
-    |> String.replace(".", "_")
-    |> String.to_existing_atom()
+    parts = String.split(name, ".")
+
+    parts
+    |> length()
+    |> Range.new(1, -1)
+    |> Enum.find_value(:unknown, fn count ->
+      parts |> Enum.take(count) |> Enum.join("_") |> existing_atom()
+    end)
+  end
+
+  defp existing_atom(name) do
+    String.to_existing_atom(name)
   rescue
-    ArgumentError -> :unknown
+    ArgumentError -> nil
   end
 end

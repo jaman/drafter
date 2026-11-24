@@ -47,14 +47,15 @@ defmodule Drafter.ThemeManager do
   end
 
   @doc """
-  Switch the active theme by name, as `Drafter.Theme.get_theme/1` resolves it.
+  Switch the active theme: by name, as `Drafter.Theme.get_theme/1` resolves it, or
+  to a `%Drafter.Theme{}` of the app's own.
 
   A name no built-in theme matches is silently ignored and the active theme is left
   alone. Asynchronous: returns `:ok` before the switch has happened.
   """
-  @spec set_theme(String.t()) :: :ok
-  def set_theme(theme_name) do
-    GenServer.cast(resolve(), {:set_theme, theme_name})
+  @spec set_theme(String.t() | Theme.t()) :: :ok
+  def set_theme(theme) do
+    GenServer.cast(resolve(), {:set_theme, theme})
   end
 
   @doc """
@@ -88,24 +89,25 @@ defmodule Drafter.ThemeManager do
   end
 
   @impl GenServer
+  def handle_cast({:set_theme, %Theme{} = theme}, state), do: {:noreply, switched(state, theme)}
+
   def handle_cast({:set_theme, theme_name}, state) do
     case Theme.get_theme(theme_name) do
       nil ->
         {:noreply, state}
 
       new_theme ->
-        new_state = %{state | current_theme: new_theme}
-
-        if state.app_pid do
-          send(state.app_pid, {:theme_updated, new_theme})
-        end
-
-        {:noreply, new_state}
+        {:noreply, switched(state, new_theme)}
     end
   end
 
   def handle_cast({:register_app, app_pid}, state) do
     {:noreply, %{state | app_pid: app_pid}}
+  end
+
+  defp switched(state, theme) do
+    if state.app_pid, do: send(state.app_pid, {:theme_updated, theme})
+    %{state | current_theme: theme}
   end
 
   defp resolve, do: Context.fetch!(:theme_manager)

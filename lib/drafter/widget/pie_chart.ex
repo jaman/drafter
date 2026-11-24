@@ -1,10 +1,11 @@
 defmodule Drafter.Widget.PieChart do
   @moduledoc """
-  Renders a circular pie chart using Unicode block and braille characters.
+  Renders a circular pie chart: an image on terminals with a graphics protocol,
+  and elsewhere Unicode block and braille characters (see `:renderer`).
 
-  Each slice is proportional to its value relative to the total. The chart uses
-  quarter-block and half-block Unicode characters for sub-cell resolution rendering,
-  and braille characters where finer detail is needed.
+  Each slice is proportional to its value relative to the total. In cells the
+  chart uses quarter-block and half-block characters for sub-cell resolution, and
+  braille characters where finer detail is needed.
 
   ## Component tag
 
@@ -28,10 +29,12 @@ defmodule Drafter.Widget.PieChart do
     * `:colors` - `[{r, g, b}]` palette. Default
       `[{100, 180, 255}, {255, 130, 80}, {100, 220, 140}, {220, 100, 220},
       {255, 220, 80}, {120, 220, 220}, {255, 100, 100}, {180, 140, 255}]`.
-    * `:renderer` - `:text` (default) draws block and braille cells. Any other atom
-      is treated as a terminal graphics protocol and passed to
-      `Drafter.Widget.Chart.Pixel`, falling back to cells when that protocol is
-      unavailable.
+    * `:renderer` - how the chart is drawn. Unset (the default), the mode the app was run with applies (`Drafter.run/2`'s
+      `:mode`), and without one `:auto`: an image with the terminal's graphics
+      protocol (kitty, iTerm2 or sixel), braille cells where it has none.
+      `DRAFTER_MODE` overrides both. `:text` always
+      draws block and braille cells; a protocol atom forces that protocol, falling
+      back to cells when the terminal lacks it.
     * `:style` - `t:map/0` of style overrides passed to the theme computation.
       Default `%{}`.
     * `:class` - theme class atom or list of them, normalised by
@@ -89,7 +92,7 @@ defmodule Drafter.Widget.PieChart do
     :style,
     :classes,
     :app_module,
-    renderer: :text
+    renderer: nil
   ]
 
   @type rgb :: {0..255, 0..255, 0..255}
@@ -114,7 +117,7 @@ defmodule Drafter.Widget.PieChart do
 
       iex> state = Drafter.Widget.PieChart.mount(%{data: [{"A", 60}, {"B", 40}]})
       iex> {state.data, state.show_legend, state.show_percentages, state.renderer}
-      {[{"A", 60}, {"B", 40}], true, true, :text}
+      {[{"A", 60}, {"B", 40}], true, true, nil}
 
       iex> Drafter.Widget.PieChart.mount(%{}).colors |> length()
       8
@@ -130,7 +133,7 @@ defmodule Drafter.Widget.PieChart do
       style: Map.get(props, :style, %{}),
       classes: Map.get(props, :classes, []),
       app_module: Map.get(props, :app_module),
-      renderer: Map.get(props, :renderer, :text)
+      renderer: Map.get(props, :renderer)
     }
   end
 
@@ -307,7 +310,7 @@ defmodule Drafter.Widget.PieChart do
 
       iex> props = Drafter.Widget.PieChart.from_component_opts([{"A", 1}], show_legend: false)
       iex> {props.data, props.show_legend, props.renderer}
-      {[{"A", 1}], false, :text}
+      {[{"A", 1}], false, nil}
 
       iex> Drafter.Widget.PieChart.from_component_opts(nil, data: [{"B", 2}]).data
       [{"B", 2}]
@@ -331,7 +334,7 @@ defmodule Drafter.Widget.PieChart do
       style: Keyword.get(opts, :style, %{}),
       classes: classes,
       app_module: Keyword.get(opts, :__app_module__),
-      renderer: Keyword.get(opts, :renderer, :text)
+      renderer: Keyword.get(opts, :renderer)
     }
   end
 

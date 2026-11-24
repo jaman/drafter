@@ -26,8 +26,8 @@ defmodule Drafter.Regression.PixelChartTest do
     assert clear == ""
   end
 
-  test "image_raster/2 returns nil for the default text renderer" do
-    state = Chart.mount(%{data: [1, 2, 3], chart_type: :line})
+  test "image_raster/2 returns nil for the text renderer" do
+    state = Chart.mount(%{data: [1, 2, 3], chart_type: :line, renderer: :text})
     assert Chart.image_raster(state, %{x: 0, y: 0, width: 10, height: 4}) == nil
   end
 
@@ -203,7 +203,7 @@ defmodule Drafter.Regression.PixelChartTest do
     end)
   end
 
-  test "pie chart rasterizes to a positioned (sub-rect) image, text by default" do
+  test "pie chart rasterizes to a positioned (sub-rect) image, none as text" do
     state = PieChart.mount(%{data: [{"A", 30}, {"B", 50}, {"C", 20}], renderer: :iterm2})
     rect = %{x: 0, y: 0, width: 40, height: 12}
 
@@ -213,10 +213,11 @@ defmodule Drafter.Regression.PixelChartTest do
     assert (is_binary(paint) or is_list(paint)) and IO.iodata_length(paint) > 0
     assert cols <= 40
 
-    assert PieChart.image_raster(PieChart.mount(%{data: [{"A", 1}]}), rect) == nil
+    assert PieChart.image_raster(PieChart.mount(%{data: [{"A", 1}], renderer: :text}), rect) ==
+             nil
   end
 
-  test "gauge renders a positioned pixel arc below its label, text by default" do
+  test "gauge renders a positioned pixel arc below its label, none as text" do
     state = Gauge.mount(%{value: 0.7, label: "CPU", renderer: :iterm2})
     rect = %{x: 0, y: 0, width: 20, height: 6}
 
@@ -225,6 +226,6 @@ defmodule Drafter.Regression.PixelChartTest do
 
     assert IO.iodata_length(paint) > 0
 
-    assert Gauge.image_raster(Gauge.mount(%{value: 0.5}), rect) == nil
+    assert Gauge.image_raster(Gauge.mount(%{value: 0.5, renderer: :text}), rect) == nil
   end
 end

@@ -17,9 +17,9 @@ defmodule Drafter.RenderModeTest do
     :ok
   end
 
-  test "unset renderer falls back to text" do
-    assert Pixel.resolve(nil) == :text
-    assert Pixel.mode(nil, :line) == :text
+  test "unset renderer follows what the terminal can draw" do
+    assert Pixel.resolve(nil) == :auto
+    assert Pixel.mode(nil, :line) in [:pixel, :braille]
   end
 
   test "explicit per-widget renderer wins over the runtime config" do
@@ -55,7 +55,7 @@ defmodule Drafter.RenderModeTest do
 
   test "invalid runtime mode is ignored" do
     Application.put_env(:drafter, :render_mode, :bogus)
-    assert Pixel.resolve(nil) == :text
+    assert Pixel.resolve(nil) == :auto
   end
 
   test "legacy DRAFTER_NO_PIXEL maps to text" do

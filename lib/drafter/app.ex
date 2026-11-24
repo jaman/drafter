@@ -833,8 +833,8 @@ defmodule Drafter.App do
   (default `false`), `:language` (default `nil`), `:trap_focus` (default `false`),
   `:tab_behavior` (`:focus` by default), and `:tab_size` (default `2`).
 
-  `:placeholder_style`, `:focused_style`, `:selection_style`, `:line_number_style`
-  and `:max_checkpoints` are read by the widget's `mount/1` only — this element does
+  `:placeholder_style`, `:selection_style`, `:line_number_style` and
+  `:max_checkpoints` are read by the widget's `mount/1` only — this element does
   not forward them.
 
   `:width` and `:height` are taken from the rect the parent allocated rather than
@@ -1113,6 +1113,23 @@ defmodule Drafter.App do
   end
 
   @doc """
+  A sidebar list in sections. Returns `{:source_list, rows, opts}`.
+
+  `rows` are `%{id: id, title: title}` maps, each with an optional `:icon`, and
+  `{:heading, title}` section headings; see `Drafter.Widget.SourceList` for them and
+  for the options, of which `:selected` (the id drawn as selected) and `:on_select`
+  (called with the opened row's id) are the usual ones.
+
+      iex> source_list([%{id: :home, title: "Home"}], selected: :home, on_select: :go)
+      {:source_list, [%{id: :home, title: "Home"}], [selected: :home, on_select: :go]}
+  """
+  @spec source_list([map() | {:heading, String.t()}], opts()) ::
+          {:source_list, [map() | {:heading, String.t()}], opts()}
+  def source_list(rows, opts \\ []) do
+    {:source_list, rows, opts}
+  end
+
+  @doc """
   Lays `children` out left to right. Returns `{:layout, :horizontal, children, opts}`
   with `layout: :horizontal` added to `opts`.
 
@@ -1242,6 +1259,11 @@ defmodule Drafter.App do
       `%{bg: {r, g, b}}`. Default `%{}`.
     * `:highlight_focus` - `boolean()`, draw the border and title in the theme's primary
       colour while a widget inside the box has keyboard focus. Default `false`.
+    * `:surface` - a colour (`{r, g, b}` or a theme token) the interior is filled
+      with and its descendants are drawn on: a cell a child draws on the theme's
+      background, or with no background, takes this colour instead, so labels,
+      lists and layout gaps inside the box sit on it. The nearest enclosing box with
+      a surface decides. Default `nil`.
 
   `:classes` is documented on `Drafter.Widget.Box` because its `mount/1` reads it, but
   this element does not forward it.
@@ -1864,8 +1886,8 @@ defmodule Drafter.App do
       Default `false`.
     * `:show_vertical_scrollbar` - `:auto` (default), `:always`, or `:never`.
     * `:show_horizontal_scrollbar` - `:never` (default), `:auto`, or `:always`.
-    * `:scrollbar` - `:block` (default, the skin's solid thumb) or `:thin` (a line
-      thumb on a dim line track).
+    * `:scrollbar` - `:block` (default, the skin's solid thumb), `:thin` (a line
+      thumb on a dim line track) or `:overlay` (a muted line thumb with no track).
     * `:height` - `pos_integer()` used as the element's preferred height in a
       parent's layout. Default: the summed heights of `children`.
 

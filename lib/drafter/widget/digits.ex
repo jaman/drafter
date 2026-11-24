@@ -39,9 +39,11 @@ defmodule Drafter.Widget.Digits do
       and text width fit the widget's rect. When none fits, the text is written in
       plain characters on one row, cut to the width with `…`. FIGlet
       fonts must be registered first (see `Drafter.Widget.Digits.Figlet`)
-    * `:renderer` - `:text` (default) draws cells; any other value transmits an
-      image on a terminal supporting kitty, iTerm2, or sixel, falling back to cells
-      where none is available
+    * `:renderer` - how the digits are drawn. Unset (the default), the mode the app was run with applies (`Drafter.run/2`'s
+      `:mode`), and without one `:auto`: an image with the terminal's graphics
+      protocol (kitty, iTerm2 or sixel), braille cells where it has none.
+      `DRAFTER_MODE` overrides both. `:text` always
+      draws cells
     * `:bg_data` - list of numbers. Default `nil`. When set, an area-chart fill is
       drawn behind the digits using per-cell background colours
     * `:color` - `{r, g, b}` fill colour for the area chart. Default
@@ -132,7 +134,7 @@ defmodule Drafter.Widget.Digits do
       {"42", :small, nil, :left}
 
       iex> Drafter.Widget.Digits.mount(%{})
-      %{text: "", style: %{}, align: :left, size: :large, font: nil, fit: nil, renderer: :text, bg_data: nil, color: {0, 150, 255}, bg_min: 0, bg_max: nil}
+      %{text: "", style: %{}, align: :left, size: :large, font: nil, fit: nil, renderer: nil, bg_data: nil, color: {0, 150, 255}, bg_min: 0, bg_max: nil}
   """
   @spec mount(Drafter.Widget.props()) :: t()
   @impl Drafter.Widget
@@ -144,7 +146,7 @@ defmodule Drafter.Widget.Digits do
       size: Map.get(props, :size, :large),
       font: Map.get(props, :font),
       fit: Map.get(props, :fit),
-      renderer: Map.get(props, :renderer, :text),
+      renderer: Map.get(props, :renderer),
       bg_data: Map.get(props, :bg_data),
       color: Map.get(props, :color, {0, 150, 255}),
       bg_min: Map.get(props, :bg_min, 0),
@@ -264,7 +266,7 @@ defmodule Drafter.Widget.Digits do
       size: Keyword.get(opts, :size, :large),
       font: Keyword.get(opts, :font),
       fit: Keyword.get(opts, :fit),
-      renderer: Keyword.get(opts, :renderer, :text),
+      renderer: Keyword.get(opts, :renderer),
       bg_data: Keyword.get(opts, :bg_data),
       color: Keyword.get(opts, :color, {0, 150, 255}),
       bg_min: Keyword.get(opts, :bg_min, 0),

@@ -41,6 +41,9 @@ defmodule Drafter.Widget.CodeView do
     * `:hex_view` - `t:boolean/0`, render the content as a hex dump of 16 bytes per
       row with offset and ASCII columns instead of as source text, suppressing
       syntax highlighting. Default `false`
+    * `:highlighter` - a module implementing `Drafter.Syntax.Highlighter`,
+      `highlight(source, language)` returning tree-sitter captures, used before
+      the `tree-sitter` CLI and the built-in Elixir highlighter. Default `nil`
     * `:height` - read only by `preferred_height/2`, never by `mount/1`. Default
       `20`
 
@@ -78,7 +81,8 @@ defmodule Drafter.Widget.CodeView do
     :h_scroll_offset,
     :focused,
     :show_line_numbers,
-    :hex_view
+    :hex_view,
+    :highlighter
   ]
 
   @type t :: %__MODULE__{
@@ -90,7 +94,8 @@ defmodule Drafter.Widget.CodeView do
           h_scroll_offset: non_neg_integer(),
           focused: boolean(),
           show_line_numbers: boolean(),
-          hex_view: boolean()
+          hex_view: boolean(),
+          highlighter: module() | nil
         }
 
   @doc """
@@ -116,8 +121,10 @@ defmodule Drafter.Widget.CodeView do
     language = Map.get(props, :language, :text)
     show_line_numbers = Map.get(props, :show_line_numbers, false)
     hex_view = Map.get(props, :hex_view, false)
+    highlighter = Map.get(props, :highlighter)
 
-    {lines, highlights} = load_content(path, Map.get(props, :source, ""), language, hex_view)
+    {lines, highlights} =
+      load_content(path, Map.get(props, :source, ""), language, hex_view, highlighter)
 
     %__MODULE__{
       lines: lines,
@@ -128,7 +135,8 @@ defmodule Drafter.Widget.CodeView do
       h_scroll_offset: 0,
       focused: false,
       show_line_numbers: show_line_numbers,
-      hex_view: hex_view
+      hex_view: hex_view,
+      highlighter: highlighter
     }
   end
 
@@ -304,8 +312,9 @@ defmodule Drafter.Widget.CodeView do
 
   defp reload_content(state, props, path, hex_view, source, path_changed, hex_changed) do
     language = Map.get(props, :language, state.language)
+    highlighter = Map.get(props, :highlighter, state.highlighter)
     raw_source = resolve_source(path, source, state.lines, path_changed, hex_changed)
-    {lines, highlights} = content_to_lines(raw_source, language, path, hex_view)
+    {lines, highlights} = content_to_lines(raw_source, language, path, hex_view, highlighter)
 
     %{
       state
@@ -314,6 +323,7 @@ defmodule Drafter.Widget.CodeView do
         language: language,
         path: path,
         hex_view: hex_view,
+        highlighter: highlighter,
         scroll_offset: 0,
         h_scroll_offset: 0
     }
@@ -357,7 +367,7 @@ defmodule Drafter.Widget.CodeView do
   The positional argument is ignored, so the text must be passed as `source:`.
 
       iex> Drafter.Widget.CodeView.from_component_opts("ignored", source: "a")
-      %{source: "a", path: nil, language: :text, show_line_numbers: false, hex_view: false}
+      %{source: "a", path: nil, language: :text, show_line_numbers: false, hex_view: false, highlighter: nil}
   """
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
@@ -366,13 +376,14 @@ defmodule Drafter.Widget.CodeView do
       path: Keyword.get(opts, :path),
       language: Keyword.get(opts, :language, :text),
       show_line_numbers: Keyword.get(opts, :show_line_numbers, false),
-      hex_view: Keyword.get(opts, :hex_view, false)
+      hex_view: Keyword.get(opts, :hex_view, false),
+      highlighter: Keyword.get(opts, :highlighter)
     }
   end
 
   @doc """
   Narrows the props a re-render feeds to `update/2` to `:source`, `:path`,
-  `:language` and `:hex_view`. `:show_line_numbers` is left out and stays as
+  `:language`, `:hex_view` and `:highlighter`. `:show_line_numbers` is left out and stays as
   mounted.
   """
   @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
@@ -381,32 +392,33 @@ defmodule Drafter.Widget.CodeView do
       source: mount_props.source,
       path: mount_props.path,
       language: mount_props.language,
-      hex_view: mount_props.hex_view
+      hex_view: mount_props.hex_view,
+      highlighter: mount_props.highlighter
     }
   end
 
-  defp load_content(nil, source, language, hex_view) do
-    content_to_lines(source, language, nil, hex_view)
+  defp load_content(nil, source, language, hex_view, highlighter) do
+    content_to_lines(source, language, nil, hex_view, highlighter)
   end
 
-  defp load_content(path, _source, language, hex_view) do
+  defp load_content(path, _source, language, hex_view, highlighter) do
     raw =
       case File.read(path) do
         {:ok, content} -> content
         _ -> ""
       end
 
-    content_to_lines(raw, language, path, hex_view)
+    content_to_lines(raw, language, path, hex_view, highlighter)
   end
 
-  defp content_to_lines(raw, _language, _path, true) do
+  defp content_to_lines(raw, _language, _path, true, _highlighter) do
     lines = hex_dump_lines(raw)
     {lines, nil}
   end
 
-  defp content_to_lines(raw, language, path, _hex_view) do
+  defp content_to_lines(raw, language, path, _hex_view, highlighter) do
     lines = String.split(raw, "\n")
-    highlights = compute_highlights(raw, language, path)
+    highlights = compute_highlights(raw, language, path, highlighter)
     {lines, highlights}
   end
 
@@ -435,9 +447,12 @@ defmodule Drafter.Widget.CodeView do
   defp byte_to_ascii(b) when b >= 32 and b <= 126, do: <<b>>
   defp byte_to_ascii(_b), do: "."
 
-  defp compute_highlights(source, language, path) do
+  defp compute_highlights(source, language, path, highlighter) do
     captures =
       cond do
+        highlighter != nil ->
+          highlighter.highlight(source, language)
+
         path && TreeSitter.available?() ->
           TreeSitter.highlight_file(path)
 

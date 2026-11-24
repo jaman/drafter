@@ -18,6 +18,7 @@ defmodule Drafter.Widgets.MZDoctestTest do
   doctest Drafter.Widget.SelectionList
   doctest Drafter.Widget.Slider
   doctest Drafter.Widget.Slider.Scale
+  doctest Drafter.Widget.SourceList
   doctest Drafter.Widget.Sparkline
   doctest Drafter.Widget.SplitPaneDivider
   doctest Drafter.Widget.Switch

@@ -37,7 +37,8 @@ defmodule Drafter.WidgetHierarchy do
     event_consumed: false,
     focus_cleared: false,
     pending_focus: nil,
-    widget_overflow: %{}
+    widget_overflow: %{},
+    widget_surfaces: %{}
   ]
 
   @type widget_id :: atom() | String.t()
@@ -389,6 +390,39 @@ defmodule Drafter.WidgetHierarchy do
   @spec widget_overflow(t(), widget_id()) :: :clip | :ellipsis
   def widget_overflow(hierarchy, widget_id) do
     Map.get(hierarchy.widget_overflow || %{}, widget_id, :clip)
+  end
+
+  @doc """
+  Record the surface a box gives its descendants (see `Drafter.Widget.Box`), or
+  forget it with `nil`. Read back with `surface_for/2`.
+  """
+  @spec set_widget_surface(t(), widget_id(), Drafter.Widget.Box.surface() | nil) :: t()
+  def set_widget_surface(hierarchy, widget_id, nil),
+    do: %{hierarchy | widget_surfaces: Map.delete(hierarchy.widget_surfaces || %{}, widget_id)}
+
+  def set_widget_surface(hierarchy, widget_id, surface),
+    do: %{
+      hierarchy
+      | widget_surfaces: Map.put(hierarchy.widget_surfaces || %{}, widget_id, surface)
+    }
+
+  @doc """
+  The surface `widget_id` is drawn on: that of its nearest ancestor recorded
+  with `set_widget_surface/3`, or `nil` when none is.
+  """
+  @spec surface_for(t(), widget_id()) :: Drafter.Widget.Box.surface() | nil
+  def surface_for(%{widget_surfaces: surfaces}, _widget_id) when surfaces == %{}, do: nil
+
+  def surface_for(hierarchy, widget_id),
+    do: nearest_surface(hierarchy, get_parent(hierarchy, widget_id))
+
+  defp nearest_surface(_hierarchy, nil), do: nil
+
+  defp nearest_surface(hierarchy, widget_id) do
+    case Map.get(hierarchy.widget_surfaces, widget_id) do
+      nil -> nearest_surface(hierarchy, get_parent(hierarchy, widget_id))
+      surface -> surface
+    end
   end
 
   @doc "Clear the per-dispatch consumption flag before routing a new event."

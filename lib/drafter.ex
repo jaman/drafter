@@ -186,7 +186,8 @@ defmodule Drafter do
       `component_tag/0`. Default `[]`.
     * `:mode` - global chart rendering mode: `:auto`, `:pixel`, `:kitty`, `:iterm2`,
       `:sixel`, `:braille`, or `:text`. Default: unset, which `Drafter.Widget.Chart.Pixel`
-      resolves as `:text`. The lowest-precedence layer — a per-widget `:renderer`
+      resolves as `:auto`: each widget with an image renderer draws with the terminal's
+      graphics protocol (kitty, iTerm2 or sixel), and braille where it has none. The lowest-precedence layer — a per-widget `:renderer`
       overrides it, and the `DRAFTER_MODE` env var overrides both. See `render_mode/1`.
     * `:log` - file logging. `false` (default) silences the console handler so logs
       cannot corrupt the display, and writes no file; `true` writes `drafter.log` in
@@ -395,7 +396,8 @@ defmodule Drafter do
       `:small` (5×3).
     * `:font` - a name from `Drafter.Widget.Digits.Font.names/0`, or a font map.
       Default `nil`; overrides `:size` when given.
-    * `:renderer` - `:text` (default) or a pixel renderer atom.
+    * `:renderer` - unset (the default) follows the app's mode and then the
+      terminal; `:text` or a pixel renderer atom chooses.
     * `:color` - `{r, g, b}` foreground. Default `{0, 150, 255}`.
     * `:bg_data` - series driving a background fill. Default `nil`.
     * `:bg_min` - low bound for `:bg_data`. Default `0`.
@@ -891,18 +893,22 @@ defmodule Drafter do
   @doc """
   Switches the active theme.
 
-  `theme_name` is a `String.t()` naming a theme `Drafter.Theme` knows; a non-binary
-  raises `FunctionClauseError`, and a name no theme answers to is ignored. The app the
+  `theme` is a `String.t()` naming a theme `Drafter.Theme` knows, or a
+  `%Drafter.Theme{}` of the app's own (build one from a built-in theme with struct
+  update syntax and `Drafter.Theme.default_syntax_colors/1`); anything else raises
+  `FunctionClauseError`, and a name no theme answers to is ignored. The app the
   theme manager has most recently had registered re-renders with the new theme.
 
   Asynchronous, and always returns `:ok`, so neither an unknown name nor a failed
   re-render is reported. Raises when the calling process belongs to no session and no
   theme manager is running.
   """
-  @spec set_theme(String.t()) :: :ok
+  @spec set_theme(String.t() | Drafter.Theme.t()) :: :ok
   def set_theme(theme_name) when is_binary(theme_name) do
     Drafter.ThemeManager.set_theme(theme_name)
   end
+
+  def set_theme(%Drafter.Theme{} = theme), do: Drafter.ThemeManager.set_theme(theme)
 
   @doc """
   Change the running app's refresh rate.

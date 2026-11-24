@@ -26,6 +26,10 @@ defmodule Drafter.Widget.FilePicker do
     * `:filter` - list of file extensions, e.g. `[".ex", ".exs"]`. Default `nil`.
       Carried on the state but not applied: every file is listed either way
     * `:title` - label for the open button. Default `"Open"`
+    * `:show_hidden` - `t:boolean/0`, list entries starting with `.` from the
+      start (`h` still toggles them). Default `false`
+    * `:places` - `[{label, path}]` added to the sidebar after its standard
+      locations, those that are directories. Default `[]`
     * `:width` - modal width in columns. Default `90`
     * `:height` - modal height in rows. Default `26`
 
@@ -99,7 +103,9 @@ defmodule Drafter.Widget.FilePicker do
       initial_path: Keyword.get(opts, :path, Path.expand("~/")),
       allow_dirs: Keyword.get(opts, :allow_dirs, false),
       filter: Keyword.get(opts, :filter, nil),
-      title: Keyword.get(opts, :title, "Open")
+      title: Keyword.get(opts, :title, "Open"),
+      show_hidden: Keyword.get(opts, :show_hidden, false),
+      places: Keyword.get(opts, :places, [])
     }
 
     modal_opts = [
@@ -128,8 +134,8 @@ defmodule Drafter.Widget.FilePicker do
     %{
       tree_root: tree_root,
       selected_path: initial_selected,
-      show_hidden: false,
-      sidebar: build_sidebar_items(),
+      show_hidden: Map.get(props, :show_hidden, false),
+      sidebar: build_sidebar_items(Map.get(props, :places, [])),
       on_select: Map.get(props, :on_select),
       on_cancel: Map.get(props, :on_cancel),
       allow_dirs: Map.get(props, :allow_dirs, false),
@@ -239,9 +245,10 @@ defmodule Drafter.Widget.FilePicker do
     end
   end
 
-  defp build_sidebar_items do
-    @sidebar_locations
+  defp build_sidebar_items(places) do
+    (@sidebar_locations ++ places)
     |> Enum.map(fn {label, raw_path} -> {label, Path.expand(raw_path)} end)
+    |> Enum.uniq_by(fn {_label, path} -> path end)
     |> Enum.filter(fn {_label, path} -> File.dir?(path) end)
   end
 

@@ -1,6 +1,7 @@
 defmodule Drafter.Widget.Gauge do
   @moduledoc """
-  A semi-circular gauge chart rendered using Unicode braille characters.
+  A semi-circular gauge chart, drawn as an image on terminals with a graphics
+  protocol and as braille cells elsewhere (see `:renderer`).
 
   The arc spans 260° (from ~8 o'clock to ~4 o'clock through the top). The
   filled portion is coloured green below the low threshold, orange between
@@ -28,9 +29,12 @@ defmodule Drafter.Widget.Gauge do
     * `:mid_color` - `{r, g, b}` for the mid range. Default `{220, 140, 0}`
     * `:high_color` - `{r, g, b}` for the high range. Default `{220, 60, 60}`
     * `:track_color` - `{r, g, b}` for the unfilled arc. Default `{55, 55, 55}`
-    * `:renderer` - `:text` (default) draws braille cells; any terminal graphics
-      protocol atom transmits the arc as an image, falling back to cells when
-      that protocol is unavailable
+    * `:renderer` - how the arc is drawn. Unset (the default), the mode the app was run with applies (`Drafter.run/2`'s
+      `:mode`), and without one `:auto`: an image with the terminal's graphics
+      protocol (kitty, iTerm2 or sixel), braille cells where it has none.
+      `DRAFTER_MODE` overrides both. `:text` always
+      draws braille cells; a protocol atom (`:kitty`, `:iterm2`, `:sixel`) forces
+      that protocol, falling back to cells when the terminal lacks it
     * `:height` - read only by `preferred_height/2`, never by `mount/1`. Default `5`
 
   `update/2` re-reads only `:value`, `:label` and `:renderer`; the thresholds and
@@ -83,7 +87,7 @@ defmodule Drafter.Widget.Gauge do
     :mid_color,
     :high_color,
     :track_color,
-    renderer: :text
+    renderer: nil
   ]
 
   @type rgb :: {0..255, 0..255, 0..255}
@@ -105,7 +109,7 @@ defmodule Drafter.Widget.Gauge do
 
       iex> g = Drafter.Widget.Gauge.mount(%{value: 0.72, label: "CPU"})
       iex> {g.value, g.label, g.low_threshold, g.high_threshold, g.renderer}
-      {0.72, "CPU", 0.8, 0.9, :text}
+      {0.72, "CPU", 0.8, 0.9, nil}
 
       iex> g = Drafter.Widget.Gauge.mount(%{})
       iex> {g.value, g.label, g.low_color, g.mid_color, g.high_color, g.track_color}
@@ -123,7 +127,7 @@ defmodule Drafter.Widget.Gauge do
       mid_color: Map.get(props, :mid_color, {220, 140, 0}),
       high_color: Map.get(props, :high_color, {220, 60, 60}),
       track_color: Map.get(props, :track_color, {55, 55, 55}),
-      renderer: Map.get(props, :renderer, :text)
+      renderer: Map.get(props, :renderer)
     }
   end
 
@@ -308,7 +312,7 @@ defmodule Drafter.Widget.Gauge do
 
       iex> props = Drafter.Widget.Gauge.from_component_opts(nil, value: 0.5, label: "CPU")
       iex> {props.value, props.label, props.low_threshold, props.renderer}
-      {0.5, "CPU", 0.8, :text}
+      {0.5, "CPU", 0.8, nil}
   """
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
@@ -321,7 +325,7 @@ defmodule Drafter.Widget.Gauge do
       mid_color: Keyword.get(opts, :mid_color, {220, 140, 0}),
       high_color: Keyword.get(opts, :high_color, {220, 60, 60}),
       track_color: Keyword.get(opts, :track_color, {55, 55, 55}),
-      renderer: Keyword.get(opts, :renderer, :text)
+      renderer: Keyword.get(opts, :renderer)
     }
   end
 
