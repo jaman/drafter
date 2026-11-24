@@ -802,14 +802,13 @@ defmodule Drafter.ComponentRenderer do
     scrollbar_width = 1
     content_rect = %{rect | width: rect.width - scrollbar_width}
 
-    child_heights =
+    child_pairs =
       Enum.map(children, fn child ->
-        Layout.get_preferred_height(child, hierarchy, content_rect.width)
+        {child, Layout.get_preferred_height(child, hierarchy, content_rect.width)}
       end)
 
-    total_content_height = Enum.sum(child_heights)
-
-    focusable = Keyword.get(opts, :focusable, true)
+    total_content_height =
+      Enum.reduce(child_pairs, 0, fn {_child, height}, acc -> acc + height end)
 
     mount_props = %{
       id: scroll_id,
@@ -820,7 +819,7 @@ defmodule Drafter.ComponentRenderer do
       show_vertical_scrollbar: Keyword.get(opts, :show_vertical_scrollbar, :auto),
       show_horizontal_scrollbar: Keyword.get(opts, :show_horizontal_scrollbar, :never),
       click_to_scroll: click_to_scroll,
-      focusable: focusable,
+      focusable: Keyword.get(opts, :focusable, true),
       scrollbar: Keyword.get(opts, :scrollbar, :block),
       follow: Keyword.get(opts, :follow, false)
     }
@@ -833,28 +832,9 @@ defmodule Drafter.ComponentRenderer do
     }
 
     hierarchy =
-      if Map.has_key?(hierarchy.widgets, scroll_id) do
-        hierarchy
-        |> WidgetHierarchy.update_widget_rect(scroll_id, scrollbar_rect)
-        |> WidgetHierarchy.update_widget(scroll_id, %{
-          content_height: total_content_height,
-          viewport_height: rect.height,
-          focusable: focusable
-        })
-      else
-        WidgetHierarchy.add_widget(
-          hierarchy,
-          scroll_id,
-          ScrollableContainer,
-          mount_props,
-          parent_id,
-          scrollbar_rect
-        )
-      end
-
-    hierarchy =
-      WidgetHierarchy.register_scroll_container(
-        hierarchy,
+      hierarchy
+      |> upsert_scrollable_widget(scroll_id, scrollbar_rect, mount_props, parent_id)
+      |> WidgetHierarchy.register_scroll_container(
         scroll_id,
         content_rect,
         total_content_height,
@@ -862,44 +842,102 @@ defmodule Drafter.ComponentRenderer do
         click_to_scroll
       )
 
-    start_counter = id_counter + 1
-
-    {scrollable_children, footer_child} =
-      Enum.split_while(children, fn
-        {:footer, _} -> false
-        _ -> true
+    {scrollable_pairs, footer_pairs} =
+      Enum.split_while(child_pairs, fn
+        {{:footer, _}, _height} -> false
+        _other -> true
       end)
 
-    footer_height =
-      if footer_child == [],
-        do: 0,
-        else: Layout.get_preferred_height(hd(footer_child), hierarchy, content_rect.width)
-
+    footer_height = scrollable_footer_height(footer_pairs)
     scrollable_rect = %{content_rect | height: max(0, content_rect.height - footer_height)}
-
-    scroll_offset_y =
-      case WidgetHierarchy.get_widget_state(hierarchy, scroll_id) do
-        nil -> 0
-        state -> Map.get(state, :scroll_offset_y, 0)
-      end
-
-    viewport_height = scrollable_rect.height
+    scroll_offset_y = scrollable_offset_y(hierarchy, scroll_id)
 
     scroll_ctx =
       Map.put(ctx, :scroll_viewport, %{
         visible_top: scrollable_rect.y + scroll_offset_y,
-        visible_bottom: scrollable_rect.y + scroll_offset_y + viewport_height
+        visible_bottom: scrollable_rect.y + scroll_offset_y + scrollable_rect.height
       })
 
+    viewport = %{rect: scrollable_rect, offset_y: scroll_offset_y}
+
+    {updated_hierarchy, final_counter} =
+      render_scrollable_children(
+        scrollable_pairs,
+        hierarchy,
+        id_counter + 1,
+        viewport,
+        scroll_ctx,
+        scroll_id
+      )
+
+    footer_rect = %{
+      x: content_rect.x,
+      y: rect.y + rect.height - footer_height,
+      width: content_rect.width,
+      height: footer_height
+    }
+
+    {updated_hierarchy, final_counter} =
+      render_scrollable_footer(
+        footer_pairs,
+        updated_hierarchy,
+        footer_rect,
+        ctx,
+        parent_id,
+        final_counter
+      )
+
+    {assign_scroll_parents(updated_hierarchy, scroll_id), final_counter}
+  end
+
+  defp upsert_scrollable_widget(hierarchy, scroll_id, scrollbar_rect, mount_props, parent_id) do
+    if Map.has_key?(hierarchy.widgets, scroll_id) do
+      hierarchy
+      |> WidgetHierarchy.update_widget_rect(scroll_id, scrollbar_rect)
+      |> WidgetHierarchy.update_widget(scroll_id, %{
+        content_height: mount_props.content_height,
+        viewport_height: mount_props.viewport_height,
+        focusable: mount_props.focusable
+      })
+    else
+      WidgetHierarchy.add_widget(
+        hierarchy,
+        scroll_id,
+        ScrollableContainer,
+        mount_props,
+        parent_id,
+        scrollbar_rect
+      )
+    end
+  end
+
+  defp scrollable_footer_height([]), do: 0
+  defp scrollable_footer_height([{_footer, height} | _rest]), do: height
+
+  defp scrollable_offset_y(hierarchy, scroll_id) do
+    case WidgetHierarchy.get_widget_state(hierarchy, scroll_id) do
+      nil -> 0
+      state -> Map.get(state, :scroll_offset_y, 0)
+    end
+  end
+
+  defp render_scrollable_children(
+         scrollable_pairs,
+         hierarchy,
+         start_counter,
+         viewport,
+         scroll_ctx,
+         scroll_id
+       ) do
+    scrollable_rect = viewport.rect
+    scroll_offset_y = viewport.offset_y
+    viewport_height = scrollable_rect.height
+
     {updated_hierarchy, final_counter, _} =
-      Enum.reduce(scrollable_children, {hierarchy, start_counter, 0}, fn child,
-                                                                         {h, counter, virtual_y} ->
-        child_height = Layout.get_preferred_height(child, h, scrollable_rect.width)
-
-        below_viewport = virtual_y >= scroll_offset_y + viewport_height
-        above_viewport = virtual_y + child_height <= scroll_offset_y
-
-        if below_viewport or above_viewport do
+      Enum.reduce(scrollable_pairs, {hierarchy, start_counter, 0}, fn {child, child_height},
+                                                                      {h, counter, virtual_y} ->
+        if virtual_y >= scroll_offset_y + viewport_height or
+             virtual_y + child_height <= scroll_offset_y do
           {h, counter + Layout.count_component_slots(child), virtual_y + child_height}
         else
           child_rect = %{
@@ -916,32 +954,32 @@ defmodule Drafter.ComponentRenderer do
         end
       end)
 
-    {updated_hierarchy, final_counter} =
-      if footer_child != [] do
-        footer = hd(footer_child)
+    {updated_hierarchy, final_counter}
+  end
 
-        footer_rect = %{
-          x: content_rect.x,
-          y: rect.y + rect.height - footer_height,
-          width: content_rect.width,
-          height: footer_height
-        }
+  defp render_scrollable_footer([], hierarchy, _footer_rect, _ctx, _parent_id, counter) do
+    {hierarchy, counter}
+  end
 
-        render_component(updated_hierarchy, footer, footer_rect, ctx, parent_id, final_counter)
+  defp render_scrollable_footer(
+         [{footer, _height} | _rest],
+         hierarchy,
+         footer_rect,
+         ctx,
+         parent_id,
+         counter
+       ) do
+    render_component(hierarchy, footer, footer_rect, ctx, parent_id, counter)
+  end
+
+  defp assign_scroll_parents(hierarchy, scroll_id) do
+    Enum.reduce(hierarchy.widgets, hierarchy, fn {widget_id, _widget_info}, h ->
+      if descendant_of?(hierarchy, widget_id, scroll_id) do
+        WidgetHierarchy.set_widget_scroll_parent(h, widget_id, scroll_id)
       else
-        {updated_hierarchy, final_counter}
+        h
       end
-
-    final_hierarchy =
-      Enum.reduce(updated_hierarchy.widgets, updated_hierarchy, fn {widget_id, _widget_info}, h ->
-        if descendant_of?(updated_hierarchy, widget_id, scroll_id) do
-          WidgetHierarchy.set_widget_scroll_parent(h, widget_id, scroll_id)
-        else
-          h
-        end
-      end)
-
-    {final_hierarchy, final_counter}
+    end)
   end
 
   defp descendant_of?(_hierarchy, widget_id, ancestor_id) when widget_id == ancestor_id, do: false

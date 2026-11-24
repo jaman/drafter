@@ -58,10 +58,11 @@ defmodule Drafter.Widget.ScrollableContainer do
       of Tab order, arrow navigation and the first-focus a render gives, so its keys
       reach the app; the wheel still scrolls it
       Mount-only.
-    * `:follow` - `t:boolean/0`. Default `false`. `true` keeps a viewport that is at
-      the bottom of its content at the bottom as the content grows, in the same
-      frame, as a chat or a log does; scrolled up, it stays where it is until it is
-      brought back to the bottom. Mount-only.
+    * `:follow` - `t:boolean/0`. Default `false`. `true` starts the viewport at the
+      bottom of its content and keeps one that is there at the bottom as the content
+      and the viewport change size, in the same frame, as a chat or a log does;
+      scrolled up, it stays where it is until it is brought back to the bottom.
+      Mount-only.
     * `:child_widget_ids` - list of widget IDs whose scroll events bubble through
       this container. Default `[]`. Live-updatable.
     * `:id` - identifier for the container. Default `nil`; set by the renderer
@@ -70,8 +71,8 @@ defmodule Drafter.Widget.ScrollableContainer do
 
   `update/2` additionally accepts `:scroll_offset_y` and `:scroll_offset_x` to
   drive the position directly; both are clamped to the content extent, as is any
-  offset already on the state, on every call. `mount/1` always starts both at `0`
-  and ignores any offset in the props.
+  offset already on the state, on every call. `mount/1` starts both at `0`, or at the
+  bottom with `:follow`, and ignores any offset in the props.
 
   ## Key bindings
 
@@ -150,9 +151,10 @@ defmodule Drafter.Widget.ScrollableContainer do
   @doc """
   Builds the widget state from `props`.
 
-  Both scroll offsets start at `0` whatever `props` says, and so do
-  `:dragging_scrollbar`, `:hovering_scrollbar`, `:drag_thumb_offset` and the
-  internal `:scroll_locked` flag.
+  Both scroll offsets start at `0`, but with `:follow` the vertical one starts at the
+  bottom of the content; an offset in `props` is ignored. `:dragging_scrollbar`,
+  `:hovering_scrollbar`, `:drag_thumb_offset` and the internal `:scroll_locked` flag
+  start at their defaults whatever `props` says.
 
       iex> state = Drafter.Widget.ScrollableContainer.mount(%{})
       iex> {state.content_height, state.viewport_height, state.viewport_width}
@@ -161,6 +163,9 @@ defmodule Drafter.Widget.ScrollableContainer do
       iex> state = Drafter.Widget.ScrollableContainer.mount(%{scroll_offset_y: 5})
       iex> {state.scroll_offset_y, state.show_vertical_scrollbar, state.show_horizontal_scrollbar}
       {0, :auto, :never}
+
+      iex> Drafter.Widget.ScrollableContainer.mount(%{content_height: 100, follow: true}).scroll_offset_y
+      90
   """
   @spec mount(Drafter.Widget.props()) :: t()
   def mount(props) do
@@ -185,6 +190,7 @@ defmodule Drafter.Widget.ScrollableContainer do
       scrollbar: Map.get(props, :scrollbar, :block),
       follow: Map.get(props, :follow, false)
     }
+    |> then(&followed(&1, &1.follow))
   end
 
   @doc """

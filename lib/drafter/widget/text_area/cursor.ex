@@ -2,8 +2,35 @@ defmodule Drafter.Widget.TextArea.Cursor do
   @moduledoc false
 
   alias Drafter.Widget.TextArea
+  alias Drafter.Widget.TextArea.Wrap
+
+  @spec move_row(map(), integer()) :: map()
+  def move_row(state, delta) do
+    {rows, _width} = Wrap.state_layout(state)
+    {row, column} = Wrap.position(rows, state.cursor_line, state.cursor_col)
+    target = min(max(row + delta, 0), length(rows) - 1)
+
+    if target == row do
+      state
+    else
+      {line, col} = Wrap.at(rows, target, column)
+      %{state | cursor_line: line, cursor_col: col}
+    end
+  end
+
+  @spec at_edge?(map(), :up | :down) :: boolean()
+  def at_edge?(%{appearance: %{wrap: :word}} = state, direction) do
+    {rows, _width} = Wrap.state_layout(state)
+    {row, _column} = Wrap.position(rows, state.cursor_line, state.cursor_col)
+    if direction == :up, do: row == 0, else: row == length(rows) - 1
+  end
+
+  def at_edge?(state, :up), do: state.cursor_line == 0
+  def at_edge?(state, :down), do: state.cursor_line >= length(state.lines) - 1
 
   @spec move_up(map()) :: map()
+  def move_up(%{appearance: %{wrap: :word}} = state), do: move_row(state, -1)
+
   def move_up(state) do
     if state.cursor_line > 0 do
       new_line = state.cursor_line - 1
@@ -15,6 +42,8 @@ defmodule Drafter.Widget.TextArea.Cursor do
   end
 
   @spec move_down(map()) :: map()
+  def move_down(%{appearance: %{wrap: :word}} = state), do: move_row(state, 1)
+
   def move_down(state) do
     if state.cursor_line < length(state.lines) - 1 do
       new_line = state.cursor_line + 1
@@ -96,18 +125,29 @@ defmodule Drafter.Widget.TextArea.Cursor do
 
   defp adjust_v_scroll(state) do
     content_height = state.height - 2 * TextArea.chrome(state)
+    row = cursor_row(state)
 
     cond do
-      state.cursor_line < state.scroll_offset ->
-        %{state | scroll_offset: state.cursor_line}
+      row < state.scroll_offset ->
+        %{state | scroll_offset: row}
 
-      state.cursor_line >= state.scroll_offset + content_height ->
-        %{state | scroll_offset: state.cursor_line - content_height + 1}
+      row >= state.scroll_offset + content_height ->
+        %{state | scroll_offset: row - content_height + 1}
 
       true ->
         state
     end
   end
+
+  defp cursor_row(%{appearance: %{wrap: :word}} = state) do
+    {rows, _width} = Wrap.state_layout(state)
+    {row, _column} = Wrap.position(rows, state.cursor_line, state.cursor_col)
+    row
+  end
+
+  defp cursor_row(state), do: state.cursor_line
+
+  defp adjust_h_scroll(%{appearance: %{wrap: :word}} = state), do: %{state | h_scroll: 0}
 
   defp adjust_h_scroll(state) do
     content_width =

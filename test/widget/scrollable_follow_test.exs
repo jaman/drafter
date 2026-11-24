@@ -7,6 +7,11 @@ defmodule Drafter.Widget.ScrollableFollowTest do
     ScrollableContainer.mount(%{content_height: 30, viewport_height: 10, follow: follow})
   end
 
+  test "a following viewport starts at the bottom" do
+    assert container(true).scroll_offset_y == 20
+    assert container(false).scroll_offset_y == 0
+  end
+
   test "a following viewport at the bottom stays at the bottom as the content grows" do
     at_bottom = ScrollableContainer.update(%{scroll_offset_y: 20}, container(true))
 

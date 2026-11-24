@@ -9,7 +9,7 @@ Versions marked with ★ were published to Hex.pm.
 ### Added
 
 - `TextArea`'s `enter: :submit` with `:on_submit`: `enter` submits the text and `shift`, `ctrl`, `alt` or `meta` with `enter` starts a new line, as a chat composer does.
-- `scrollable`'s `:follow`: a viewport at the bottom of its content stays at the bottom as the content grows, in the same frame.
+- `scrollable`'s `:follow`: the viewport starts at the bottom of its content, and one at the bottom stays there as the content grows, in the same frame.
 - `FilePicker`'s `:show_hidden` (list dot-entries from the start) and `:places` (`{label, path}` entries added to its sidebar).
 - `TextArea` keeps a cursor that was at the end of its text at the end when the app replaces the text (through `:bind` or `update/2`), so text the app completes is typed on after.
 - `ESC` followed in the same read by another key parses as that key with `:alt` (`ESC CR` is `{:key, :enter, [:alt]}`), except before a sequence opener or another `ESC`.

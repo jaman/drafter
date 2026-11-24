@@ -9,13 +9,13 @@ defmodule Drafter.Widget.TextArea.History do
   @spec push_undo(map()) :: map()
   def push_undo(state) do
     snap = snapshot(state)
-    trimmed = Enum.take([snap | state.undo_stack], state.max_checkpoints)
-    %{state | undo_stack: trimmed, redo_stack: []}
+    trimmed = Enum.take([snap | state.history.undo], state.max_checkpoints)
+    %{state | history: %{undo: trimmed, redo: []}}
   end
 
   @spec handle_undo(map()) :: {:ok, map()}
   def handle_undo(state) do
-    case state.undo_stack do
+    case state.history.undo do
       [] ->
         {:ok, state}
 
@@ -30,8 +30,7 @@ defmodule Drafter.Widget.TextArea.History do
               cursor_line: prev_row,
               cursor_col: prev_col,
               text: Enum.join(prev_lines, "\n"),
-              undo_stack: rest,
-              redo_stack: [current_snap | state.redo_stack],
+              history: %{undo: rest, redo: [current_snap | state.history.redo]},
               selection: nil
           }
           |> Cursor.adjust_scroll()
@@ -42,7 +41,7 @@ defmodule Drafter.Widget.TextArea.History do
 
   @spec handle_redo(map()) :: {:ok, map()}
   def handle_redo(state) do
-    case state.redo_stack do
+    case state.history.redo do
       [] ->
         {:ok, state}
 
@@ -57,8 +56,7 @@ defmodule Drafter.Widget.TextArea.History do
               cursor_line: next_row,
               cursor_col: next_col,
               text: Enum.join(next_lines, "\n"),
-              redo_stack: rest,
-              undo_stack: [current_snap | state.undo_stack],
+              history: %{undo: [current_snap | state.history.undo], redo: rest},
               selection: nil
           }
           |> Cursor.adjust_scroll()

@@ -50,6 +50,10 @@ defmodule Drafter.Widget.Markdown do
   alias Drafter.Draw.{Segment, Strip}
   alias Drafter.Style.Computed
 
+  @parse_cache_key {__MODULE__, :parse_cache}
+  @parse_cache_limit 512
+  @inline_pattern ~r/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/
+
   @type t :: %{
           content: String.t(),
           style: map(),
@@ -122,7 +126,7 @@ defmodule Drafter.Widget.Markdown do
     if content_width <= 0 do
       []
     else
-      lines = parse_markdown(state.content, content_width)
+      {lines, _count} = cached_parse_markdown(state.content, content_width)
 
       Enum.map(lines, fn {segments_spec, base_part} ->
         render_markdown_line(segments_spec, base_part, state, padding)
@@ -166,7 +170,8 @@ defmodule Drafter.Widget.Markdown do
   def height_for_width(args, opts, width) do
     content = args || Keyword.get(opts, :content, "")
     padding = Keyword.get(opts, :padding, 1)
-    content |> parse_markdown(max(width - padding * 2, 1)) |> length() |> max(1)
+    {_lines, count} = cached_parse_markdown(content, max(width - padding * 2, 1))
+    max(count, 1)
   end
 
   @doc """
@@ -258,6 +263,28 @@ defmodule Drafter.Widget.Markdown do
 
   defp apply_inline_style(base_style, :normal), do: base_style
 
+  defp cached_parse_markdown(content, width) do
+    key = {content, width}
+    cache = Process.get(@parse_cache_key, %{})
+
+    case Map.fetch(cache, key) do
+      {:ok, cached} ->
+        cached
+
+      :error ->
+        lines = parse_markdown(content, width)
+        entry = {lines, length(lines)}
+
+        next_cache =
+          if map_size(cache) >= @parse_cache_limit,
+            do: %{key => entry},
+            else: Map.put(cache, key, entry)
+
+        Process.put(@parse_cache_key, next_cache)
+        entry
+    end
+  end
+
   defp parse_markdown(content, width) do
     content
     |> String.split("\n")
@@ -288,9 +315,7 @@ defmodule Drafter.Widget.Markdown do
   end
 
   defp parse_inline_formatting(text) do
-    pattern = ~r/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/
-
-    parts = Regex.split(pattern, text, include_captures: true)
+    parts = Regex.split(@inline_pattern, text, include_captures: true)
 
     Enum.flat_map(parts, fn part ->
       cond do

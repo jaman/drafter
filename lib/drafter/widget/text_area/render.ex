@@ -2,7 +2,60 @@ defmodule Drafter.Widget.TextArea.Render do
   @moduledoc false
 
   alias Drafter.Draw.Segment
-  alias Drafter.Widget.TextArea.{Highlight, Selection}
+  alias Drafter.Widget.TextArea.{Highlight, Selection, Wrap}
+
+  @spec render_wrapped(map(), [Wrap.row()], pos_integer(), pos_integer(), map(), map() | nil) ::
+          [{String.t() | nil, [Segment.t()] | nil}]
+  def render_wrapped(state, rows, width, height, style, placeholder_style) do
+    if placeholder_shown?(state) do
+      render_content(state, width, height, style, placeholder_style)
+    else
+      cursor =
+        if state.focused, do: Wrap.position(rows, state.cursor_line, state.cursor_col)
+
+      visible =
+        rows
+        |> Enum.with_index()
+        |> Enum.slice(state.scroll_offset, height)
+        |> Enum.map(&render_row(&1, state, cursor, width, style))
+
+      visible ++
+        List.duplicate({String.duplicate(" ", width), nil}, max(0, height - length(visible)))
+    end
+  end
+
+  defp render_row({{line_index, start, stop}, index}, state, cursor, width, style) do
+    line = Enum.at(state.lines, line_index, "")
+
+    visible =
+      state
+      |> base_segments(line, style)
+      |> slice_segments(start, stop - start)
+      |> wrapped_selection(state, line_index, start, width)
+
+    visible =
+      case cursor do
+        {^index, column} -> overlay_cursor(visible, column, width, style)
+        _elsewhere -> visible
+      end
+
+    {nil, pad_segments(visible, width, style)}
+  end
+
+  defp wrapped_selection(visible, %{selection: nil}, _line_index, _start, _width), do: visible
+  defp wrapped_selection(visible, %{focused: false}, _line_index, _start, _width), do: visible
+
+  defp wrapped_selection(visible, state, line_index, start, width) do
+    {ss_row, ss_col, se_row, se_col} = Selection.normalize_selection(state.selection)
+
+    if line_index < ss_row or line_index > se_row do
+      visible
+    else
+      from = if line_index == ss_row, do: ss_col - start, else: 0
+      to = if line_index == se_row, do: se_col - start, else: width
+      recolor_range(visible, max(0, from), min(width, to), state.selection_style)
+    end
+  end
 
   @spec render_content(map(), pos_integer(), pos_integer(), map(), map() | nil) ::
           [{String.t() | nil, [Segment.t()] | nil}]

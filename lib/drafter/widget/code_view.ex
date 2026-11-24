@@ -13,7 +13,10 @@ defmodule Drafter.Widget.CodeView do
   - `Page Up` / `Page Down` — scroll ten lines
   - `←` / `→` — horizontal scroll by five columns, the right limit being the
     longest line less 20 columns
-  - Mouse wheel — vertical scroll by three lines
+  - Mouse wheel — vertical scroll by three lines; a turn that cannot move the
+    document (at its top, at its end, or over a document that fits the rect)
+    goes to the container around it, so a code view inside a scrolling page
+    lets the page scroll
 
   Every other key is consumed and leaves the state unchanged, so nothing bubbles out
   of a focused code view. Dragging is declared but does nothing.
@@ -46,6 +49,9 @@ defmodule Drafter.Widget.CodeView do
       the `tree-sitter` CLI and the built-in Elixir highlighter. Default `nil`
     * `:height` - read only by `preferred_height/2`, never by `mount/1`. Default
       `20`
+    * `:viewport_height` - `t:pos_integer/0` rows the view is drawn in, which
+      bounds wheel scrolling. Through the element it is the allocated rect's
+      height. Default `nil`: the wheel scrolls until the last line is at the top
 
   `update/2` re-reads `:path`, `:hex_view`, `:source` and `:language`, and reloads
   the document only when the path, the hex mode, or a non-empty source actually
@@ -82,7 +88,8 @@ defmodule Drafter.Widget.CodeView do
     :focused,
     :show_line_numbers,
     :hex_view,
-    :highlighter
+    :highlighter,
+    :viewport_height
   ]
 
   @type t :: %__MODULE__{
@@ -95,7 +102,8 @@ defmodule Drafter.Widget.CodeView do
           focused: boolean(),
           show_line_numbers: boolean(),
           hex_view: boolean(),
-          highlighter: module() | nil
+          highlighter: module() | nil,
+          viewport_height: pos_integer() | nil
         }
 
   @doc """
@@ -136,7 +144,8 @@ defmodule Drafter.Widget.CodeView do
       focused: false,
       show_line_numbers: show_line_numbers,
       hex_view: hex_view,
-      highlighter: highlighter
+      highlighter: highlighter,
+      viewport_height: Map.get(props, :viewport_height)
     }
   end
 
@@ -181,8 +190,10 @@ defmodule Drafter.Widget.CodeView do
   @doc """
   Scrolls the document three lines per wheel notch.
 
-  The offset is clamped to `0..length(lines) - 1`, so the last line can always be
-  scrolled to the top of the rect. Always returns `{:ok, state}`.
+  The offset is clamped to `0..length(lines) - :viewport_height`, or to
+  `0..length(lines) - 1` without a `:viewport_height`. A notch that cannot move
+  the offset returns `{:bubble, state}`, so the container around the view
+  scrolls instead; any other returns `{:ok, state}`.
 
       iex> cv = Drafter.Widget.CodeView.mount(%{source: "a\\nb\\nc\\nd\\ne\\nf"})
       iex> {:ok, down} = Drafter.Widget.CodeView.handle_scroll(:down, cv)
@@ -192,14 +203,24 @@ defmodule Drafter.Widget.CodeView do
   """
   @spec handle_scroll(:up | :down, t()) :: {:ok, t()}
   @impl Drafter.Widget
+  def handle_scroll(:up, %{scroll_offset: 0} = state), do: {:bubble, state}
+
   def handle_scroll(:up, state) do
     {:ok, %{state | scroll_offset: max(0, state.scroll_offset - 3)}}
   end
 
   def handle_scroll(:down, state) do
-    max_offset = max(0, length(state.lines) - 1)
-    {:ok, %{state | scroll_offset: min(max_offset, state.scroll_offset + 3)}}
+    max_offset = wheel_limit(state)
+
+    if state.scroll_offset >= max_offset,
+      do: {:bubble, state},
+      else: {:ok, %{state | scroll_offset: min(max_offset, state.scroll_offset + 3)}}
   end
+
+  defp wheel_limit(%{viewport_height: rows, lines: lines}) when is_integer(rows),
+    do: max(0, length(lines) - rows)
+
+  defp wheel_limit(state), do: max(0, length(state.lines) - 1)
 
   @doc """
   Scrolls the document.
@@ -296,6 +317,7 @@ defmodule Drafter.Widget.CodeView do
   @spec update(Drafter.Widget.props(), t()) :: t()
   @impl Drafter.Widget
   def update(props, state) do
+    state = %{state | viewport_height: Map.get(props, :viewport_height, state.viewport_height)}
     path = Map.get(props, :path, state.path)
     hex_view = Map.get(props, :hex_view, state.hex_view)
     source = Map.get(props, :source)
@@ -365,9 +387,11 @@ defmodule Drafter.Widget.CodeView do
   Turns the `{:code_view, opts}` element into a props map for `mount/1`.
 
   The positional argument is ignored, so the text must be passed as `source:`.
+  `:viewport_height` is the height of the rect the renderer allocated
+  (`:__rect__`), `nil` without one.
 
       iex> Drafter.Widget.CodeView.from_component_opts("ignored", source: "a")
-      %{source: "a", path: nil, language: :text, show_line_numbers: false, hex_view: false, highlighter: nil}
+      %{source: "a", path: nil, language: :text, show_line_numbers: false, hex_view: false, highlighter: nil, viewport_height: nil}
   """
   @spec from_component_opts(term(), keyword()) :: Drafter.Widget.props()
   def from_component_opts(_args, opts) do
@@ -377,13 +401,14 @@ defmodule Drafter.Widget.CodeView do
       language: Keyword.get(opts, :language, :text),
       show_line_numbers: Keyword.get(opts, :show_line_numbers, false),
       hex_view: Keyword.get(opts, :hex_view, false),
-      highlighter: Keyword.get(opts, :highlighter)
+      highlighter: Keyword.get(opts, :highlighter),
+      viewport_height: opts |> Keyword.get(:__rect__, %{}) |> Map.get(:height)
     }
   end
 
   @doc """
   Narrows the props a re-render feeds to `update/2` to `:source`, `:path`,
-  `:language`, `:hex_view` and `:highlighter`. `:show_line_numbers` is left out and stays as
+  `:language`, `:hex_view`, `:highlighter` and `:viewport_height`. `:show_line_numbers` is left out and stays as
   mounted.
   """
   @spec update_props_from_mount(Drafter.Widget.props(), t(), keyword()) :: Drafter.Widget.props()
@@ -393,7 +418,8 @@ defmodule Drafter.Widget.CodeView do
       path: mount_props.path,
       language: mount_props.language,
       hex_view: mount_props.hex_view,
-      highlighter: mount_props.highlighter
+      highlighter: mount_props.highlighter,
+      viewport_height: Map.get(mount_props, :viewport_height)
     }
   end
 

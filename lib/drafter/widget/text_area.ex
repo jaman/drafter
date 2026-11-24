@@ -69,6 +69,18 @@ defmodule Drafter.Widget.TextArea do
       is reported by nearly every terminal.
     * `:on_submit` - atom event name or `(String.t() -> term())` called with
       the text when `enter` submits. Default `nil`.
+    * `:wrap` - `:none | :word`. Default `:none`, where a long line runs past
+      the right edge and the view scrolls sideways to the cursor. With `:word`
+      a long line is drawn on as many rows as it needs, broken after the last
+      space that fits (or mid-word when a word is wider than the row), one
+      column kept for the cursor at a row's end; `up`, `down`, the page keys,
+      the wheel and the scrollbar move by rows, and the line-number gutter
+      numbers a line's first row only.
+    * `:on_edge` - atom event name or `(:up | :down -> term())` called with
+      `:up` when `up` is pressed with the cursor on the first row, and with
+      `:down` when `down` is pressed on the last row, as a chat composer uses
+      to step through earlier prompts. Default `nil`, where those keys do
+      nothing there.
     * `:focused` - `t:boolean/0` read by `mount/1`. Default `false`. Every editing
       binding requires it.
 
@@ -135,7 +147,7 @@ defmodule Drafter.Widget.TextArea do
   alias Drafter.ThemeManager
   alias Drafter.Widget.Callback
   alias Drafter.Widget.Scrollbar
-  alias Drafter.Widget.TextArea.{Clipboard, Cursor, Editing, History, Render, Selection}
+  alias Drafter.Widget.TextArea.{Clipboard, Cursor, Editing, History, Render, Selection, Wrap}
 
   defstruct [
     :text,
@@ -166,9 +178,9 @@ defmodule Drafter.Widget.TextArea do
     :highlight_cursor_line,
     :enter,
     :on_submit,
-    :undo_stack,
-    :redo_stack,
-    appearance: %{border: :single, placeholder_when: :blurred}
+    :on_edge,
+    history: %{undo: [], redo: []},
+    appearance: %{border: :single, placeholder_when: :blurred, wrap: :none}
   ]
 
   @type selection ::
@@ -203,9 +215,13 @@ defmodule Drafter.Widget.TextArea do
           highlight_cursor_line: boolean(),
           enter: :newline | :submit,
           on_submit: (String.t() -> term()) | nil,
-          undo_stack: list(),
-          redo_stack: list(),
-          appearance: %{border: :single | :rounded | :none, placeholder_when: :blurred | :empty}
+          on_edge: (:up | :down -> term()) | nil,
+          history: %{undo: list(), redo: list()},
+          appearance: %{
+            border: :single | :rounded | :none,
+            placeholder_when: :blurred | :empty,
+            wrap: :none | :word
+          }
         }
 
   @doc """
@@ -276,9 +292,9 @@ defmodule Drafter.Widget.TextArea do
       highlight_cursor_line: Map.get(props, :highlight_cursor_line, false),
       enter: Map.get(props, :enter, :newline),
       on_submit: Map.get(props, :on_submit),
-      undo_stack: [],
-      redo_stack: [],
-      appearance: appearance(props, %{border: :single, placeholder_when: :blurred})
+      on_edge: Map.get(props, :on_edge),
+      history: %{undo: [], redo: []},
+      appearance: appearance(props, %{border: :single, placeholder_when: :blurred, wrap: :none})
     }
   end
 
@@ -323,35 +339,16 @@ defmodule Drafter.Widget.TextArea do
     top_border = border_line(corners.tl, "┬", corners.tr, gutter_width, content_width)
     bottom_border = border_line(corners.bl, "┴", corners.br, gutter_width, content_width)
 
-    scrollbar_thumb =
-      Scrollbar.thumb_rows(
-        normalized_state.scroll_offset,
-        length(normalized_state.lines),
-        content_height
-      )
+    {content_lines, scrollbar_thumb, inner_width, labels} =
+      content(normalized_state, content_width, content_height, effective_style, placeholder_style)
 
-    inner_width = if scrollbar_thumb, do: max(1, content_width - 1), else: content_width
     scrollbar_styles = Scrollbar.styles(ThemeManager.get_current_theme())
-
-    content_lines =
-      Render.render_content(
-        normalized_state,
-        inner_width,
-        content_height,
-        effective_style,
-        placeholder_style
-      )
 
     side = if chrome == 1, do: [Segment.new("│", border_style)], else: []
 
     rows =
       Enum.with_index(content_lines, fn {line, segments}, idx ->
-        line_num = normalized_state.scroll_offset + idx + 1
-
-        line_num_text =
-          if gutter_width > 0,
-            do: String.pad_leading(to_string(line_num), gutter_width - 1) <> " ",
-            else: ""
+        line_num_text = gutter_text(Enum.at(labels, idx), gutter_width)
 
         gutter_segment =
           if gutter_width > 0 do
@@ -399,6 +396,33 @@ defmodule Drafter.Widget.TextArea do
     bordered(rows, chrome, top_border, bottom_border, rect.width, border_style)
   end
 
+  defp content(%{appearance: %{wrap: :word}} = state, width, height, style, placeholder_style) do
+    {rows, inner_width} = Wrap.layout(state.lines, width, height)
+    thumb = Scrollbar.thumb_rows(state.scroll_offset, length(rows), height)
+    lines = Render.render_wrapped(state, rows, inner_width, height, style, placeholder_style)
+
+    labels =
+      rows
+      |> Enum.slice(state.scroll_offset, height)
+      |> Enum.map(fn {line, start, _stop} -> if start == 0, do: line + 1 end)
+
+    {lines, thumb, inner_width, labels}
+  end
+
+  defp content(state, width, height, style, placeholder_style) do
+    thumb = Scrollbar.thumb_rows(state.scroll_offset, length(state.lines), height)
+    inner_width = if thumb, do: max(1, width - 1), else: width
+    lines = Render.render_content(state, inner_width, height, style, placeholder_style)
+    labels = Enum.map(0..(height - 1)//1, &(state.scroll_offset + &1 + 1))
+    {lines, thumb, inner_width, labels}
+  end
+
+  defp gutter_text(_label, 0), do: ""
+  defp gutter_text(nil, gutter_width), do: String.duplicate(" ", gutter_width)
+
+  defp gutter_text(label, gutter_width),
+    do: String.pad_leading(to_string(label), gutter_width - 1) <> " "
+
   defp bordered(rows, 0, _top, _bottom, _width, _style), do: rows
 
   defp bordered(rows, _chrome, top, bottom, width, style),
@@ -418,7 +442,8 @@ defmodule Drafter.Widget.TextArea do
   defp appearance(props, current),
     do: %{
       border: Map.get(props, :border, current.border),
-      placeholder_when: Map.get(props, :placeholder_when, current.placeholder_when)
+      placeholder_when: Map.get(props, :placeholder_when, current.placeholder_when),
+      wrap: Map.get(props, :wrap, current.wrap)
     }
 
   defp border_corners(:rounded), do: %{tl: "╭", tr: "╮", bl: "╰", br: "╯"}
@@ -464,7 +489,7 @@ defmodule Drafter.Widget.TextArea do
 
   def handle_scroll(:down, state) do
     content_height = max(1, state.height - 2 * chrome(state))
-    max_offset = max(0, length(state.lines) - content_height)
+    max_offset = max(0, row_count(state) - content_height)
     new_offset = min(max_offset, state.scroll_offset + 3)
     {:ok, %{state | scroll_offset: new_offset}}
   end
@@ -511,6 +536,16 @@ defmodule Drafter.Widget.TextArea do
     {:ok, %{state | focused: false}}
   end
 
+  def handle_event({:key, direction}, %{focused: true, on_edge: on_edge} = state)
+      when direction in [:up, :down] and on_edge != nil do
+    if Cursor.at_edge?(state, direction) do
+      on_edge.(direction)
+      {:ok, state}
+    else
+      handle_event({:key, direction}, %{state | on_edge: nil}) |> with_on_edge(on_edge)
+    end
+  end
+
   def handle_event({:key, :up}, %{focused: true} = state),
     do: {:ok, state |> Selection.clear_selection() |> Cursor.move_up() |> Cursor.adjust_scroll()}
 
@@ -532,6 +567,13 @@ defmodule Drafter.Widget.TextArea do
   def handle_event({:key, :end}, %{focused: true} = state) do
     current_line = Enum.at(state.lines, state.cursor_line, "")
     {:ok, %{state | cursor_col: String.length(current_line), selection: nil}}
+  end
+
+  def handle_event({:key, page}, %{focused: true, appearance: %{wrap: :word}} = state)
+      when page in [:page_up, :page_down] do
+    viewport_height = max(1, state.height - 2 * chrome(state))
+    delta = if page == :page_up, do: -viewport_height, else: viewport_height
+    {:ok, %{state | selection: nil} |> Cursor.move_row(delta) |> Cursor.adjust_scroll()}
   end
 
   def handle_event({:key, :page_up}, %{focused: true} = state) do
@@ -652,6 +694,15 @@ defmodule Drafter.Widget.TextArea do
 
   def handle_event(_event, state), do: {:noreply, state}
 
+  defp with_on_edge({tag, state}, on_edge), do: {tag, %{state | on_edge: on_edge}}
+
+  defp row_count(%{appearance: %{wrap: :word}} = state) do
+    {rows, _width} = Wrap.state_layout(state)
+    length(rows)
+  end
+
+  defp row_count(state), do: length(state.lines)
+
   defp clipboard_binding(key, mods) do
     Enum.find([:copy, :cut, :paste, :select_all], &Drafter.Clipboard.key?(&1, key, mods))
   end
@@ -745,6 +796,7 @@ defmodule Drafter.Widget.TextArea do
             Map.get(props, :highlight_cursor_line, state.highlight_cursor_line),
           enter: Map.get(props, :enter, state.enter),
           on_submit: Map.get(props, :on_submit, state.on_submit),
+          on_edge: Map.get(props, :on_edge, state.on_edge),
           appearance: appearance(props, state.appearance)
       }
 
@@ -852,6 +904,8 @@ defmodule Drafter.Widget.TextArea do
       highlight_cursor_line: Keyword.get(opts, :highlight_cursor_line, false),
       enter: Keyword.get(opts, :enter, :newline),
       on_submit: Callback.wrap_1_with_pid(Keyword.get(opts, :on_submit), self()),
+      on_edge: Callback.wrap_1_with_pid(Keyword.get(opts, :on_edge), self()),
+      wrap: Keyword.get(opts, :wrap, :none),
       border: Keyword.get(opts, :border, :single),
       placeholder_when: Keyword.get(opts, :placeholder_when, :blurred)
     }
@@ -892,6 +946,8 @@ defmodule Drafter.Widget.TextArea do
       highlight_cursor_line: mount_props.highlight_cursor_line,
       enter: mount_props.enter,
       on_submit: mount_props.on_submit,
+      on_edge: mount_props.on_edge,
+      wrap: mount_props.wrap,
       style: mount_props.style,
       border: mount_props.border,
       placeholder_when: mount_props.placeholder_when

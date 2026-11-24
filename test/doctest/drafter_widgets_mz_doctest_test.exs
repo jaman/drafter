@@ -24,6 +24,7 @@ defmodule Drafter.Widgets.MZDoctestTest do
   doctest Drafter.Widget.Switch
   doctest Drafter.Widget.TabbedContent
   doctest Drafter.Widget.TextArea
+  doctest Drafter.Widget.TextArea.Wrap
   doctest Drafter.Widget.TextInput
   doctest Drafter.Widget.Trait
   doctest Drafter.Widget.Tree
